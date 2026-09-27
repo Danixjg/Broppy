@@ -1,0 +1,35 @@
+flowchart LR
+  Browser[Browser / demo user] --> API[TypeScript API]
+  API --> Hybrid[Hybrid search: sparse vector + keyword]
+  Hybrid --> IDs[Candidate document and chunk IDs]
+  IDs --> FGA[FGA batch document ID check]
+  FGA -->|Allowed IDs| Live[Live source access and version re-check]
+  FGA -->|Zero allowed| Fixed[Fixed no-result response]
+  Live -->|Denied or deleted| Fixed
+  Live -->|New version| Refresh[Re-chunk and re-embed]
+  Refresh --> Context[Authorized fresh context]
+  Live -->|Current version| Context
+  Context --> LLM[LLMClient / Hunyuan boundary]
+  LLM --> Checker[Citation output checker]
+  Checker --> API
+  API --> Audit[Hash-chain audit log]
+  Audit --> Merkle[Merkle sealer and proof]
+  Merkle --> Compliance[Compliance console]
+
+  subgraph Sources[Mock source platforms]
+    Slack[Slack]
+    Jira[Jira]
+    Confluence[Confluence]
+    Drive[Drive]
+  end
+
+  Sources --> Sync[Resumable sync and ID deletion pass]
+  Sources --> Live
+  Sync -->|Content hash change| Refresh
+  Sync -->|Permission hash change| FGA
+  Sync -->|Missing ID| Tombstone[Tombstone]
+  Tombstone --> Hybrid
+
+  Admin[Mock admin] -->|Source edit webhook simulation| Sources
+  Admin -->|Narrow tier only| FGA
+  Orchestrator[Headless periodic orchestrator] --> Sync

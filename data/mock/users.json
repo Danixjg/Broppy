@@ -1,0 +1,51 @@
+[
+  {
+    "id": "ravi",
+    "name": "Ravi",
+    "email": "ravi@aspire.example",
+    "auth0Sub": "auth0|ravi",
+    "groups": ["payments", "security", "fraud-ops"],
+    "role": "member"
+  },
+  {
+    "id": "maya",
+    "name": "Maya",
+    "email": "maya@aspire.example",
+    "auth0Sub": "auth0|maya",
+    "groups": ["payments"],
+    "role": "admin"
+  },
+  {
+    "id": "alex",
+    "name": "Alex",
+    "email": "alex@aspire.example",
+    "auth0Sub": "auth0|alex",
+    "groups": ["interns"],
+    "role": "member"
+  },
+  {
+    "id": "david",
+    "name": "David",
+    "email": "david@aspire.example",
+    "auth0Sub": "auth0|david",
+    "groups": ["payments", "security"],
+    "role": "member"
+  },
+  {
+    "id": "nur",
+    "name": "Nur",
+    "email": "nur@aspire.example",
+    "auth0Sub": "auth0|nur",
+    "groups": ["compliance", "payments"],
+    "role": "compliance"
+  },
+  {
+    "id": "wei",
+    "name": "Wei Ming",
+    "email": "wei@contractor.example",
+    "auth0Sub": "auth0|wei",
+    "groups": [],
+    "role": "member",
+    "contractor": true
+  }
+]

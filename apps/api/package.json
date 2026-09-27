@@ -1,0 +1,13 @@
+{
+  "name": "@brain/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@brain/audit": "workspace:*",
+    "@brain/connectors": "workspace:*",
+    "@brain/fga-adapter": "workspace:*",
+    "@brain/retrieval": "workspace:*",
+    "@brain/types": "workspace:*"
+  }
+}
