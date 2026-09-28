@@ -4,40 +4,84 @@
     "name": "Ravi",
     "email": "ravi@aspire.example",
     "auth0Sub": "auth0|ravi",
-    "groups": ["payments", "security", "fraud-ops"],
-    "role": "member"
+    "groups": [
+      "payments",
+      "security",
+      "fraud-ops"
+    ],
+    "role": "member",
+    "platformIdentities": {
+      "slack": "ravi@aspire.example",
+      "jira": "ravi@aspire.example",
+      "confluence": "ravi@aspire.example",
+      "drive": "ravi@aspire.example"
+    }
   },
   {
     "id": "maya",
     "name": "Maya",
     "email": "maya@aspire.example",
     "auth0Sub": "auth0|maya",
-    "groups": ["payments"],
-    "role": "admin"
+    "groups": [
+      "payments"
+    ],
+    "role": "admin",
+    "platformIdentities": {
+      "slack": "maya@aspire.example",
+      "jira": "maya@aspire.example",
+      "confluence": "maya@aspire.example",
+      "drive": "maya@aspire.example"
+    }
   },
   {
     "id": "alex",
     "name": "Alex",
     "email": "alex@aspire.example",
     "auth0Sub": "auth0|alex",
-    "groups": ["interns"],
-    "role": "member"
+    "groups": [
+      "interns"
+    ],
+    "role": "member",
+    "platformIdentities": {
+      "slack": "alex@aspire.example",
+      "jira": "alex@aspire.example",
+      "confluence": "alex@aspire.example",
+      "drive": "alex@aspire.example"
+    }
   },
   {
     "id": "david",
     "name": "David",
     "email": "david@aspire.example",
     "auth0Sub": "auth0|david",
-    "groups": ["payments", "security"],
-    "role": "member"
+    "groups": [
+      "payments",
+      "security"
+    ],
+    "role": "member",
+    "platformIdentities": {
+      "slack": "david@aspire.example",
+      "jira": "david@aspire.example",
+      "confluence": "david@aspire.example",
+      "drive": "david@aspire.example"
+    }
   },
   {
     "id": "nur",
     "name": "Nur",
     "email": "nur@aspire.example",
     "auth0Sub": "auth0|nur",
-    "groups": ["compliance", "payments"],
-    "role": "compliance"
+    "groups": [
+      "compliance",
+      "payments"
+    ],
+    "role": "compliance",
+    "platformIdentities": {
+      "slack": "nur@aspire.example",
+      "jira": "nur@aspire.example",
+      "confluence": "nur@aspire.example",
+      "drive": "nur@aspire.example"
+    }
   },
   {
     "id": "wei",
@@ -46,6 +90,12 @@
     "auth0Sub": "auth0|wei",
     "groups": [],
     "role": "member",
-    "contractor": true
+    "contractor": true,
+    "platformIdentities": {
+      "slack": "wei@contractor.example",
+      "jira": "wei@contractor.example",
+      "confluence": "wei@contractor.example",
+      "drive": "wei@contractor.example"
+    }
   }
 ]

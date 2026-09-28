@@ -5,7 +5,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "ALLOW_DEMO_AUTH=true tsx apps/api/src/server.ts",
-    "test": "vitest run",
+    "test": "vitest run && node --test apps/web/*.nodecheck.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

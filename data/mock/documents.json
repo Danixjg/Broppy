@@ -8,8 +8,28 @@
     "url": "https://slack.example/archives/C-PAY-01/p1727352000",
     "version": 1,
     "updatedAt": "2026-09-26T10:00:00.000Z",
-    "metadata": { "channel": "payments-cutover", "project": "payments" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "channel": "payments-cutover",
+      "project": "payments"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "slack",
+        "channelId": "C-PAY-01",
+        "visibility": "private",
+        "members": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
@@ -21,8 +41,24 @@
     "url": "https://slack.example/archives/C-FRAUD-99/p1727352060",
     "version": 1,
     "updatedAt": "2026-09-26T10:01:00.000Z",
-    "metadata": { "channel": "fraud-ops-private" },
-    "permissions": { "users": [], "groups": ["fraud-ops"], "public": false },
+    "metadata": {
+      "channel": "fraud-ops-private"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "fraud-ops"
+      ],
+      "public": false,
+      "native": {
+        "source": "slack",
+        "channelId": "C-FRAUD-99",
+        "visibility": "private",
+        "members": [
+          "ravi@aspire.example"
+        ]
+      }
+    },
     "tier": "restricted"
   },
   {
@@ -34,8 +70,33 @@
     "url": "https://jira.example/browse/PAY-101",
     "version": 2,
     "updatedAt": "2026-09-26T11:00:00.000Z",
-    "metadata": { "project": "PAY", "status": "in review" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "project": "PAY",
+      "status": "in review"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "jira",
+        "projectKey": "PAY",
+        "projectViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "issueViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
@@ -47,9 +108,70 @@
     "url": "https://jira.example/browse/SEC-44",
     "version": 3,
     "updatedAt": "2026-09-26T11:05:00.000Z",
-    "metadata": { "project": "SEC", "status": "open" },
-    "permissions": { "users": [], "groups": ["security"], "public": false },
+    "metadata": {
+      "project": "SEC",
+      "status": "open"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "security"
+      ],
+      "public": false,
+      "native": {
+        "source": "jira",
+        "projectKey": "SEC",
+        "projectViewers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "issueViewers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "restricted"
+  },
+  {
+    "docId": "jira:SETL-27",
+    "source": "jira",
+    "sourceNativeId": "SETL-27",
+    "title": "SETL-27 Settlement reconciliation",
+    "content": "SETL-27 tracks settlement reconciliation after the payment cutover. Confirm the recon sheet before closing the migration.",
+    "url": "https://jira.example/browse/SETL-27",
+    "version": 1,
+    "updatedAt": "2026-09-26T11:10:00.000Z",
+    "metadata": {
+      "project": "SETL",
+      "status": "open"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "jira",
+        "projectKey": "SETL",
+        "projectViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "issueViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal"
   },
   {
     "docId": "confluence:payment-master",
@@ -60,8 +182,33 @@
     "url": "https://confluence.example/pages/PAGE-100",
     "version": 4,
     "updatedAt": "2026-09-26T12:00:00.000Z",
-    "metadata": { "space": "PAY", "status": "final" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "space": "PAY",
+      "status": "final"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "confluence",
+        "spaceKey": "PAY",
+        "spaceViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "pageViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
@@ -73,8 +220,29 @@
     "url": "https://confluence.example/pages/PAGE-900",
     "version": 1,
     "updatedAt": "2026-09-25T09:00:00.000Z",
-    "metadata": { "space": "SEC", "classification": "restricted" },
-    "permissions": { "users": ["nur@aspire.example"], "groups": [], "public": false },
+    "metadata": {
+      "space": "SEC",
+      "classification": "restricted"
+    },
+    "permissions": {
+      "users": [
+        "nur@aspire.example"
+      ],
+      "groups": [],
+      "public": false,
+      "native": {
+        "source": "confluence",
+        "spaceKey": "SEC",
+        "spaceViewers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "pageViewers": [
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "restricted"
   },
   {
@@ -86,8 +254,27 @@
     "url": "https://drive.example/file/d/FILE-100",
     "version": 5,
     "updatedAt": "2026-09-26T13:00:00.000Z",
-    "metadata": { "status": "final", "mimeType": "text/plain" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "status": "final",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-100",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
@@ -99,8 +286,27 @@
     "url": "https://drive.example/file/d/FILE-101",
     "version": 1,
     "updatedAt": "2026-09-20T13:00:00.000Z",
-    "metadata": { "status": "superseded", "mimeType": "text/plain" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "status": "superseded",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-101",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
@@ -112,22 +318,62 @@
     "url": "https://drive.example/file/d/FILE-102",
     "version": 2,
     "updatedAt": "2026-09-26T08:00:00.000Z",
-    "metadata": { "status": "in review", "mimeType": "text/csv" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "status": "in review",
+      "mimeType": "text/csv"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-102",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   },
   {
     "docId": "drive:steering-deck",
     "source": "drive",
     "sourceNativeId": "FILE-103",
-    "title": "Payment steering deck",
-    "content": "Executive milestones for the payment migration and cutover.",
+    "title": "Cutover steering deck",
+    "content": "Executive milestones for the staged cutover. New hires can read this overview before asking the project team for details.",
     "url": "https://drive.example/file/d/FILE-103",
     "version": 1,
     "updatedAt": "2026-09-24T08:00:00.000Z",
-    "metadata": { "status": "draft", "mimeType": "text/plain" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
-    "tier": "internal"
+    "metadata": {
+      "status": "draft",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments",
+        "interns"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-103",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example",
+          "alex@aspire.example"
+        ]
+      }
+    },
+    "tier": "open"
   },
   {
     "docId": "drive:api-spec",
@@ -138,8 +384,27 @@
     "url": "https://drive.example/file/d/FILE-104",
     "version": 2,
     "updatedAt": "2026-09-25T08:00:00.000Z",
-    "metadata": { "status": "final", "mimeType": "text/plain" },
-    "permissions": { "users": [], "groups": ["payments"], "public": false },
+    "metadata": {
+      "status": "final",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-104",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
     "tier": "internal"
   }
 ]

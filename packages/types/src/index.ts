@@ -6,15 +6,23 @@ export interface User {
   name: string;
   email: string;
   auth0Sub: string;
+  platformIdentities?: Record<Source, string>;
   groups: string[];
   role: "member" | "admin" | "compliance";
   contractor?: boolean;
 }
 
+export type NativePermission =
+  | { source: "slack"; channelId: string; visibility: "public" | "private"; members: string[] }
+  | { source: "jira"; projectKey: string; projectViewers: string[]; issueViewers?: string[] }
+  | { source: "confluence"; spaceKey: string; spaceViewers: string[]; pageViewers?: string[] }
+  | { source: "drive"; fileId: string; owner: string; sharedUsers: string[] };
+
 export interface SourcePermission {
   users: string[];
   groups: string[];
   public: boolean;
+  native?: NativePermission;
 }
 
 export interface SourceDocument {

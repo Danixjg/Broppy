@@ -1,0 +1,112 @@
+[
+  {
+    "user": "user:ravi@aspire.example",
+    "relation": "member",
+    "object": "group:payments"
+  },
+  {
+    "user": "user:ravi@aspire.example",
+    "relation": "member",
+    "object": "group:security"
+  },
+  {
+    "user": "user:ravi@aspire.example",
+    "relation": "member",
+    "object": "group:fraud-ops"
+  },
+  {
+    "user": "user:maya@aspire.example",
+    "relation": "member",
+    "object": "group:payments"
+  },
+  {
+    "user": "user:alex@aspire.example",
+    "relation": "member",
+    "object": "group:interns"
+  },
+  {
+    "user": "user:david@aspire.example",
+    "relation": "member",
+    "object": "group:payments"
+  },
+  {
+    "user": "user:david@aspire.example",
+    "relation": "member",
+    "object": "group:security"
+  },
+  {
+    "user": "user:nur@aspire.example",
+    "relation": "member",
+    "object": "group:compliance"
+  },
+  {
+    "user": "user:nur@aspire.example",
+    "relation": "member",
+    "object": "group:payments"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:slack:payments-cutover"
+  },
+  {
+    "user": "group:fraud-ops#member",
+    "relation": "group_reader",
+    "object": "document:slack:fraud-private"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:jira:PAY-101"
+  },
+  {
+    "user": "group:security#member",
+    "relation": "group_reader",
+    "object": "document:jira:SEC-44"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:jira:SETL-27"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:confluence:payment-master"
+  },
+  {
+    "user": "user:nur@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:q3-incident"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:cutover-plan"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:cutover-duplicate"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:recon-sheet"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:steering-deck"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:drive:steering-deck"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:api-spec"
+  }
+]

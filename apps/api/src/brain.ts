@@ -1,8 +1,8 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, type MockConnector } from "@brain/connectors";
-import { FgaAdapter, tierAllows } from "@brain/fga-adapter";
-import { groundedOutput, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient } from "@brain/retrieval";
+import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
+import { groundedOutput, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
 import type {
   Citation,
   ConnectorState,
@@ -16,29 +16,32 @@ import type {
 } from "@brain/types";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
-const auditKey = process.env.AUDIT_HMAC_KEY ?? randomBytes(32).toString("hex");
-const tierOrder: Record<Tier, number> = {
-  open: 0,
-  internal: 1,
-  restricted: 2
-};
-
 export class Brain {
   readonly users: User[];
   readonly connectors: Record<Source, MockConnector>;
   readonly index = new HybridIndex();
   readonly fga = new FgaAdapter();
-  readonly audit = new AuditLog();
+  readonly remoteFga?: RemoteFgaAdapter;
+  readonly embedding?: SemanticEmbeddingClient;
+  readonly supabase?: SupabaseIndex;
+  readonly audit: AuditLog;
   readonly states = new Map<Source, ConnectorState>();
   readonly runs = new Map<Source, SyncRun>();
   readonly llm: LlmClient;
+  readonly lastTraceIds = new Map<string, string>();
   private readonly syncQueues = new Map<Source, Promise<void>>();
+  private readonly remoteSynced = new Set<string>();
+  private readonly supabaseSynced = new Set<string>();
 
-  constructor(llm: LlmClient = new LocalGroundedLlm()) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex } = {}) {
     const fixture = loadMockCorpus();
     this.users = fixture.users;
     this.connectors = fixture.connectors;
     this.llm = llm;
+    this.audit = options.audit ?? new AuditLog();
+    this.remoteFga = options.remoteFga;
+    this.embedding = options.embedding;
+    this.supabase = options.supabase;
     for (const source of sources) this.states.set(source, { source, cursor: 0 });
   }
 
@@ -52,10 +55,11 @@ export class Brain {
 
   async sync(source: Source): Promise<void> {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
-    const next = previous.then(() => this.syncSource(source));
-    this.syncQueues.set(source, next.finally(() => {
-      if (this.syncQueues.get(source) === next) this.syncQueues.delete(source);
-    }));
+    const next = previous.catch(() => undefined).then(() => this.syncSource(source));
+    const settled = next.catch(() => undefined).then(() => {
+      if (this.syncQueues.get(source) === settled) this.syncQueues.delete(source);
+    });
+    this.syncQueues.set(source, settled);
     return next;
   }
 
@@ -68,7 +72,8 @@ export class Brain {
       const changed = await connector.listUpdatedSince(state.cursor);
       const liveIds = new Set(await connector.listIds());
       const missing = [...this.index.documents.values()]
-        .filter(doc => doc.source === source && !doc.deletedAt && !liveIds.has(doc.docId))
+        .filter(doc => doc.source === source && !liveIds.has(doc.docId) &&
+          (!doc.deletedAt || this.remoteSynced.has(doc.docId) || this.supabaseSynced.has(doc.docId)))
         .map(doc => doc.docId);
       run = {
         source,
@@ -86,13 +91,29 @@ export class Brain {
         const remaining = run.pendingIds.slice(1);
         const doc = await connector.fetchDocument(id);
         if (!doc) {
-          if (this.index.tombstone(id)) {
-            this.fga.remove(id);
+          const removed = this.index.tombstone(id);
+          this.fga.remove(id);
+          await this.remoteFga?.removeDocument(id);
+          this.remoteSynced.delete(id);
+          const deletedAt = this.index.documents.get(id)?.deletedAt;
+          if (deletedAt && this.supabaseSynced.has(id)) await this.supabase?.tombstone(id, deletedAt);
+          this.supabaseSynced.delete(id);
+          if (removed) {
             this.audit.append("document_deleted", "sync", { docRef: auditRef(id), source });
           }
         } else {
           const result = this.index.upsert(doc);
           this.fga.upsert(doc);
+          await this.persistSearch(doc.docId, result.contentChanged);
+          if (this.remoteFga && (result.permissionChanged || !this.remoteSynced.has(id))) {
+            try {
+              await this.remoteFga.syncDocument(doc);
+              this.remoteSynced.add(id);
+            } catch (error) {
+              this.remoteSynced.delete(id);
+              throw error;
+            }
+          }
           this.audit.append("document_synced", "sync", {
             docRef: auditRef(id),
             source,
@@ -116,18 +137,46 @@ export class Brain {
     }
   }
 
-  async query(user: User, question: string): Promise<QueryAnswer> {
+  async query(user: User, question: string, onTrace?: (traceId: string) => void): Promise<QueryAnswer> {
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
-    this.audit.append("query_received", user.id, { questionHash: hashQuestion(trimmed) });
+    const traceId = randomUUID();
+    this.lastTraceIds.set(user.id, traceId);
+    onTrace?.(traceId);
+    const audit = (type: string, data: Record<string, unknown>) =>
+      this.audit.append(type, user.id, { traceId, ...data });
+    audit("query_received", { questionHash: hashQuestion(trimmed) });
 
-    const candidates = this.index.search(trimmed, 30);
+    let queryVector: number[] | undefined;
+    if (this.embedding) {
+      try { queryVector = await this.embedding.embed(trimmed); }
+      catch { audit("embedding_fallback", {}); }
+    }
+    let candidates = this.index.search(trimmed, 30, queryVector);
+    if (this.supabase && queryVector?.length === 1024) {
+      try { candidates = await this.supabase.search(trimmed, queryVector, 30); }
+      catch { audit("search_fallback", {}); }
+    }
     const candidateDocIds = [...new Set(candidates.map(candidate => candidate.docId))];
-    this.audit.append("candidates_found", user.id, { count: candidateDocIds.length });
+    audit("candidates_found", { count: candidateDocIds.length });
+    for (const candidate of candidates) {
+      audit("candidate_ranked", {
+        docRef: auditRef(candidate.docId),
+        chunkRef: auditRef(candidate.chunkId),
+        score: Number(candidate.score.toFixed(4))
+      });
+    }
 
-    const decisions = this.fga.batchCheck(user, candidateDocIds);
+    const localDecisions = this.fga.batchCheck(user, candidateDocIds);
+    const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, candidateDocIds) : undefined;
+    const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
+    const decisions = localDecisions.map(decision => {
+      const remote = remoteById.get(decision.docId);
+      return decision.allowed && remote && !remote.allowed ? remote :
+        remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
+    });
     for (const decision of decisions) {
-      this.audit.append("access_decision", user.id, {
+      audit("access_decision", {
         docRef: auditRef(decision.docId),
         allowed: decision.allowed,
         reason: decision.reason
@@ -135,18 +184,18 @@ export class Brain {
     }
 
     const allowedIds = new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
-    if (!allowedIds.size) return this.noResult(user);
+    if (!allowedIds.size) return this.noResult(user, traceId);
 
     const context: Array<{ citation: string; text: string }> = [];
     const citationMap = new Map<string, Citation>();
     for (const candidate of candidates.filter(item => allowedIds.has(item.docId)).slice(0, 8)) {
-      const sourceAllowed = await this.connector(candidate.docId).checkAccess(user, candidate.docId);
-      const doc = await this.refreshLive(candidate.docId);
-      const effectiveTier = this.fga.effectiveTier(candidate.docId);
-      const allowed = sourceAllowed && Boolean(doc) && Boolean(effectiveTier) &&
-        tierAllows(user, effectiveTier!) && this.fga.check(user, candidate.docId).allowed;
-      this.audit.append("live_access_decision", user.id, { docRef: auditRef(candidate.docId), allowed });
-      if (!allowed || !doc) continue;
+      const indexedVersion = this.index.documents.get(candidate.docId)?.version;
+      const doc = await this.liveAuthorizedDocument(user, candidate.docId);
+      audit("live_access_decision", {
+        docRef: auditRef(candidate.docId), allowed: Boolean(doc),
+        ...(doc ? { sourceVersion: doc.version, refreshed: doc.version !== indexedVersion } : {})
+      });
+      if (!doc) continue;
 
       const indexed = this.index.documents.get(candidate.docId);
       const freshChunk = indexed?.chunks.find(item => item.chunkId === candidate.chunkId);
@@ -163,31 +212,37 @@ export class Brain {
       });
     }
 
-    if (!context.length) return this.noResult(user);
-    this.audit.append("context_sent", user.id, { chunkIds: [...citationMap.keys()] });
+    if (!context.length) return this.noResult(user, traceId);
+    audit("context_sent", { chunkIds: [...citationMap.keys()] });
     const generated = await this.llm.generate(context, trimmed);
-    const answer = groundedOutput(generated, citationMap);
-    this.audit.append("answer_returned", user.id, {
+    const answer = groundedOutput(generated, citationMap,
+      new Map(context.map(item => [item.citation, item.text])));
+    audit("answer_returned", {
       citationIds: answer.citations.map(citation => citation.chunkId),
       empty: answer.text === NO_RESULT
     });
     return answer;
   }
 
-  async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number }>> {
-    const visible = [];
+  async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
+    const visible: Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
     for (const doc of this.index.documents.values()) {
       if (doc.deletedAt || !this.fga.check(user, doc.docId).allowed) continue;
-      if (!await this.connectors[doc.source].checkAccess(user, doc.docId)) continue;
+      if (!await this.liveAuthorizedDocument(user, doc.docId)) continue;
+      const fresh = this.index.documents.get(doc.docId);
+      if (!fresh || fresh.deletedAt) continue;
       visible.push({
-        docId: doc.docId,
-        source: doc.source,
-        title: doc.title,
-        url: doc.url,
-        updatedAt: doc.updatedAt,
-        metadata: doc.metadata,
-        tier: this.fga.effectiveTier(doc.docId) ?? doc.tier,
-        version: doc.version
+        docId: fresh.docId,
+        source: fresh.source,
+        title: fresh.title,
+        content: fresh.content,
+        url: fresh.url,
+        updatedAt: fresh.updatedAt,
+        metadata: fresh.metadata,
+        tier: this.fga.effectiveTier(fresh.docId) ?? fresh.tier,
+        version: fresh.version,
+        lastIndexedAt: fresh.lastIndexedAt,
+        lastPermissionSyncAt: fresh.lastPermissionSyncAt
       });
     }
     return visible;
@@ -195,13 +250,14 @@ export class Brain {
 
   async narrowTier(actor: User, docId: string, tier: Tier): Promise<void> {
     if (actor.role !== "admin") throw new Error("Forbidden");
+    this.remoteFga?.narrowTier(docId, tier);
     this.fga.narrowTier(docId, tier);
     this.audit.append("tier_narrowed", actor.id, { docRef: auditRef(docId), tier });
   }
 
   async setNativePermissions(actor: User, docId: string, permissions: SourcePermission): Promise<void> {
     if (actor.role !== "admin") throw new Error("Forbidden");
-    if (!this.isValidPermission(permissions)) throw new Error("Invalid permissions");
+    if (!isValidPermission(permissions)) throw new Error("Invalid permissions");
     const connector = this.connector(docId);
     const current = await connector.fetchPermissions(docId);
     if (!current || !isPermissionSubset(permissions, current)) {
@@ -210,6 +266,33 @@ export class Brain {
     connector.updatePermissions(docId, permissions);
     await this.sync(connector.source);
     this.audit.append("native_permission_changed", actor.id, { docRef: auditRef(docId) });
+  }
+
+  removeUserFromGroup(actor: User, userId: string, group: string): void {
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    const target = this.user(userId);
+    if (!target) throw new Error("Unknown user");
+    if (!target.groups.includes(group)) throw new Error("Unknown group membership");
+    target.groups = target.groups.filter(item => item !== group);
+    this.audit.append("group_membership_removed", actor.id, { userId, group });
+  }
+
+  async removeSlackMember(actor: User, docId: string, userId: string): Promise<void> {
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    const target = this.user(userId);
+    if (!target) throw new Error("Unknown user");
+    const connector = this.connectors.slack;
+    const doc = await connector.fetchDocument(docId);
+    const native = doc?.permissions.native;
+    if (doc?.source !== "slack" || native?.source !== "slack") throw new Error("Unknown document");
+    const identity = target.platformIdentities?.slack;
+    if (!identity || !native.members.includes(identity)) throw new Error("Unknown channel membership");
+    connector.updatePermissions(docId, {
+      ...doc.permissions,
+      native: { ...native, members: native.members.filter(member => member !== identity) }
+    });
+    await this.sync("slack");
+    this.audit.append("channel_membership_removed", actor.id, { docRef: auditRef(docId), userId });
   }
 
   async editContent(actor: User, docId: string, content: string): Promise<void> {
@@ -221,29 +304,78 @@ export class Brain {
     this.audit.append("source_content_changed", actor.id, { docId });
   }
 
-  async previewAccess(actor: User, targetUserId: string): Promise<{ user: User; documents: Awaited<ReturnType<Brain["visibleDocuments"]>> }> {
+  async previewAccess(actor: User, targetUserId: string): Promise<{ user: User; documents: Awaited<ReturnType<Brain["visibleDocuments"]>>; reasons: Record<string, string[]> }> {
     if (actor.role !== "admin") throw new Error("Forbidden");
     const target = this.user(targetUserId);
     if (!target) throw new Error("Unknown user");
-    return { user: target, documents: await this.visibleDocuments(target) };
+    const documents = await this.visibleDocuments(target);
+    const reasons: Record<string, string[]> = {};
+    for (const doc of documents) {
+      const permission = this.index.documents.get(doc.docId)?.permissions;
+      const matchingGroup = permission?.groups.find(group => target.groups.includes(group));
+      const grantReason = permission?.users.includes(target.email) ? "Direct user grant" :
+        matchingGroup ? `Group: ${matchingGroup}` : "Public brain grant";
+      reasons[doc.docId] = [
+        grantReason,
+        `${doc.source} native permission`,
+        `Tier: ${doc.tier}`
+      ];
+    }
+    return { user: target, documents, reasons };
   }
 
   private async refreshLive(docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
-    const doc = await connector.fetchDocument(docId);
-    if (!doc) {
+    const indexed = this.index.documents.get(docId);
+    const [version, permissions] = await Promise.all([
+      connector.fetchVersion(docId), connector.fetchPermissions(docId)
+    ]);
+    if (version === undefined || !permissions) {
       this.index.tombstone(docId);
       this.fga.remove(docId);
-      this.audit.append("document_deleted", "query", { docId });
+      await this.remoteFga?.removeDocument(docId);
+      this.remoteSynced.delete(docId);
+      const deletedAt = this.index.documents.get(docId)?.deletedAt;
+      if (deletedAt && this.supabaseSynced.has(docId)) await this.supabase?.tombstone(docId, deletedAt);
+      this.supabaseSynced.delete(docId);
+      this.audit.append("document_deleted", "query", { docRef: auditRef(docId) });
       return undefined;
     }
-    const indexed = this.index.documents.get(docId);
-    if (!indexed || doc.version !== indexed.version ||
-      JSON.stringify(doc.permissions) !== JSON.stringify(indexed.permissions)) {
+    if (indexed && version === indexed.version) {
+      if (hash(permissions) !== indexed.permissionHash) {
+        const changed = { ...indexed, permissions };
+        this.index.upsert(changed);
+        this.fga.upsert(changed);
+        await this.persistSearch(docId, false);
+        if (this.remoteFga) {
+          try {
+            await this.remoteFga.syncDocument(changed);
+            this.remoteSynced.add(docId);
+          } catch (error) {
+            this.remoteSynced.delete(docId);
+            throw error;
+          }
+        }
+        this.audit.append("live_permission_refresh", "query", { docRef: auditRef(docId) });
+      }
+      return indexed;
+    }
+    const doc = await connector.fetchDocument(docId);
+    if (doc) {
       const result = this.index.upsert(doc);
       this.fga.upsert(doc);
+      await this.persistSearch(docId, result.contentChanged);
+      if (this.remoteFga) {
+        try {
+          await this.remoteFga.syncDocument(doc);
+          this.remoteSynced.add(docId);
+        } catch (error) {
+          this.remoteSynced.delete(docId);
+          throw error;
+        }
+      }
       this.audit.append("live_refresh", "query", {
-        docId,
+        docRef: auditRef(docId),
         version: doc.version,
         contentChanged: result.contentChanged,
         permissionChanged: result.permissionChanged
@@ -252,8 +384,70 @@ export class Brain {
     return doc;
   }
 
-  private noResult(user: User): QueryAnswer {
-    this.audit.append("answer_returned", user.id, { citationIds: [], empty: true });
+  private async persistSearch(docId: string, contentChanged: boolean): Promise<void> {
+    const indexed = this.index.documents.get(docId);
+    if (!indexed || indexed.deletedAt) return;
+    const existing = this.index.semanticVectorsFor(docId);
+    if (this.embedding && (contentChanged || existing.size !== indexed.chunks.length)) {
+      if (!await this.index.refreshSemantic(docId, this.embedding)) {
+        throw new Error("Semantic embedding refresh failed");
+      }
+    }
+    if (this.supabase) {
+      const rewriteChunks = contentChanged || !this.supabaseSynced.has(docId);
+      try {
+        await this.supabase.syncDocument(indexed, this.index.semanticVectorsFor(docId), rewriteChunks);
+        this.supabaseSynced.add(docId);
+      } catch (error) {
+        this.supabaseSynced.delete(docId);
+        throw error;
+      }
+    }
+  }
+
+  private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
+    const connector = this.connector(docId);
+    if (!await connector.checkAccess(user, docId)) {
+      const indexed = this.index.documents.get(docId);
+      const permissions = await connector.fetchPermissions(docId);
+      if (indexed && permissions) {
+        this.index.upsert({ ...indexed, permissions });
+        this.fga.upsert({ docId, permissions, tier: indexed.tier });
+        if (this.remoteFga) {
+          try {
+            await this.remoteFga.syncDocument({ docId, permissions, tier: indexed.tier });
+            this.remoteSynced.add(docId);
+          } catch {
+            this.remoteSynced.delete(docId);
+          }
+        }
+      } else {
+        this.index.tombstone(docId);
+        this.fga.remove(docId);
+        if (this.remoteFga) {
+          try {
+            await this.remoteFga.removeDocument(docId);
+            this.remoteSynced.delete(docId);
+          } catch {
+            // The next ID pass retries the remote removal while the local tombstone denies access.
+          }
+        }
+      }
+      return undefined;
+    }
+    let doc: SourceDocument | undefined;
+    try {
+      doc = await this.refreshLive(docId);
+    } catch {
+      return undefined;
+    }
+    if (!doc || !this.fga.check(user, docId).allowed) return undefined;
+    if (this.remoteFga && !(await this.remoteFga.batchCheck(user, [docId]))[0]?.allowed) return undefined;
+    return await connector.checkAccess(user, docId) ? doc : undefined;
+  }
+
+  private noResult(user: User, traceId: string): QueryAnswer {
+    this.audit.append("answer_returned", user.id, { traceId, citationIds: [], empty: true });
     return { text: NO_RESULT, citations: [] };
   }
 
@@ -267,4 +461,21 @@ export class Brain {
 
 function hashQuestion(question: string): string {
   return createHash("sha256").update(question).digest("hex");
+}
+
+function auditRef(docId: string): string {
+  return createHash("sha256").update(docId).digest("hex");
+}
+
+function isValidPermission(value: SourcePermission): boolean {
+  return Boolean(value && typeof value === "object" &&
+    Array.isArray(value.users) && value.users.every(user => typeof user === "string") &&
+    Array.isArray(value.groups) && value.groups.every(group => typeof group === "string") &&
+    typeof value.public === "boolean");
+}
+
+function isPermissionSubset(next: SourcePermission, current: SourcePermission): boolean {
+  return (!next.public || current.public) &&
+    next.users.every(user => current.public || current.users.includes(user)) &&
+    next.groups.every(group => current.public || current.groups.includes(group));
 }

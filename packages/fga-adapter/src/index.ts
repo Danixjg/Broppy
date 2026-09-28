@@ -1,5 +1,7 @@
 import { nativeAllows } from "@brain/connectors";
 import type { AccessDecision, SourceDocument, SourcePermission, Tier, User } from "@brain/types";
+export { RemoteFgaAdapter } from "./remote.js";
+export type { RemoteFgaConfig } from "./remote.js";
 
 const tierOrder: Record<Tier, number> = {
   open: 0,

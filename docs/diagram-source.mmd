@@ -1,35 +1,45 @@
 flowchart LR
-  Browser[Browser / demo user] --> API[TypeScript API]
-  API --> Hybrid[Hybrid search: sparse vector + keyword]
-  Hybrid --> IDs[Candidate document and chunk IDs]
-  IDs --> FGA[FGA batch document ID check]
-  FGA -->|Allowed IDs| Live[Live source access and version re-check]
-  FGA -->|Zero allowed| Fixed[Fixed no-result response]
-  Live -->|Denied or deleted| Fixed
-  Live -->|New version| Refresh[Re-chunk and re-embed]
-  Refresh --> Context[Authorized fresh context]
-  Live -->|Current version| Context
-  Context --> LLM[LLMClient / Hunyuan boundary]
-  LLM --> Checker[Citation output checker]
-  Checker --> API
-  API --> Audit[Hash-chain audit log]
-  Audit --> Merkle[Merkle sealer and proof]
-  Merkle --> Compliance[Compliance console]
-
-  subgraph Sources[Mock source platforms]
-    Slack[Slack]
-    Jira[Jira]
-    Confluence[Confluence]
-    Drive[Drive]
+  Browser[Browser] --> Web[Static web :3001]
+  Web -->|demo x-demo-user| API[Node API :3000]
+  Web -.->|optional PKCE and bearer token| Auth0[Auth0 authorization and JWKS]
+  Web -.->|optional bearer API calls| API
+  Auth0 -.->|API validates JWT| API
+  subgraph Local[API process: local mock]
+    API --> Sync[Startup and 30 s sync]
+    Sources[Four mock source connectors] -->|changed IDs and ID pass| Sync
+    Sync -->|missing ID| Tombstone[Tombstone; clear chunks and grant]
+    Sync -->|content/title change| Index[In memory chunks and sparse vectors]
+    Sync -->|permission change| Grants[In process FGA style grants and tier]
+    Sync -->|metadata change| Index
+    Tombstone --> Index
+    API --> Search[Local vector + keyword + freshness search]
+    Index --> Search
+    Search -->|candidate document and chunk IDs| Check[Batch document ID check]
+    Grants --> Check
+    Check -->|allowed IDs| Live[Live mock source access and document refresh]
+    Sources --> Live
+    Live -->|current authorized chunks| Context[Context assembly]
+    Live -->|new version / permission| Index
+    Live -->|new permission| Grants
+    Check -->|none allowed| Fixed[Fixed no-result response]
+    Live -->|none usable| Fixed
+    Context --> LLM[LLMClient: deterministic local answer]
+    LLM --> Checker[Extractive citation output checker]
+    Checker --> API
+    API --> Audit[Hash chain and Merkle batches]
+    Audit --> Console[Compliance API and web console]
+    Admin[Mock admin web view] -->|content / native permission edit, membership removal, tier narrowing| API
   end
-
-  Sources --> Sync[Resumable sync and ID deletion pass]
-  Sources --> Live
-  Sync -->|Content hash change| Refresh
-  Sync -->|Permission hash change| FGA
-  Sync -->|Missing ID| Tombstone[Tombstone]
-  Tombstone --> Hybrid
-
-  Admin[Mock admin] -->|Source edit webhook simulation| Sources
-  Admin -->|Narrow tier only| FGA
-  Orchestrator[Headless periodic orchestrator] --> Sync
+  Context -.->|optional question + authorized chunk text and IDs| Hunyuan[Hunyuan chat API]
+  Hunyuan -.-> Checker
+  Sync -.->|optional changed chunk text| Embed[Hunyuan embeddings API]
+  API -.->|optional question| Embed
+  Embed -.->|1024-d vectors| Index
+  Sync -.->|optional documents and changed chunks| DB[Supabase pgvector and FTS]
+  API -.->|optional hybrid_search query| DB
+  DB -.->|candidate IDs and scores| Check
+  API -.-> File[Optional local JSONL audit file + signing key]
+  Sync -.->|optional tuple reconciliation| Model[Remote FGA API and model]
+  Check -.->|optional batch ID check intersected with local decision| Model
+  Live -.->|optional recheck after refresh| Model
+  Migration[SQL migration applied separately] -.-> DB

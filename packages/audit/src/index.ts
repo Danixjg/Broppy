@@ -1,5 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import { appendFileSync, existsSync, openSync, readFileSync, closeSync, fsyncSync } from "node:fs";
 import type { AuditEntry, MerkleBatch, MerkleProof } from "@brain/types";
+
+const GENESIS = "0".repeat(64);
+const HASH = /^[0-9a-f]{64}$/;
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -9,14 +13,134 @@ function pair(left: string, right: string): string {
   return digest(`${left}:${right}`);
 }
 
+function entryHash(entry: AuditEntry): string {
+  return digest(JSON.stringify({
+    sequence: entry.sequence,
+    timestamp: entry.timestamp,
+    type: entry.type,
+    actor: entry.actor,
+    data: entry.data,
+    previousHash: entry.previousHash
+  }));
+}
+
+export interface SignedMerkleBatch extends MerkleBatch {
+  signature?: string;
+}
+
+export interface AuditProof extends MerkleProof {
+  sequence: number;
+  firstSequence: number;
+  lastSequence: number;
+  entry: AuditEntry;
+}
+
+export interface AuditStore {
+  load(): { entries: AuditEntry[]; batches: SignedMerkleBatch[] };
+  appendEntry(entry: AuditEntry): void;
+  appendBatch(batch: SignedMerkleBatch): void;
+}
+
+/** One JSON record per line. Appends are flushed before they become visible in the log. */
+export class FileAuditStore implements AuditStore {
+  constructor(private readonly path: string) {}
+
+  load(): { entries: AuditEntry[]; batches: SignedMerkleBatch[] } {
+    const entries: AuditEntry[] = [];
+    const batches: SignedMerkleBatch[] = [];
+    if (!existsSync(this.path)) return { entries, batches };
+    const content = readFileSync(this.path, "utf8");
+    if (!content) return { entries, batches };
+    if (content && !content.endsWith("\n")) throw new Error("Incomplete audit record");
+    let nextSequence = 1;
+    let nextBatchSequence = 1;
+    for (const line of content.slice(0, -1).split("\n")) {
+      if (!line) throw new Error("Invalid audit record");
+      let record: { kind: string; value: unknown };
+      try {
+        record = JSON.parse(line);
+      } catch {
+        throw new Error("Invalid audit record");
+      }
+      if (record?.kind === "entry") {
+        const entry = record.value as AuditEntry;
+        if (entry?.sequence !== nextSequence++) throw new Error("Invalid audit record order");
+        entries.push(entry);
+      } else if (record?.kind === "batch") {
+        const batch = record.value as SignedMerkleBatch;
+        if (batch?.firstSequence !== nextBatchSequence || batch.lastSequence >= nextSequence) {
+          throw new Error("Invalid audit record order");
+        }
+        nextBatchSequence = batch.lastSequence + 1;
+        batches.push(batch);
+      } else throw new Error("Invalid audit record");
+    }
+    return { entries, batches };
+  }
+
+  appendEntry(entry: AuditEntry): void {
+    this.write({ kind: "entry", value: entry });
+  }
+
+  appendBatch(batch: SignedMerkleBatch): void {
+    this.write({ kind: "batch", value: batch });
+  }
+
+  private write(record: unknown): void {
+    const fd = openSync(this.path, "a");
+    try {
+      appendFileSync(fd, `${JSON.stringify(record)}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+}
+
+export interface AuditLogOptions {
+  store?: AuditStore;
+  signingKey?: KeyObject | string | Buffer;
+  verificationKey?: KeyObject | string | Buffer;
+}
+
+function batchPayload(batch: MerkleBatch): Buffer {
+  return Buffer.from(JSON.stringify({
+    firstSequence: batch.firstSequence,
+    lastSequence: batch.lastSequence,
+    root: batch.root,
+    sealedAt: batch.sealedAt
+  }));
+}
+
 export class AuditLog {
-  readonly entries: AuditEntry[] = [];
-  readonly batches: MerkleBatch[] = [];
+  private readonly storedEntries: AuditEntry[];
+  private readonly storedBatches: SignedMerkleBatch[];
+  private readonly store?: AuditStore;
+  private readonly signingKey?: KeyObject | string | Buffer;
+  private readonly verificationKey?: KeyObject | string | Buffer;
+
+  constructor(options: AuditLogOptions = {}) {
+    this.store = options.store;
+    this.signingKey = options.signingKey;
+    this.verificationKey = options.verificationKey ?? (options.signingKey ? createPublicKey(options.signingKey) : undefined);
+    const loaded = options.store?.load() ?? { entries: [], batches: [] };
+    this.storedEntries = structuredClone(loaded.entries);
+    this.storedBatches = structuredClone(loaded.batches);
+    if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid stored audit log");
+  }
+
+  get entries(): AuditEntry[] {
+    return structuredClone(this.storedEntries);
+  }
+
+  get batches(): SignedMerkleBatch[] {
+    return structuredClone(this.storedBatches);
+  }
 
   append(type: string, actor: string, data: Record<string, unknown>): AuditEntry {
-    const previousHash = this.entries.at(-1)?.hash ?? "0".repeat(64);
+    const previousHash = this.storedEntries.at(-1)?.hash ?? GENESIS;
     const entry: AuditEntry = {
-      sequence: this.entries.length + 1,
+      sequence: this.storedEntries.length + 1,
       timestamp: new Date().toISOString(),
       type,
       actor,
@@ -24,54 +148,65 @@ export class AuditLog {
       previousHash,
       hash: ""
     };
-    entry.hash = digest(JSON.stringify({
-      sequence: entry.sequence,
-      timestamp: entry.timestamp,
-      type: entry.type,
-      actor: entry.actor,
-      data: entry.data,
-      previousHash
-    }));
-    this.entries.push(entry);
+    entry.hash = entryHash(entry);
+    this.store?.appendEntry(entry);
+    this.storedEntries.push(entry);
     return structuredClone(entry);
   }
 
   verifyChain(): boolean {
-    let previousHash = "0".repeat(64);
-    for (const entry of this.entries) {
-      if (entry.previousHash !== previousHash) return false;
-      const expected = digest(JSON.stringify({
-        sequence: entry.sequence,
-        timestamp: entry.timestamp,
-        type: entry.type,
-        actor: entry.actor,
-        data: entry.data,
-        previousHash
-      }));
-      if (entry.hash !== expected) return false;
-      previousHash = expected;
+    let previousHash = GENESIS;
+    try {
+      for (let i = 0; i < this.storedEntries.length; i++) {
+        const entry = this.storedEntries[i];
+        if (!entry || entry.sequence !== i + 1 || entry.previousHash !== previousHash ||
+          !HASH.test(entry.hash) || entry.hash !== entryHash(entry)) return false;
+        previousHash = entry.hash;
+      }
+    } catch {
+      return false;
     }
     return true;
   }
 
-  seal(): MerkleBatch | undefined {
-    const firstSequence = (this.batches.at(-1)?.lastSequence ?? 0) + 1;
-    if (firstSequence > this.entries.length) return undefined;
-    const leaves = this.entries.slice(firstSequence - 1).map(entry => entry.hash);
-    const batch: MerkleBatch = {
+  verifyBatches(): boolean {
+    let nextSequence = 1;
+    for (const batch of this.storedBatches) {
+      if (!batch || batch.firstSequence !== nextSequence ||
+        !Number.isSafeInteger(batch.lastSequence) || batch.lastSequence < nextSequence ||
+        batch.lastSequence > this.storedEntries.length || !HASH.test(batch.root)) return false;
+      const leaves = this.storedEntries.slice(nextSequence - 1, batch.lastSequence).map(entry => entry.hash);
+      if (AuditLog.root(leaves) !== batch.root) return false;
+      if (this.verificationKey && !AuditLog.verifyBatchSignature(batch, this.verificationKey)) return false;
+      nextSequence = batch.lastSequence + 1;
+    }
+    return true;
+  }
+
+  seal(): SignedMerkleBatch | undefined {
+    if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid audit log");
+    const firstSequence = (this.storedBatches.at(-1)?.lastSequence ?? 0) + 1;
+    if (firstSequence > this.storedEntries.length) return undefined;
+    if (this.verificationKey && !this.signingKey) throw new Error("Signing key required to seal");
+    const leaves = this.storedEntries.slice(firstSequence - 1).map(entry => entry.hash);
+    const batch: SignedMerkleBatch = {
       firstSequence,
-      lastSequence: this.entries.length,
+      lastSequence: this.storedEntries.length,
       root: AuditLog.root(leaves),
       sealedAt: new Date().toISOString()
     };
-    this.batches.push(batch);
+    if (this.signingKey) batch.signature = sign(null, batchPayload(batch), this.signingKey).toString("hex");
+    this.store?.appendBatch(batch);
+    this.storedBatches.push(batch);
     return structuredClone(batch);
   }
 
-  proof(sequence: number): MerkleProof | undefined {
-    const batch = this.batches.find(item => sequence >= item.firstSequence && sequence <= item.lastSequence);
+  proof(sequence: number): AuditProof | undefined {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) return undefined;
+    if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid audit log");
+    const batch = this.storedBatches.find(item => sequence >= item.firstSequence && sequence <= item.lastSequence);
     if (!batch) return undefined;
-    let level = this.entries.slice(batch.firstSequence - 1, batch.lastSequence).map(entry => entry.hash);
+    let level = this.storedEntries.slice(batch.firstSequence - 1, batch.lastSequence).map(entry => entry.hash);
     let index = sequence - batch.firstSequence;
     const siblings: MerkleProof["siblings"] = [];
     while (level.length > 1) {
@@ -81,14 +216,16 @@ export class AuditLog {
         position: siblingIndex < index ? "left" : "right"
       });
       const next: string[] = [];
-      for (let i = 0; i < level.length; i += 2) {
-        next.push(pair(level[i], level[i + 1] ?? level[i]));
-      }
+      for (let i = 0; i < level.length; i += 2) next.push(pair(level[i], level[i + 1] ?? level[i]));
       level = next;
       index = Math.floor(index / 2);
     }
     return {
-      leaf: this.entries[sequence - 1].hash,
+      sequence,
+      firstSequence: batch.firstSequence,
+      lastSequence: batch.lastSequence,
+      entry: structuredClone(this.storedEntries[sequence - 1]),
+      leaf: this.storedEntries[sequence - 1].hash,
       root: batch.root,
       siblings
     };
@@ -99,21 +236,55 @@ export class AuditLog {
     let level = leaves;
     while (level.length > 1) {
       const next: string[] = [];
-      for (let i = 0; i < level.length; i += 2) {
-        next.push(pair(level[i], level[i + 1] ?? level[i]));
-      }
+      for (let i = 0; i < level.length; i += 2) next.push(pair(level[i], level[i + 1] ?? level[i]));
       level = next;
     }
     return level[0];
   }
 
-  static verifyProof(proof: MerkleProof, trustedRoot: string): boolean {
-    let current = proof.leaf;
-    for (const sibling of proof.siblings) {
-      current = sibling.position === "left"
-        ? pair(sibling.hash, current)
-        : pair(current, sibling.hash);
+  static verifyBatchSignature(batch: SignedMerkleBatch, verificationKey: KeyObject | string | Buffer): boolean {
+    if (!batch || !HASH.test(batch.root) || !Number.isSafeInteger(batch.firstSequence) ||
+      !Number.isSafeInteger(batch.lastSequence) || batch.firstSequence < 1 ||
+      batch.lastSequence < batch.firstSequence || typeof batch.sealedAt !== "string" ||
+      typeof batch.signature !== "string" || !/^(?:[0-9a-f]{2})+$/.test(batch.signature)) return false;
+    try {
+      return verify(null, batchPayload(batch), verificationKey, Buffer.from(batch.signature, "hex"));
+    } catch {
+      return false;
     }
-    return current === trustedRoot && proof.root === trustedRoot;
+  }
+
+  static verifyProof(proof: MerkleProof, trusted: string | MerkleBatch): boolean {
+    const item = proof as AuditProof;
+    const trustedRoot = typeof trusted === "string" ? trusted : trusted?.root;
+    if (!item || !HASH.test(trustedRoot) || item.root !== trustedRoot || !HASH.test(item.leaf) ||
+      (typeof trusted !== "string" && (!trusted || item.firstSequence !== trusted.firstSequence ||
+        item.lastSequence !== trusted.lastSequence)) ||
+      !Number.isSafeInteger(item.sequence) || !Number.isSafeInteger(item.firstSequence) ||
+      !Number.isSafeInteger(item.lastSequence) || item.firstSequence < 1 ||
+      item.sequence < item.firstSequence || item.sequence > item.lastSequence ||
+      !item.entry || item.entry.sequence !== item.sequence || item.entry.hash !== item.leaf ||
+      !HASH.test(item.entry.previousHash) ||
+      !Array.isArray(item.siblings)) return false;
+    try {
+      if (entryHash(item.entry) !== item.leaf) return false;
+    } catch {
+      return false;
+    }
+
+    let current = item.leaf;
+    let index = item.sequence - item.firstSequence;
+    let width = item.lastSequence - item.firstSequence + 1;
+    let depth = 0;
+    while (width > 1) {
+      const sibling = item.siblings[depth++];
+      if (!sibling || !HASH.test(sibling.hash) ||
+        sibling.position !== (index % 2 ? "left" : "right")) return false;
+      if (index % 2 === 0 && index + 1 === width && sibling.hash !== current) return false;
+      current = sibling.position === "left" ? pair(sibling.hash, current) : pair(current, sibling.hash);
+      index = Math.floor(index / 2);
+      width = Math.ceil(width / 2);
+    }
+    return depth === item.siblings.length && current === trustedRoot;
   }
 }
