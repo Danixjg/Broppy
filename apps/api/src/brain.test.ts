@@ -18,6 +18,14 @@ describe("Internal Brain security and sync", () => {
     expect(brain.audit.verifyChain()).toBe(true);
   });
 
+  it("answers the PAY-101 prerequisite from current sources", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("ravi")!, "What does PAY-101 need before cutover?");
+    expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
+    expect(answer.citations.map(citation => citation.docId)).not.toContain("drive:cutover-duplicate");
+  });
+
   it("does not re-embed permission-only changes", async () => {
     const brain = new Brain();
     await brain.syncAll();
@@ -133,6 +141,42 @@ describe("Internal Brain security and sync", () => {
       .toEqual(answer);
   });
 
+  it("finds an authorized result beyond thirty higher ranked denied hits", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    for (let index = 0; index < 35; index++) {
+      const doc = (await brain.connectors.drive.fetchDocument("drive:steering-deck"))!;
+      const privateDoc = {
+        ...doc,
+        docId: `drive:private-${index}`,
+        sourceNativeId: `private-${index}`,
+        title: "Executive milestones staged cutover decisions",
+        content: "Executive milestones staged cutover decisions. ".repeat(8),
+        updatedAt: "2100-01-01T00:00:00.000Z",
+        permissions: { ...doc.permissions, groups: ["payments"] }
+      };
+      brain.index.upsert(privateDoc);
+      brain.fga.upsert(privateDoc);
+    }
+    const answer = await brain.query(brain.user("alex")!, "Executive milestones staged cutover decisions");
+    expect(answer.citations.map(citation => citation.docId)).toContain("drive:steering-deck");
+  });
+
+  it("continues past stale grants while filling the answer context", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const base = (await brain.connectors.drive.fetchDocument("drive:steering-deck"))!;
+    const query = "Executive milestones staged cutover decisions";
+    for (let index = 0; index < 9; index++) {
+      const stale = { ...base, docId: `drive:stale-${index}`, sourceNativeId: `stale-${index}`,
+        title: query, content: `${query}. `.repeat(8), updatedAt: "2100-01-01T00:00:00.000Z" };
+      brain.index.upsert(stale);
+      brain.fga.upsert(stale);
+    }
+    const answer = await brain.query(brain.user("alex")!, query);
+    expect(answer.citations.map(citation => citation.docId)).toContain("drive:steering-deck");
+  });
+
   it("lets a remote FGA denial stop context and workspace content", async () => {
     const generate = vi.fn(async () => "Should not run");
     const remote = {
@@ -189,6 +233,59 @@ describe("Internal Brain security and sync", () => {
     const answer = await brain.query(ravi, "Private fraud review");
     expect(answer).toEqual({ text: NO_RESULT, citations: [] });
     expect(generate).toHaveBeenCalledTimes(calls);
+  });
+
+  it("does not return generated text when access is revoked during the same query", async () => {
+    let release!: () => void;
+    let generating!: () => void;
+    const started = new Promise<void>(resolve => { generating = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const brain = new Brain({ generate: async context => {
+      generating();
+      await gate;
+      return `${context[0].text.split(".")[0]}. [${context[0].citation}]`;
+    } });
+    await brain.syncAll();
+    const pending = brain.query(brain.user("ravi")!, "Private fraud review");
+    await started;
+    const permissions = (await brain.connectors.slack.fetchPermissions("slack:fraud-private"))!;
+    if (permissions.native?.source !== "slack") throw new Error("Expected Slack permissions");
+    brain.connectors.slack.updatePermissions("slack:fraud-private", {
+      ...permissions,
+      native: { ...permissions.native, members: [] }
+    });
+    release();
+    expect(await pending).toEqual({ text: NO_RESULT, citations: [] });
+    expect(brain.audit.entries.some(entry => entry.type === "output_access_decision" &&
+      entry.data.allowed === false)).toBe(true);
+  });
+
+  it("rechecks the signed-in user's groups before returning generated text", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const user = brain.user("ravi")!;
+    const answer = await brain.query(user, "PAY-101 cutover", undefined,
+      async () => ({ ...user, groups: [] }));
+    expect(answer).toEqual({ text: NO_RESULT, citations: [] });
+  });
+
+  it("retries ingestion if source permissions change after document fetch", async () => {
+    const brain = new Brain();
+    const connector = brain.connectors.slack;
+    const original = connector.fetchDocument.bind(connector);
+    let changed = false;
+    connector.fetchDocument = async id => {
+      const doc = await original(id);
+      if (!changed && id === "slack:fraud-private" && doc) {
+        changed = true;
+        connector.updatePermissions(id, { ...doc.permissions, groups: [] });
+      }
+      return doc;
+    };
+    await expect(brain.sync("slack")).rejects.toThrow("Source changed during ingestion");
+    expect(brain.index.documents.has("slack:fraud-private")).toBe(false);
+    await brain.sync("slack");
+    expect(brain.fga.check(brain.user("ravi")!, "slack:fraud-private").allowed).toBe(false);
   });
 
   it("refreshes a newer source version before context assembly", async () => {

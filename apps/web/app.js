@@ -1,4 +1,5 @@
 import { parseAuthConfig, startLogin, completeLogin, accessToken, clearLogin, logoutUrl } from "./auth.js";
+import { parseSupabaseConfig, supabaseAccessToken, clearSupabaseLogin } from "./supabase-auth.js";
 import { narrowerPermissionError } from "./permissions.js";
 
 const API = "http://127.0.0.1:3000";
@@ -40,9 +41,10 @@ function statusBadge(doc) {
   return node("span", `status-badge ${tone}`, status);
 }
 async function call(path, options = {}) {
-  if (state.authMode !== "demo" && state.authMode !== "auth0") throw new Error("Sign-in is not configured.");
-  const token = state.authMode === "auth0" ? accessToken() : null;
-  if (state.authMode === "auth0" && !token) throw new Error("Session expired. Log in again.");
+  if (!["demo", "auth0", "supabase"].includes(state.authMode)) throw new Error("Sign-in is not configured.");
+  const token = state.authMode === "auth0" ? accessToken() :
+    state.authMode === "supabase" ? supabaseAccessToken() : null;
+  if (state.authMode !== "demo" && !token) throw new Error("Session expired. Log in again.");
   const response = await fetch(API + path, {
     ...options,
     headers: { ...(token ? { authorization: `Bearer ${token}` } : { "x-demo-user": $("user").value }), "content-type": "application/json", ...(options.headers || {}) },
@@ -53,15 +55,17 @@ async function call(path, options = {}) {
   if (!response.ok) {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
-    if (response.status === 401 && state.authMode === "auth0") {
-      clearLogin(); state.me = null; updateAuthUi("Session expired. Log in again."); resetIdentity();
+    if (response.status === 401 && state.authMode !== "demo") {
+      if (state.authMode === "auth0") clearLogin(); else clearSupabaseLogin();
+      state.me = null; updateAuthUi("Session expired. Log in again."); resetIdentity();
+      if (state.authMode === "supabase") location.assign("./login.html");
     }
     throw error;
   }
   return payload;
 }
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
-function role() { return state.authMode === "auth0" ? state.me?.role || "member" : state.authMode === "demo" ? roles[$("user").value] || "member" : "member"; }
+function role() { return state.authMode === "demo" ? roles[$("user").value] || "member" : state.me?.role || "member"; }
 function setView(view) {
   if (view === "admin" && role() !== "admin") view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
@@ -92,13 +96,13 @@ function resetIdentity() {
   else $("workspaceNotice").textContent = "Log in to view your accessible documents.";
 }
 function updateAuthUi(message = "") {
-  const auth0 = state.authMode !== "demo";
-  $("demoIdentity").hidden = auth0;
-  $("user").disabled = auth0;
-  $("authIdentity").hidden = !auth0;
+  const signedInMode = state.authMode === "auth0" || state.authMode === "supabase";
+  $("demoIdentity").hidden = signedInMode;
+  $("user").disabled = signedInMode;
+  $("authIdentity").hidden = !signedInMode;
   $("authName").textContent = state.me?.name || "";
-  $("loginButton").hidden = !auth0 || Boolean(state.me) || state.authMode !== "auth0";
-  $("logoutButton").hidden = !auth0 || !state.me;
+  $("loginButton").hidden = Boolean(state.me) || state.authMode !== "auth0";
+  $("logoutButton").hidden = !signedInMode || !state.me;
   $("authStatus").hidden = !message;
   $("authStatus").textContent = message;
 }
@@ -107,7 +111,17 @@ async function initAuth() {
   try {
     const response = await fetch("./auth-config.json", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load sign-in configuration.");
-    state.authConfig = parseAuthConfig(await response.json());
+    const publicConfig = await response.json();
+    const supabase = parseSupabaseConfig(publicConfig.supabase);
+    state.authConfig = parseAuthConfig(publicConfig);
+    if (supabase && state.authConfig) throw new Error("Choose one sign-in provider.");
+    if (supabase) {
+      state.authMode = "supabase";
+      if (!supabaseAccessToken()) { location.assign("./login.html"); return; }
+      state.me = await call("/v1/me");
+      if (!state.me || typeof state.me.id !== "string" || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
+      updateAuthUi(); resetIdentity(); return;
+    }
     if (!state.authConfig) {
       state.authMode = "demo"; updateAuthUi(); resetIdentity(); return;
     }
@@ -119,6 +133,7 @@ async function initAuth() {
     updateAuthUi(); resetIdentity();
   } catch (error) {
     if (state.authMode === "auth0") { clearLogin(); state.me = null; }
+    else if (state.authMode === "supabase") { clearSupabaseLogin(); state.me = null; location.assign("./login.html"); }
     else state.authMode = "invalid";
     updateAuthUi(error.message);
     resetIdentity();
@@ -643,6 +658,9 @@ $("loginButton").addEventListener("click", async () => {
   catch (error) { $("loginButton").disabled = false; updateAuthUi(error.message); }
 });
 $("logoutButton").addEventListener("click", () => {
+  if (state.authMode === "supabase") {
+    clearSupabaseLogin(); state.me = null; resetIdentity(); location.assign("./login.html"); return;
+  }
   if (!state.authConfig) return;
   clearLogin(); state.me = null; updateAuthUi("Logging out…"); resetIdentity();
   location.assign(logoutUrl(state.authConfig));

@@ -43,7 +43,8 @@ function service() {
         });
         const group = check.contextual_tuples.tuple_keys.some((membership: any) =>
           tuples.has(JSON.stringify({ user: `${membership.object}#member`, relation: "group_reader", object: check.tuple_key.object })));
-        return [check.correlation_id, { allowed: tuples.has(direct) || group }];
+        const publicGrant = JSON.stringify({ user: "user:*", relation: "public_reader", object: check.tuple_key.object });
+        return [check.correlation_id, { allowed: tuples.has(direct) || group || tuples.has(publicGrant) }];
       });
       return Response.json({ result: Object.fromEntries(entries.reverse()) });
     }
@@ -111,6 +112,23 @@ describe("RemoteFgaAdapter", () => {
     const removedFromGroup = { ...user, groups: [] };
     expect(await adapter.batchCheck(removedFromGroup, ["group-doc"]))
       .toEqual([{ docId: "group-doc", allowed: false, reason: "fga" }]);
+  });
+
+  it("writes and revokes wildcard grants for public documents", async () => {
+    const remote = service();
+    const adapter = remote.adapter();
+    const publicPermission = { ...permission([], []), public: true,
+      native: { source: "slack" as const, channelId: "public", visibility: "public" as const, members: [] } };
+    await adapter.syncDocument({ docId: "public-doc", permissions: publicPermission, tier: "open" });
+    expect([...remote.tuples.values()]).toContainEqual({
+      user: "user:*", relation: "public_reader", object: "document:public-doc"
+    });
+    expect((await adapter.batchCheck(user, ["public-doc"]))[0].allowed).toBe(true);
+    await adapter.syncDocument({ docId: "public-doc", permissions: {
+      ...publicPermission, public: false
+    }, tier: "open" });
+    expect((await adapter.batchCheck(user, ["public-doc"]))[0].allowed).toBe(false);
+    expect(remote.tuples.size).toBe(0);
   });
 
   it("chunks unique document checks at 50 and maps out of order results by correlation ID", async () => {

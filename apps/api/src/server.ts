@@ -6,6 +6,9 @@ import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { createHunyuanLlmFromEnv } from "./hunyuan.js";
 import { createHunyuanEmbeddingClientFromEnv } from "./embedding.js";
+import { SupabaseUsers } from "./supabase-users.js";
+import { liveConnectorsFromEnv } from "@brain/connectors/live";
+import { loadMockCorpus } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
 import { RemoteFgaAdapter } from "@brain/fga-adapter";
 import { SupabaseIndex } from "@brain/retrieval";
@@ -47,9 +50,13 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   return parsed as Record<string, unknown>;
 }
 
-async function identity(request: IncomingMessage, brain: Brain, auth0?: Auth0TokenValidator): Promise<User | undefined> {
+async function identity(request: IncomingMessage, brain: Brain, auth0?: Auth0TokenValidator,
+  supabaseUsers?: SupabaseUsers, allowDemo = true): Promise<User | undefined> {
   const authorization = request.headers.authorization;
-  if (authorization) return auth0?.validate(authorization);
+  if (authorization) return supabaseUsers
+    ? supabaseUsers.validate(authorization, brain.users)
+    : auth0?.validate(authorization);
+  if (supabaseUsers || !allowDemo) return undefined;
   if (process.env.ALLOW_DEMO_AUTH !== "true" || process.env.NODE_ENV === "production") return undefined;
   const id = request.headers["x-demo-user"];
   return typeof id === "string" ? brain.user(id) : undefined;
@@ -103,8 +110,10 @@ function configuredAudit(): AuditLog {
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
   const hasAuth0 = Boolean(process.env.AUTH0_ISSUER && process.env.AUTH0_AUDIENCE);
-  if (!hasAuth0 && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
-    throw new Error("Auth0 configuration required when demo authentication is disabled");
+  const supabaseUsers = SupabaseUsers.fromEnv();
+  if (hasAuth0 && supabaseUsers) throw new Error("Choose Auth0 or Supabase authentication");
+  if (!hasAuth0 && !supabaseUsers && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
+    throw new Error("Auth0 configuration required when demo authentication is disabled (or configure Supabase Auth)");
   }
   const useHunyuan = Boolean(process.env.HUNYUAN_API_KEY || process.env.HUNYUAN_MODEL);
   const useRemoteFga = Boolean(process.env.FGA_API_URL || process.env.FGA_STORE_ID ||
@@ -112,10 +121,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const embedding = createHunyuanEmbeddingClientFromEnv();
   const supabase = SupabaseIndex.fromEnv();
   if (supabase && !embedding) throw new Error("Supabase hybrid search requires HUNYUAN_EMBEDDING_API_KEY");
+  const users = supabaseUsers ? await supabaseUsers.list() : undefined;
+  const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users);
+  if (connectors && !supabaseUsers && !hasAuth0) {
+    throw new Error("Live sources require Supabase or Auth0 sign-in");
+  }
   const brain = options.brain ?? new Brain(useHunyuan ? createHunyuanLlmFromEnv() : undefined,
-    { audit: configuredAudit(), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined });
+    { audit: configuredAudit(), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(brain.users) : undefined;
-  const orchestrator = new SyncOrchestrator(brain);
+  const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
   await brain.syncAll();
   if (options.startOrchestrator ?? true) orchestrator.start();
 
@@ -133,7 +147,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
-      const user = await identity(request, brain, auth0);
+      const user = await identity(request, brain, auth0, supabaseUsers, !connectors);
       if (!user) return send(response, 401, { error: "Unauthorized" });
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
@@ -144,7 +158,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const input = await body(request);
         if (typeof input.question !== "string") throw new Error("Invalid question");
         let traceId: string | undefined;
-        const answer = await brain.query(user, input.question, id => { traceId = id; });
+        const answer = await brain.query(user, input.question, id => { traceId = id; },
+          () => identity(request, brain, auth0, supabaseUsers, !connectors));
         return send(response, 200, { ...answer, traceId });
       }
 

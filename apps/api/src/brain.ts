@@ -19,6 +19,7 @@ const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 export class Brain {
   readonly users: User[];
   readonly connectors: Record<Source, MockConnector>;
+  readonly liveMode: boolean;
   readonly index = new HybridIndex();
   readonly fga = new FgaAdapter();
   readonly remoteFga?: RemoteFgaAdapter;
@@ -33,10 +34,11 @@ export class Brain {
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
     const fixture = loadMockCorpus();
-    this.users = fixture.users;
-    this.connectors = fixture.connectors;
+    this.users = options.users ?? fixture.users;
+    this.connectors = options.connectors ?? fixture.connectors;
+    this.liveMode = Boolean(options.connectors);
     this.llm = llm;
     this.audit = options.audit ?? new AuditLog();
     this.remoteFga = options.remoteFga;
@@ -102,6 +104,14 @@ export class Brain {
             this.audit.append("document_deleted", "sync", { docRef: auditRef(id), source });
           }
         } else {
+          // Read source permissions again before content enters either index.
+          // A change racing ingestion is retried from this ID on the next run.
+          const [permissions, version] = await Promise.all([
+            connector.fetchPermissions(id), connector.fetchVersion(id)
+          ]);
+          if (!permissions || version !== doc.version || hash(permissions) !== hash(doc.permissions)) {
+            throw new Error("Source changed during ingestion");
+          }
           const result = this.index.upsert(doc);
           this.fga.upsert(doc);
           await this.persistSearch(doc.docId, result.contentChanged);
@@ -137,7 +147,8 @@ export class Brain {
     }
   }
 
-  async query(user: User, question: string, onTrace?: (traceId: string) => void): Promise<QueryAnswer> {
+  async query(user: User, question: string, onTrace?: (traceId: string) => void,
+    revalidateUser?: () => Promise<User | undefined>): Promise<QueryAnswer> {
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
     const traceId = randomUUID();
@@ -152,9 +163,16 @@ export class Brain {
       try { queryVector = await this.embedding.embed(trimmed); }
       catch { audit("embedding_fallback", {}); }
     }
-    let candidates = this.index.search(trimmed, 30, queryVector);
+    // Keep the full local candidate set so denied hits cannot crowd an
+    // accessible document out of the authorization pass.
+    const localCandidates = this.index.search(trimmed, Number.MAX_SAFE_INTEGER, queryVector);
+    let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
-      try { candidates = await this.supabase.search(trimmed, queryVector, 30); }
+      try {
+        const remote = await this.supabase.search(trimmed, queryVector, 30);
+        const seen = new Set(remote.map(item => item.chunkId));
+        candidates = [...remote, ...localCandidates.filter(item => !seen.has(item.chunkId))];
+      }
       catch { audit("search_fallback", {}); }
     }
     const candidateDocIds = [...new Set(candidates.map(candidate => candidate.docId))];
@@ -186,9 +204,15 @@ export class Brain {
     const allowedIds = new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
     if (!allowedIds.size) return this.noResult(user, traceId);
 
+    const authorizedCandidates = candidates.filter(item => allowedIds.has(item.docId));
+    const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
+    const currentCandidates = authorizedCandidates.filter(item =>
+      this.index.documents.get(item.docId)?.metadata.status !== "superseded");
+    const answerCandidates = !asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates;
     const context: Array<{ citation: string; text: string }> = [];
     const citationMap = new Map<string, Citation>();
-    for (const candidate of candidates.filter(item => allowedIds.has(item.docId)).slice(0, 8)) {
+    for (const candidate of answerCandidates) {
+      if (context.length >= 8) break;
       const indexedVersion = this.index.documents.get(candidate.docId)?.version;
       const doc = await this.liveAuthorizedDocument(user, candidate.docId);
       audit("live_access_decision", {
@@ -217,6 +241,29 @@ export class Brain {
     const generated = await this.llm.generate(context, trimmed);
     const answer = groundedOutput(generated, citationMap,
       new Map(context.map(item => [item.citation, item.text])));
+    let outputUser = user;
+    if (revalidateUser) {
+      try {
+        const current = await revalidateUser();
+        if (!current || current.id !== user.id) return this.noResult(user, traceId);
+        outputUser = current;
+      } catch {
+        return this.noResult(user, traceId);
+      }
+    }
+    // Generation can outlive a source ACL change. Recheck every source that
+    // influenced the model before returning any generated text or citation.
+    for (const citation of citationMap.values()) {
+      let current: SourceDocument | undefined;
+      try { current = await this.liveAuthorizedDocument(outputUser, citation.docId); }
+      catch { current = undefined; }
+      const allowed = Boolean(current && current.version === citation.version &&
+        this.index.documents.get(citation.docId)?.chunks.some(item =>
+          item.chunkId === citation.chunkId &&
+          item.text === context.find(part => part.citation === citation.chunkId)?.text));
+      audit("output_access_decision", { docRef: auditRef(citation.docId), allowed });
+      if (!allowed) return this.noResult(user, traceId);
+    }
     audit("answer_returned", {
       citationIds: answer.citations.map(citation => citation.chunkId),
       empty: answer.text === NO_RESULT
@@ -257,6 +304,7 @@ export class Brain {
 
   async setNativePermissions(actor: User, docId: string, permissions: SourcePermission): Promise<void> {
     if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.liveMode) throw new Error("Live source permissions must be changed at the source");
     if (!isValidPermission(permissions)) throw new Error("Invalid permissions");
     const connector = this.connector(docId);
     const current = await connector.fetchPermissions(docId);
@@ -270,6 +318,7 @@ export class Brain {
 
   removeUserFromGroup(actor: User, userId: string, group: string): void {
     if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.liveMode) throw new Error("Live group membership must be changed at the identity provider");
     const target = this.user(userId);
     if (!target) throw new Error("Unknown user");
     if (!target.groups.includes(group)) throw new Error("Unknown group membership");
@@ -279,6 +328,7 @@ export class Brain {
 
   async removeSlackMember(actor: User, docId: string, userId: string): Promise<void> {
     if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.liveMode) throw new Error("Live channel membership must be changed in Slack");
     const target = this.user(userId);
     if (!target) throw new Error("Unknown user");
     const connector = this.connectors.slack;
@@ -297,6 +347,7 @@ export class Brain {
 
   async editContent(actor: User, docId: string, content: string): Promise<void> {
     if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.liveMode) throw new Error("Live content must be edited at the source");
     if (!content.trim() || content.length > 50_000) throw new Error("Invalid content");
     const connector = this.connector(docId);
     connector.updateContent(docId, content);

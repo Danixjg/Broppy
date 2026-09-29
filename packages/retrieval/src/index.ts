@@ -187,11 +187,22 @@ export interface LlmClient {
 }
 
 export class LocalGroundedLlm implements LlmClient {
-  async generate(context: Array<{ citation: string; text: string }>): Promise<string> {
+  async generate(context: Array<{ citation: string; text: string }>, question: string): Promise<string> {
+    const queryTerms = new Set(terms(question).filter(term =>
+      !["what", "which", "does", "the", "for", "and", "before", "after", "about"].includes(term)));
+    const prerequisite = /\b(need|needs|required|require|requires|before|prerequisite|depend|depends)\b/i.test(question);
     return context.slice(0, 4)
       .map(item => {
         const normalized = item.text.replace(/\s+/g, " ").trim();
-        const sentence = normalized.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? normalized;
+        const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+        const sentence = sentences.sort((left, right) => {
+          const score = (value: string) => {
+            const overlap = [...new Set(terms(value))].filter(term => queryTerms.has(term)).length;
+            const required = prerequisite && /\b(before|requires?|complete|must|depends?|prerequisite)\b/i.test(value) ? 3 : 0;
+            return overlap + required;
+          };
+          return score(right) - score(left);
+        })[0] ?? normalized;
         return `${sentence} [${item.citation}]`;
       })
       .join("\n");

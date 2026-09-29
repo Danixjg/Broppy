@@ -11,7 +11,8 @@ type document
   relations
     define direct_reader: [user]
     define group_reader: [group#member]
-    define native_reader: direct_reader or group_reader
+    define public_reader: [user:*]
+    define native_reader: direct_reader or group_reader or public_reader
 
 # The local adapter also intersects native_reader with tier policy.
 # The production gateway must batch-check document IDs here, then re-check

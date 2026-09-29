@@ -5,27 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#172d43">
   <title>Internal Brain · Payments workspace</title>
-  <link rel="stylesheet" href="./styles.css">
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./src/main.tsx"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to workspace</a>
-  <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><span>Internal Brain<small>Payments workspace</small></span></div>
-    <label class="project-switch">Project <select id="project"><option value="payments">Payment migration</option></select></label>
-    <label class="search-box"><span aria-hidden="true">⌕</span><span class="sr-only">Search accessible documents</span><input id="search" type="search" placeholder="Search this workspace" autocomplete="off"></label>
-    <label id="demoIdentity" class="identity">Viewing as <select id="user">
-      <option value="ravi">Ravi</option><option value="maya">Maya</option><option value="alex">Alex</option><option value="david">David</option><option value="nur">Nur</option><option value="wei">Wei Ming</option>
-    </select></label>
-    <div id="authIdentity" class="auth-identity" hidden><span id="authName"></span><button type="button" id="loginButton" hidden>Log in</button><button type="button" id="logoutButton" hidden>Log out</button></div>
-  </header>
-  <nav class="view-nav" aria-label="Workspace views">
-    <button type="button" class="nav-button active" data-view="workspace" aria-current="page">Workspace</button>
-    <button type="button" class="nav-button" data-view="admin" id="adminTab" hidden>Admin</button>
-    <button type="button" class="nav-button" data-view="compliance" id="complianceTab" hidden>Compliance</button>
-    <button type="button" class="nav-button" data-view="operations">Sync health</button>
-    <span id="globalStatus" role="status" class="nav-status"></span>
-  </nav>
+  <div id="appShell"></div>
   <p id="authStatus" role="status" class="auth-status" hidden></p>
   <main id="main">
     <div id="workspaceView" class="workspace-layout">

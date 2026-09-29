@@ -3,7 +3,7 @@ import type { AccessDecision, SourceDocument, Tier, User } from "@brain/types";
 import { tierAllows } from "./index.js";
 
 type DocumentGrant = Pick<SourceDocument, "docId" | "permissions" | "tier">;
-type Tuple = { user: string; relation: "direct_reader" | "group_reader"; object: string };
+type Tuple = { user: string; relation: "direct_reader" | "group_reader" | "public_reader"; object: string };
 
 export interface RemoteFgaConfig {
   url: string;
@@ -32,7 +32,8 @@ function desiredTuples(doc: DocumentGrant): Tuple[] {
     ...[...new Set(doc.permissions.users.map(email => email.trim()).filter(Boolean))]
       .map(email => ({ user: `user:${email}`, relation: "direct_reader" as const, object })),
     ...[...new Set(doc.permissions.groups.map(group => group.trim()).filter(Boolean))]
-      .map(group => ({ user: `group:${group}#member`, relation: "group_reader" as const, object }))
+      .map(group => ({ user: `group:${group}#member`, relation: "group_reader" as const, object })),
+    ...(doc.permissions.public ? [{ user: "user:*", relation: "public_reader" as const, object }] : [])
   ];
 }
 
@@ -97,7 +98,7 @@ export class RemoteFgaAdapter {
         const key = record(entry) ? entry.key : undefined;
         if (!record(key) || typeof key.user !== "string" || typeof key.relation !== "string" ||
           key.object !== object) throw new Error("Invalid OpenFGA tuple");
-        if (key.relation === "direct_reader" || key.relation === "group_reader") {
+        if (key.relation === "direct_reader" || key.relation === "group_reader" || key.relation === "public_reader") {
           tuples.push({ user: key.user, relation: key.relation, object });
         }
       }

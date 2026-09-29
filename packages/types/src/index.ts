@@ -6,6 +6,7 @@ export interface User {
   name: string;
   email: string;
   auth0Sub: string;
+  supabaseAuthId?: string;
   platformIdentities?: Record<Source, string>;
   groups: string[];
   role: "member" | "admin" | "compliance";
