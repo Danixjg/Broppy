@@ -39,10 +39,12 @@ function statusBadge(doc) {
   return node("span", `status-badge ${tone}`, status);
 }
 async function call(path, options = {}) {
-  if (state.authMode !== "auth0") throw new Error("Please sign in with SSO.");
+  if (!["auth0", "demo"].includes(state.authMode)) throw new Error("Please sign in with SSO.");
+  // Demo visitors act as the persona chosen in the header; the host ignores this header for signed-in users.
+  const persona = state.authMode === "demo" ? { "x-demo-user": $("user").value } : {};
   const response = await fetch(API + path, {
     ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    headers: { "content-type": "application/json", ...persona, ...(options.headers || {}) },
     cache: "no-store"
   });
   let payload;
@@ -96,22 +98,30 @@ function resetIdentity() {
 }
 function updateAuthUi(message = "") {
   const signedInMode = state.authMode === "auth0";
-  $("demoIdentity").hidden = signedInMode;
-  $("user").disabled = signedInMode;
-  $("authIdentity").hidden = !signedInMode;
-  $("authName").textContent = state.me?.name || "";
-  $("loginButton").hidden = state.signedIn || state.authMode !== "auth0";
-  $("logoutButton").hidden = !signedInMode || !state.signedIn;
+  const demo = state.authMode === "demo";
+  $("demoIdentity").hidden = !demo;
+  $("user").disabled = !demo;
+  $("authIdentity").hidden = !signedInMode && !demo;
+  $("authName").textContent = demo ? "" : state.me?.name || "";
+  $("loginButton").hidden = demo || state.signedIn || !signedInMode;
+  $("logoutButton").hidden = !demo && (!signedInMode || !state.signedIn);
+  $("logoutButton").textContent = demo ? "Leave demo" : "Log out";
   $("authStatus").hidden = !message;
   $("authStatus").textContent = message;
 }
 async function initAuth() {
   updateAuthUi("Loading sign-in configuration…");
   try {
-    state.authMode = "auth0";
     const response = await fetch("/api/session", { cache: "no-store" });
     if (response.status === 401) { location.assign("/auth/login"); return; }
     if (!response.ok) throw new Error("SSO session is unavailable.");
+    if ((await response.json()).demo === true) {
+      state.authMode = "demo";
+      updateAuthUi("Demo mode: all people and data are fictional. Choose who you are viewing as.");
+      resetIdentity();
+      return;
+    }
+    state.authMode = "auth0";
     state.signedIn = true;
     state.me = await call("/v1/me");
     if (!state.me || typeof state.me.id !== "string" || typeof state.me.name !== "string" || !Array.isArray(state.me.groups) || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
@@ -636,5 +646,5 @@ $("retrySync").addEventListener("click", async () => {
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
 });
 $("loginButton").addEventListener("click", () => location.assign("/auth/login"));
-$("logoutButton").addEventListener("click", () => location.assign("/auth/logout"));
+$("logoutButton").addEventListener("click", () => location.assign(state.authMode === "demo" ? "/demo/exit" : "/auth/logout"));
 initAuth();
