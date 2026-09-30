@@ -1,4 +1,4 @@
-> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website requires SSO: run the API with `pnpm dev:sso`, which reads the root `.env.local`. `pnpm dev` still explicitly enables demo authentication for direct local API testing. Project decisions are logged in [decisions.md](decisions.md).
+> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. For SSO, run the API with `pnpm dev:sso`, which reads the root `.env.local`. `pnpm dev` is the demo API: it accepts `x-demo-user` persona headers, for curl and for the website's demo. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Project decisions are logged in [decisions.md](decisions.md).
 
 # Internal Brain
 
@@ -23,7 +23,16 @@ pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
 
 Open `http://127.0.0.1:3001`. The web host forwards API requests server-side with the signed-in user's Auth0 token. If sign-in fails, run `pnpm doctor:sso` while both servers are running. It checks your settings, the Auth0 tenant, the Supabase directory and the running services, and prints the fix for each problem. It changes nothing and prints no secrets.
 
-**API only (demo headers).** `pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled and loads no env file. Use it with curl as shown below; the website cannot use this mode. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
+**Website demo (no sign-in).** Run the demo API and point the web host at it:
+
+```sh
+pnpm dev                                                      # demo API at http://127.0.0.1:3000
+DEMO_API_URL=http://127.0.0.1:3000 pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
+```
+
+Open `http://127.0.0.1:3001` and choose **Try the demo**. The workspace shows a demo banner. **Viewing as** in the header switches between the six fictional people, and **Leave demo** ends the demo. To offer SSO and the demo together, start the demo API on another port (`PORT=3002 pnpm dev`) next to `pnpm dev:sso`, and set `DEMO_API_URL=http://127.0.0.1:3002` in `.env.local`. A signed-in session always takes priority over demo mode.
+
+**API only (demo headers).** `pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled and loads no env file. Use it with curl as shown below, or as the website's demo API. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
 
 For a direct query without the web app:
 
@@ -50,7 +59,7 @@ With `HUNYUAN_EMBEDDING_API_KEY`, sync embeds changed document chunks and a quer
 
 ## API routes
 
-All `/v1` routes require either a valid bearer token configured as below or, in local demo mode, `x-demo-user`. The website uses the official Auth0 Next.js SDK with server-managed sessions. Set the Regular Web Application credentials in `.env.local`; Supabase holds the server-only user directory. Browser API requests go through `/api/brain/*`, which attaches the SDK access token server-side. `GET /health` does not require identity. See [Auth0 sign-in and live sources](docs/live-sources-and-sign-in.md) for setup.
+All `/v1` routes require either a valid bearer token configured as below or, in demo mode (`pnpm dev` locally, or `PUBLIC_DEMO=true`), `x-demo-user`. The website uses the official Auth0 Next.js SDK with server-managed sessions. Set the Regular Web Application credentials in `.env.local`; Supabase holds the server-only user directory. Browser API requests go through `/api/brain/*`, which attaches the SDK access token server-side. Demo visitors' requests carry only the chosen persona and go only to `DEMO_API_URL`. `GET /health` does not require identity. See [Auth0 sign-in and live sources](docs/live-sources-and-sign-in.md) for setup.
 
 | Route | Purpose |
 | --- | --- |
@@ -81,6 +90,8 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | Variable | Use |
 | --- | --- |
 | `ALLOW_DEMO_AUTH=true` | Allows `x-demo-user` outside `NODE_ENV=production`; the root `pnpm dev` script sets it. |
+| `PUBLIC_DEMO=true` | Runs the public demo API: it accepts `x-demo-user` even with `NODE_ENV=production` and serves only the mock corpus. Startup fails if any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present. See [hosting](infra/tencent/README.md). |
+| `DEMO_API_URL` (web host) | The demo API's origin. When set, the start page offers **Try the demo**, and demo visitors' workspace requests go there with only the chosen persona. |
 | `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID` | Auth0 SSO with cached JWKS, active directory lookup and organization validation. Requires Supabase directory/persistence and an audit signing key. See [setup](docs/live-sources-and-sign-in.md). |
 | `HUNYUAN_API_KEY`, `HUNYUAN_MODEL` | Together select the Hunyuan chat client instead of deterministic local excerpts. Setting either one alone causes startup configuration failure. |
 | `HUNYUAN_EMBEDDING_API_KEY` | Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions. With no Supabase variables, semantic ranking runs in the local index. It is separate from the Hunyuan chat key. |
@@ -94,7 +105,7 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 
 ## Deployment status and remaining audit items
 
-Local demo mode remains ephemeral without Supabase configuration. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
+Local demo mode remains ephemeral without Supabase configuration. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
 
 The compliance audit contains question/answer text and source identifiers. Keep audit access and signing keys restricted. Merkle signatures link consecutive batch roots; an independent write-once root anchor remains an open infrastructure decision. Source-specific remote FGA types, expiring restricted grants and webhooks remain follow-ups identified in the audit. Week 3 differentiators and CodeBuddy/WorkBuddy evidence were not fabricated or implemented as part of this repair batch.
 

@@ -187,10 +187,77 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-01 — Hosted demo and sign-in
+
+- **Input:** the repository's website, `https://broppy-one.vercel.app`, is a Vercel project. It deploys only the
+  Next.js host, so the workspace there had no API behind it.
+- **How decided:** each option below was chosen explicitly in a planning session, except D24, where no preference was
+  given and the recommended option applies.
+
+### D20 — What the Vercel site is for (supersedes D16)
+- **Options:** a public demo without sign-in / an SSO showcase / both / local only for now.
+- **Chosen:** both. The start page offers **Try the demo** (fictional people and data, no sign-in) and **Sign in
+  with SSO** (the real Auth0 login). A signed-in session always takes priority over demo mode. Preview deployments
+  offer the demo only.
+- **Trade-off:** the most setup of the four: hosted APIs, Vercel settings and Auth0 URLs. The demo is public, and its
+  state is shared by all visitors until the demo API restarts.
+
+### D21 — Where the API runs
+- **Options:** inside the Vercel app / a separate Node host (Render, Railway or Fly.io) / Tencent Cloud / not
+  decided yet.
+- **Chosen:** Tencent Cloud, on condition that it's free. It is: as of 30 Sep 2026, Lighthouse's free trial for new
+  users (2 vCPU, 2 GB, 3 months, no card) covers the hackathon. Auto-renew stays off.
+- **Trade-off:** someone needs a Tencent Cloud account, and the trial ends after 3 months. The hackathon's credits
+  don't cover hosting.
+
+### D22 — One backend or two
+- **Options:** two backends / one backend for both.
+- **Chosen:** two. A demo API (`PUBLIC_DEMO=true`) serves only the mock corpus, and it refuses to start next to any
+  real identity or data setting. A separate SSO API uses Auth0 and Supabase. The web host sends demo visitors only to
+  `DEMO_API_URL`, with just a persona name. It sends signed-in people only to `BRAIN_API_URL`, with their token.
+- **Trade-off:** two services to run, in exchange for demo visitors never reaching the data behind the SSO showcase.
+
+### D23 — Public address and how the server runs
+- **Address options:** a free sslip.io address / our own domain.
+- **Chosen address:** sslip.io names such as `demo-api.43-156-1-2.sslip.io`, with Caddy getting and renewing HTTPS
+  certificates. There's no domain to buy.
+- **Runtime options:** Docker Compose / plain Node with systemd.
+- **Chosen runtime:** Docker Compose. One command starts the demo API, the optional SSO API (profile `sso`) and
+  Caddy. The guide is `infra/tencent/README.md`.
+
+### D24 — Where the demo persona is chosen
+- **Options:** a switcher in the workspace header / the start page.
+- **Chosen:** no preference was given, so the recommended header switcher applies. **Viewing as** in the workspace
+  header switches the persona, next to a demo banner and a **Leave demo** button.
+
+### Implementation details (hosted demo)
+- **API:** with `PUBLIC_DEMO=true`, the API accepts `x-demo-user` even under `NODE_ENV=production`. Startup fails if
+  any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present.
+- **Web host:**
+  - `/demo` sets an HttpOnly cookie for 8 hours, and `/demo/exit` clears it. The cookie selects the mode, never an
+    identity.
+  - `/api/session` reports demo mode.
+  - Redirects and the same-origin write check use the host the browser used.
+- **Image:** it holds only what the API runs, with nothing from `infra/`, where the server keeps `sso.env` and the
+  audit key. `.dockerignore` also excludes env and key files anywhere in the tree.
+- **Server:** the guide uses Ubuntu 24.04 with Docker's install script. Lighthouse's Docker CE image, whose documented
+  base is CentOS 7.6, works too if its Compose is v2 or later.
+- **Constraints found while writing the guide:**
+  - **One SSO API per Supabase project.** The audit chain accepts one writer per organization (see
+    `docs/live-sources-and-sign-in.md`). The hosted SSO API and a local `pnpm dev:sso` on the same project therefore
+    break each other.
+  - **The team's existing audit signing key.** The hosted SSO API must use it, because stored audit batches are
+    verified at startup.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
-- **Dev-only demo mode:** bring back the persona switcher behind a flag in the Next.js host (audit v0.3 §4).
+- **Hosted SSO next to local SSO work:** the audit chain allows one writer per organization. Either stop the hosted
+  SSO API during local `pnpm dev:sso` work, or give it its own Supabase project.
+- **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or
+  per-visitor state aren't decided.
 - **Additional features:** Slack "ok" → Jira suggestion card; task → doc "Mark done"; latest-doc badge scoring;
   duplicate merge; intern catch-up; master page hard-coded to `PAY`.
 - **Brain as an MCP server:** not started.
@@ -200,4 +267,5 @@ These are open. Pick them up in a later round and record the decision here.
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,
-  source-specific FGA types, and webhooks.
+  source-specific FGA types, and webhooks. The snapshot write runs after every successful response, `/health`
+  included, which matters once the SSO API is reachable from the internet.

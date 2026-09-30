@@ -12,6 +12,11 @@ the Next.js host under `/workspace/`. The request path is:
 For local development, both processes read the same private file, **`.env.local` at the repository root**. Deployed,
 each process should get its own environment (see `decisions.md`, D5).
 
+The start page can also offer a public demo with fictional people and data. It appears when `DEMO_API_URL` is set, and
+it uses a separate demo API; see the README's **Website demo** and the hosting guide,
+[`infra/tencent/README.md`](../../infra/tencent/README.md). A signed-in session always takes priority over demo
+mode.
+
 > Always open **`http://127.0.0.1:3001`**, never `localhost:3001`. Cookies belong to the host in `APP_BASE_URL`;
 > mixing the two breaks the login round-trip.
 
@@ -95,8 +100,8 @@ pnpm dev:sso               # API on 127.0.0.1:3000, Auth0 mode, reads .env.local
 pnpm --dir apps/web dev    # web host on 127.0.0.1:3001 (restart it after workspace UI edits)
 ```
 
-`pnpm dev` is still the **demo** API: it accepts `x-demo-user` for curl testing and loads no env file. The website
-can't use it, because the website only ever sends real Auth0 tokens.
+`pnpm dev` is still the **demo** API: it accepts `x-demo-user` for curl testing and for the website's demo, and it
+loads no env file. Sign-ins never reach it, because the website sends Auth0 tokens only to `BRAIN_API_URL`.
 
 ## 5. End-to-end check
 
@@ -121,7 +126,7 @@ can't use it, because the website only ever sends real Auth0 tokens.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/` says "SSO setup is incomplete" | The web host is missing `APP_BASE_URL`, `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` or `AUTH0_SECRET` | Fill them in the root `.env.local` and restart the web host |
+| `/` says "SSO setup is incomplete", or offers only **Try the demo** | The web host is missing `APP_BASE_URL`, `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` or `AUTH0_SECRET` | Fill them in the root `.env.local` and restart the web host |
 | `/auth/login` returns 500 | The host can't fetch `https://AUTH0_DOMAIN/.well-known/openid-configuration` (wrong domain, or no network) | Check `AUTH0_DOMAIN` and outbound access |
 | Auth0 shows an error page after **Sign in** (callback mismatch, organization, audience or "service not found") | A dashboard setting | Recheck section 2: callback URL, the Organizations tab, org membership and connection, API identifier |
 | Callback fails with an invalid-state error, or login loops | `localhost` and `127.0.0.1` were mixed, or `AUTH0_SECRET` changed mid-login | Use `http://127.0.0.1:3001` only, and log in again |
@@ -150,13 +155,17 @@ can't use it, because the website only ever sends real Auth0 tokens.
 
 - `lib/auth0.ts` creates the SDK client. It requests `openid profile email offline_access`, plus `audience` and
   `organization` when they're configured.
-- `proxy.ts` runs the SDK middleware and redirects signed-out requests for `/workspace/*` to `/auth/login`.
+- `proxy.ts` runs the SDK middleware and redirects signed-out requests for `/workspace/*` to `/auth/login`, except
+  for demo visitors. Without SSO settings it serves only the start page and the demo.
 - `app/api/brain/[...path]/route.ts` gets the access token with `auth0.getAccessToken()` and forwards it to the fixed
-  `BRAIN_API_URL`. It never forwards caller-supplied bearer or `x-demo-user` headers, requires a matching Origin on
-  mutating requests, and caps request bodies at 100 KB. It separates two kinds of 401:
+  `BRAIN_API_URL`. On that path it never forwards caller-supplied bearer or `x-demo-user` headers. It requires a
+  matching Origin on mutating requests and caps request bodies at 100 KB. It separates two kinds of 401:
   - `code: "signed_out"`: there's no web session.
   - `code: "account_rejected"`: the API refused a live session. There's one message for every cause, so
     configuration and directory details aren't revealed.
+- Demo mode (`lib/demo.ts`, `app/demo/`): `/demo` sets an HttpOnly cookie that selects the mode, never an identity,
+  and `/demo/exit` clears it. With no session and that cookie, `/api/brain/*` forwards only a validated persona name
+  (`x-demo-user`) to `DEMO_API_URL`, with no token, and never to `BRAIN_API_URL`.
 - The API side is `apps/api/src/auth.ts` (token validation) and `apps/api/src/user-directory.ts` (directory
   lookup).
 
@@ -165,5 +174,9 @@ can't use it, because the website only ever sends real Auth0 tokens.
 Run `pnpm --dir apps/web build`, then `pnpm --dir apps/web start`. Set `APP_BASE_URL` and the Auth0 allowlists
 (callback, logout and web origin) to the deployed HTTPS origin. Give the API and the web host separate environments,
 and set `BRAIN_API_URL` to the API's origin.
+
+The hosted site, `https://broppy-one.vercel.app`, is set up step by step in
+[`infra/tencent/README.md`](../../infra/tencent/README.md): the Vercel settings, the Auth0 URLs, and the demo and SSO
+APIs on one Tencent Cloud server.
 
 Reference: https://github.com/auth0/nextjs-auth0
