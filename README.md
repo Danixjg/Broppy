@@ -21,7 +21,7 @@ pnpm dev:sso               # API at http://127.0.0.1:3000 in Auth0 mode, reads .
 pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
 ```
 
-Open `http://127.0.0.1:3001`. The web host forwards API requests server-side with the signed-in user's Auth0 token.
+Open `http://127.0.0.1:3001`. The web host forwards API requests server-side with the signed-in user's Auth0 token. If sign-in fails, run `pnpm doctor:sso` while both servers are running. It checks your settings, the Auth0 tenant, the Supabase directory and the running services, and prints the fix for each problem. It changes nothing and prints no secrets.
 
 **API only (demo headers).** `pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled and loads no env file. Use it with curl as shown below; the website cannot use this mode. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
 

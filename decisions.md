@@ -170,6 +170,21 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Tests:** `apps/api/src/scenarios.test.ts` holds the brief-aligned scenario suite; scenarios 3 and 5 are covered
   now.
 
+### D19 — How to confirm the SSO setup
+- **Context:** sign-in was reported as failing, and the tenant and Supabase settings live only in each person's
+  `.env.local`.
+- **Options:** a local check script / opening the development sandbox's network to the tenant / sending the exact
+  error.
+- **Chosen:** a local check script, `pnpm doctor:sso`. It runs on the machine that has `.env.local`, so secrets
+  never leave it.
+  - It checks the settings, the Auth0 tenant (reachable, issuer, signing keys, client credentials, sign-in request,
+    logout URL), the Supabase tables and demo users, and whether the API runs in Auth0 mode and the web host has its
+    settings.
+  - It only reads, and it prints no secret values.
+  - To test the client secret it makes one token request with a made-up code. Auth0 refuses it (a failed-exchange
+    log entry) and issues no token.
+  - The code is in `apps/api/src/doctor.ts`, with tests in `doctor.test.ts`.
+
 ---
 
 ## Deferred (not decided yet)

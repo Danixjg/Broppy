@@ -100,7 +100,15 @@ can't use it, because the website only ever sends real Auth0 tokens.
 
 ## 5. End-to-end check
 
-1. Run `curl http://127.0.0.1:3000/health`. It should return `"ok":true`.
+1. With both servers running, run `pnpm doctor:sso` from the repository root. It checks sections 1–4 for you:
+   - your settings;
+   - the Auth0 tenant (reachable, client secret, callback URL, audience, organization, logout URL);
+   - the Supabase tables and directory users;
+   - whether the API is in Auth0 mode and the web host has its settings.
+
+   Each problem is printed as a `[FAIL]` line with its fix. The check changes nothing and prints no secret values.
+   To test the client secret, it sends Auth0 one token request with a made-up code. Auth0 refuses it and logs a
+   failed exchange; no token is issued.
 2. Open `http://127.0.0.1:3001/` and choose **Sign in with SSO**. Log in as a seeded user. The page shows
    "Signed in as …".
 3. Open `http://127.0.0.1:3001/api/session`. It should return your email.
@@ -108,6 +116,8 @@ can't use it, because the website only ever sends real Auth0 tokens.
    the table below.
 
 ## 6. Symptom → cause
+
+`pnpm doctor:sso` detects most of these for you. Use this table for what shows up only while signing in.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
