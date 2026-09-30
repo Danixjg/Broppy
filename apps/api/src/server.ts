@@ -53,12 +53,27 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   return parsed as Record<string, unknown>;
 }
 
+// Settings that connect real identities or data. A public demo must run without all of them.
+const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
+  "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
+  "FGA_CLIENT_SECRET"];
+
+// PUBLIC_DEMO lets anyone pick a demo persona, so it only ever serves the fictional mock corpus.
+function publicDemo(): boolean {
+  if (process.env.PUBLIC_DEMO !== "true") return false;
+  const real = REAL_SETTINGS.filter(name => process.env[name]);
+  if (real.length) throw new Error(`PUBLIC_DEMO serves mock data only; remove ${real.join(", ")}`);
+  return true;
+}
+
 async function identity(request: IncomingMessage, brain: Brain, auth0?: Auth0TokenValidator,
   allowDemo = true): Promise<User | undefined> {
   const authorization = request.headers.authorization;
   if (authorization) return auth0?.validate(authorization);
   if (auth0 || !allowDemo) return undefined;
-  if (process.env.ALLOW_DEMO_AUTH !== "true" || process.env.NODE_ENV === "production") return undefined;
+  const demoHeaders = process.env.PUBLIC_DEMO === "true" ||
+    (process.env.ALLOW_DEMO_AUTH === "true" && process.env.NODE_ENV !== "production");
+  if (!demoHeaders) return undefined;
   const id = request.headers["x-demo-user"];
   return typeof id === "string" ? brain.user(id) : undefined;
 }
@@ -101,10 +116,11 @@ async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
 }
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
+  const demoOnly = publicDemo();
   const hasAuth0 = Boolean(process.env.AUTH0_ISSUER || process.env.AUTH0_AUDIENCE || process.env.AUTH0_ORG_ID);
   const directory = UserDirectory.fromEnv();
   if (hasAuth0 && !directory) throw new Error("Auth0 requires the Supabase user directory");
-  if (!hasAuth0 && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
+  if (!hasAuth0 && !demoOnly && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
     throw new Error("Auth0 configuration required when demo authentication is disabled");
   }
   const useHunyuan = Boolean(process.env.HUNYUAN_API_KEY || process.env.HUNYUAN_MODEL);

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { createApiServer } from "./server.js";
 
@@ -183,4 +183,40 @@ it("restricts connector settings and starts a background Company A import", asyn
   expect(progress.body.jobs.every((job: { status: string }) => job.status === "complete")).toBe(true);
   expect((await request("/v1/admin/connections/drive", "maya", { method: "DELETE" })).status).toBe(200);
   expect((await request("/v1/workspace", "alex")).body.documents).toEqual([]);
+});
+
+describe("Public demo mode", () => {
+  const keys = ["NODE_ENV", "PUBLIC_DEMO", "ALLOW_DEMO_AUTH", "AUTH0_ISSUER", "SUPABASE_URL"];
+  let saved: Record<string, string | undefined> = {};
+  beforeEach(() => { saved = Object.fromEntries(keys.map(key => [key, process.env[key]])); });
+  afterEach(() => {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it("accepts demo personas in a production build only as a mock-only public demo", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ALLOW_DEMO_AUTH;
+    await expect(createApiServer({ startOrchestrator: false })).rejects.toThrow("Auth0 configuration required");
+    process.env.PUBLIC_DEMO = "true";
+    const api = await createApiServer({ startOrchestrator: false });
+    openServers.push(api.server);
+    await new Promise<void>(resolve => api.server.listen(0, "127.0.0.1", resolve));
+    const address = api.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP address");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/me`, { headers: { "x-demo-user": "maya" } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: "maya", role: "admin" });
+  });
+
+  it("refuses to run a public demo next to real identity or data settings", async () => {
+    process.env.PUBLIC_DEMO = "true";
+    process.env.AUTH0_ISSUER = "https://tenant.example.auth0.com/";
+    await expect(createApiServer({ startOrchestrator: false })).rejects.toThrow("PUBLIC_DEMO serves mock data only; remove AUTH0_ISSUER");
+    delete process.env.AUTH0_ISSUER;
+    process.env.SUPABASE_URL = "https://project.supabase.co";
+    await expect(createApiServer({ startOrchestrator: false })).rejects.toThrow("remove SUPABASE_URL");
+  });
 });
