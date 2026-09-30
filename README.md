@@ -1,4 +1,4 @@
-> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup](apps/web/AUTH0.md). The website requires SSO; `pnpm dev` still explicitly enables demo authentication for direct local API testing.
+> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website requires SSO: run the API with `pnpm dev:sso`, which reads the root `.env.local`. `pnpm dev` still explicitly enables demo authentication for direct local API testing. Project decisions are logged in [decisions.md](decisions.md).
 
 # Internal Brain
 
@@ -12,16 +12,18 @@ Use Node with `pnpm` 9.15.0.
 pnpm install
 pnpm typecheck
 pnpm test
-pnpm dev
 ```
 
-`pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled. In another terminal:
+**Website (SSO).** Copy `.env.example` to `.env.local` at the repository root and fill it in; see [Auth0 setup](apps/web/AUTH0.md). Then, in two terminals:
 
 ```sh
-pnpm --dir apps/web dev
+pnpm dev:sso               # API at http://127.0.0.1:3000 in Auth0 mode, reads .env.local
+pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
 ```
 
-Open `http://127.0.0.1:3001`. The web host forwards API requests server-side. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
+Open `http://127.0.0.1:3001`. The web host forwards API requests server-side with the signed-in user's Auth0 token.
+
+**API only (demo headers).** `pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled and loads no env file. Use it with curl as shown below; the website cannot use this mode. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
 
 For a direct query without the web app:
 

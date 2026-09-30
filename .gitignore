@@ -12,3 +12,5 @@ graphify-out/
 .next/
 apps/web/public/workspace/
 !**/.env.example
+apps/web/next-env.d.ts
+*.pem
