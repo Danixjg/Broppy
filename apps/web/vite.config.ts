@@ -4,7 +4,8 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  base: "/workspace/",
+  plugins: [ react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   build: {
     outDir: "dist",
@@ -12,7 +13,6 @@ export default defineConfig({
       input: {
         workspace: path.resolve(import.meta.dirname, "index.html"),
         connectors: path.resolve(import.meta.dirname, "connectors.html"),
-        login: path.resolve(import.meta.dirname, "login.html"),
       },
     },
   },

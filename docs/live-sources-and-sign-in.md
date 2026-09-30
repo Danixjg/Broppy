@@ -1,15 +1,17 @@
+> **Web authentication update:** Follow [Auth0 Next.js SDK setup](../apps/web/AUTH0.md) for the current Regular Web Application and server-managed sessions. The API directory, persistence and source connector setup below still applies.
+
 # Auth0, durable storage and live sources
 
 Auth0 validates identity; Supabase `workspace_users` supplies active status, organization, role, groups and platform identities. Supabase password login has been removed. The local demo remains available only with the explicit demo switches.
 
 ## Setup
 
-1. Create an Auth0 RS256 API and SPA, enable Organizations, create Company A, and enable the required database and SSO connections. Use access tokens lasting 5–15 minutes. Register the web origin and exact callback/logout paths (`/`, `/index.html`, `/login.html`) used by your deployment.
+1. Create an Auth0 RS256 API and Regular Web Application, enable Organizations, create Company A, and enable the required database and SSO connections. Use access tokens lasting 5–15 minutes. Register callback `http://127.0.0.1:3001/auth/callback`, logout `http://127.0.0.1:3001/`, and web origin `http://127.0.0.1:3001` for local use. Set `APP_BASE_URL` in the web host environment for other deployments.
 2. Apply SQL migrations `001` through `005` in order to Supabase. Migration `003` retains nullable legacy Supabase Auth IDs and keys memberships by organization and `user_id`. Migrations `004` and `005` require pgvector and Vault respectively. Existing indexed demo rows are assigned `demo-company-a`; reimport under the actual Auth0 organization before live use. Existing persisted audit rows without complete payloads require a separately verified migration; startup refuses to silently invent their history.
 3. Set `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `AUDIT_SIGNING_KEY_FILE` (an Ed25519 PEM private key). Keep keys on the API host. The directory and persistence work without an embedding service. Adding `HUNYUAN_EMBEDDING_API_KEY` enables the Supabase hybrid search index.
 4. Provision the six identities with `pnpm exec tsx data/seed-auth0-users.ts`. Also set `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET`, `AUTH0_DATABASE_CONNECTION`, and `MOCK_USER_PASSWORDS_JSON`. The M2M application needs Management API permissions to read/create users and add organization members. Existing accounts are reused; passwords are not reset. The `.example` fixture emails must be replaced with real matching platform emails for live integration.
-5. Fill the public `apps/web/auth-config.json`: `issuer`, `clientId`, `audience`, `organization`, `apiUrl`, and `demo: false`. No server key or client secret belongs here. Open `/login.html` and choose **Sign in with SSO**.
-6. Configure `HOST`, `PORT`, `API_ORIGIN` and `WEB_ORIGIN` for deployment. The web `apiUrl` can be an HTTPS API origin or empty for a same-origin reverse proxy.
+5. Configure the private `.env.local` as described in [Auth0 SDK setup](../apps/web/AUTH0.md). Open `/` and choose **Sign in with SSO**.
+6. Configure `HOST`, `PORT`, `API_ORIGIN` and `WEB_ORIGIN` for deployment. Set `BRAIN_API_URL` in the Next.js server environment to the API origin.
 
 Each API process serves one `AUTH0_ORG_ID`. Tokens for another organization are rejected; directory reads, storage and FGA tuple IDs are organization scoped. Run a separate process per organization and one writer per organization. Directory membership keys are organization scoped. This deployment model does not automatically provision or route new organizations.
 

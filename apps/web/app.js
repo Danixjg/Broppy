@@ -1,7 +1,6 @@
-import { parseAuthConfig, startLogin, completeLogin, accessToken, clearLogin, logoutUrl } from "./auth.js";
 import { narrowerPermissionError } from "./permissions.js";
 
-let API = "";
+const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const state = { docs: [], selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
@@ -40,12 +39,10 @@ function statusBadge(doc) {
   return node("span", `status-badge ${tone}`, status);
 }
 async function call(path, options = {}) {
-  if (!["demo", "auth0"].includes(state.authMode)) throw new Error("Sign-in is not configured.");
-  const token = state.authMode === "auth0" ? accessToken() : null;
-  if (state.authMode !== "demo" && !token) throw new Error("Session expired. Log in again.");
+  if (state.authMode !== "auth0") throw new Error("Please sign in with SSO.");
   const response = await fetch(API + path, {
     ...options,
-    headers: { ...(token ? { authorization: `Bearer ${token}` } : { "x-demo-user": $("user").value }), "content-type": "application/json", ...(options.headers || {}) },
+    headers: { "content-type": "application/json", ...(options.headers || {}) },
     cache: "no-store"
   });
   let payload;
@@ -54,7 +51,6 @@ async function call(path, options = {}) {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
     if (response.status === 401 && state.authMode !== "demo") {
-      clearLogin();
       state.me = null; updateAuthUi("Session expired. Log in again."); resetIdentity();
     }
     throw error;
@@ -110,23 +106,15 @@ function updateAuthUi(message = "") {
 async function initAuth() {
   updateAuthUi("Loading sign-in configuration…");
   try {
-    const response = await fetch("./auth-config.json", { cache: "no-store" });
-    if (!response.ok) throw new Error("Could not load sign-in configuration.");
-    const publicConfig = await response.json();
-    API = typeof publicConfig.apiUrl === "string" ? publicConfig.apiUrl.replace(/\/$/, "") : "";
-    state.authConfig = parseAuthConfig(publicConfig);
-    if (!state.authConfig) {
-      if (publicConfig.demo !== true) throw new Error("Organisation sign-in is not configured.");
-      state.authMode = "demo"; updateAuthUi(); resetIdentity(); return;
-    }
-    state.authMode = "auth0"; updateAuthUi("Checking sign-in…");
-    await completeLogin(state.authConfig);
-    if (!accessToken()) { updateAuthUi("Log in to view the workspace."); resetIdentity(); return; }
+    state.authMode = "auth0";
+    const response = await fetch("/api/session", { cache: "no-store" });
+    if (response.status === 401) { location.assign("/auth/login"); return; }
+    if (!response.ok) throw new Error("SSO session is unavailable.");
     state.me = await call("/v1/me");
     if (!state.me || typeof state.me.id !== "string" || typeof state.me.name !== "string" || !Array.isArray(state.me.groups) || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
     updateAuthUi(); resetIdentity();
   } catch (error) {
-    if (state.authMode === "auth0") { clearLogin(); state.me = null; }
+    if (state.authMode === "auth0") { state.me = null; }
     else state.authMode = "invalid";
     updateAuthUi(error.message);
     resetIdentity();
@@ -644,16 +632,6 @@ $("retrySync").addEventListener("click", async () => {
   try { await post("/v1/admin/sync", {}); if (generation !== state.identity || role() !== "admin") return; await Promise.all([loadHealth(), loadWorkspace()]); $("healthStatus").textContent = "Connector sync complete."; }
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
 });
-$("loginButton").addEventListener("click", async () => {
-  if (!state.authConfig) return;
-  $("loginButton").disabled = true;
-  updateAuthUi("Starting Auth0 login…");
-  try { await startLogin(state.authConfig); }
-  catch (error) { $("loginButton").disabled = false; updateAuthUi(error.message); }
-});
-$("logoutButton").addEventListener("click", () => {
-  if (!state.authConfig) return;
-  clearLogin(); state.me = null; updateAuthUi("Logging out…"); resetIdentity();
-  location.assign(logoutUrl(state.authConfig));
-});
+$("loginButton").addEventListener("click", () => location.assign("/auth/login"));
+$("logoutButton").addEventListener("click", () => location.assign("/auth/logout"));
 initAuth();

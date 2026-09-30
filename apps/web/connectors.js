@@ -1,12 +1,7 @@
-import { accessToken } from "./auth.js";
-const config = await (await fetch("./auth-config.json", { cache: "no-store" })).json();
-const api = (config.apiUrl || "").replace(/\/$/, "");
+const api = "/api/brain";
 const status = document.getElementById("status");
-const demoUser = new URLSearchParams(location.search).get("user") || "maya";
 async function request(path, method = "GET", data) {
-  const token = accessToken();
-  const response = await fetch(api + path, { method, headers: { "content-type": "application/json",
-    ...(token ? { authorization: `Bearer ${token}` } : config.demo ? { "x-demo-user": demoUser } : {}) },
+  const response = await fetch(api + path, { method, headers: { "content-type": "application/json" },
     ...(data ? { body: JSON.stringify(data) } : {}) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Request failed");

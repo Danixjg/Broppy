@@ -10,5 +10,4 @@ if (!mount) throw new Error("Workspace shell mount is missing.");
 flushSync(() => createRoot(mount).render(<Shell />));
 
 // The existing workspace controller attaches listeners to the rendered shell IDs.
-// @ts-expect-error The legacy controller is JavaScript and intentionally remains unchanged in this first migration step.
 void import("../app.js");

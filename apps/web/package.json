@@ -4,16 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 3001",
-    "build": "vite build && cp auth-config.json dist/auth-config.json",
-    "preview": "vite preview --host 127.0.0.1 --port 3001"
+    "dev": "pnpm build:workspace && node scripts/next.mjs dev --hostname 127.0.0.1 --port 3001",
+    "build:workspace": "vite build && node scripts/publish-workspace.mjs",
+    "build": "pnpm build:workspace && node scripts/next.mjs build",
+    "start": "node scripts/next.mjs start --hostname 127.0.0.1 --port 3001",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@auth0/nextjs-auth0": "4",
+    "@next/env": "16.3.7",
     "@radix-ui/react-slot": "^1.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",
+    "next": "16",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^3.7.0",

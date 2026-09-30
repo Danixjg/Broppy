@@ -9,3 +9,6 @@ coverage/
 *Zone.Identifier
 graphify-out/
 
+.next/
+apps/web/public/workspace/
+!**/.env.example

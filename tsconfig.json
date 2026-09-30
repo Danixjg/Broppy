@@ -8,12 +8,22 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "lib": ["ES2022", "DOM"],
-    "types": ["node", "vitest/globals"]
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node",
+      "vitest/globals"
+    ]
   },
   "include": [
     "apps/**/*.ts",
     "packages/**/*.ts",
     "data/**/*.ts"
+  ],
+  "exclude": [
+    "apps/web",
+    "node_modules"
   ]
 }
