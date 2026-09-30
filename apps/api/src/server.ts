@@ -1,3 +1,6 @@
+import { SourceOAuth } from "./source-oauth.js";
+import { Persistence } from "./persistence.js";
+import { searchAudit } from "./audit-search.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -6,13 +9,13 @@ import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { createHunyuanLlmFromEnv } from "./hunyuan.js";
 import { createHunyuanEmbeddingClientFromEnv } from "./embedding.js";
-import { SupabaseUsers } from "./supabase-users.js";
-import { liveConnectorsFromEnv } from "@brain/connectors/live";
-import { loadMockCorpus } from "@brain/connectors";
+import { UserDirectory } from "./user-directory.js";
+import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
+import { MockConnector, loadMockCorpus } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
 import { RemoteFgaAdapter } from "@brain/fga-adapter";
 import { SupabaseIndex } from "@brain/retrieval";
-import type { AuditEntry, SourcePermission, Tier, User } from "@brain/types";
+import type { AuditEntry, Source, SourcePermission, Tier, User } from "@brain/types";
 
 export interface ApiServer {
   brain: Brain;
@@ -28,7 +31,7 @@ interface ApiServerOptions {
 function send(response: ServerResponse, status: number, data: unknown): void {
   response.writeHead(status, {
     "access-control-allow-headers": "content-type,x-demo-user,authorization",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-origin": process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001",
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8",
@@ -51,30 +54,13 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 async function identity(request: IncomingMessage, brain: Brain, auth0?: Auth0TokenValidator,
-  supabaseUsers?: SupabaseUsers, allowDemo = true): Promise<User | undefined> {
+  allowDemo = true): Promise<User | undefined> {
   const authorization = request.headers.authorization;
-  if (authorization) return supabaseUsers
-    ? supabaseUsers.validate(authorization, brain.users)
-    : auth0?.validate(authorization);
-  if (supabaseUsers || !allowDemo) return undefined;
+  if (authorization) return auth0?.validate(authorization);
+  if (auth0 || !allowDemo) return undefined;
   if (process.env.ALLOW_DEMO_AUTH !== "true" || process.env.NODE_ENV === "production") return undefined;
   const id = request.headers["x-demo-user"];
   return typeof id === "string" ? brain.user(id) : undefined;
-}
-
-function auditMatches(query: string, entry: { type: string; actor: string; data: Record<string, unknown> }): boolean {
-  const terms = (query.toLowerCase().match(/[a-z0-9_-]+/g) ?? [])
-    .filter(term => !["show", "me", "all", "the", "events", "event", "for", "where", "were", "with", "by", "about"].includes(term));
-  const searchable = `${entry.type} ${entry.actor} ${JSON.stringify(entry.data)}`.toLowerCase();
-  return terms.every(term => {
-    if (["denied", "deny", "rejected"].includes(term)) return entry.data.allowed === false;
-    if (["allowed", "allow", "approved"].includes(term)) return entry.data.allowed === true;
-    if (["permission", "permissions", "access"].includes(term)) {
-      return /permission|access/.test(searchable);
-    }
-    if (["changed", "changes", "change"].includes(term)) return /changed|narrowed|refresh/.test(searchable);
-    return searchable.includes(term);
-  });
 }
 
 function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "sequence" | "timestamp" | "type" | "data">> {
@@ -100,7 +86,13 @@ function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "sequence" | 
   });
 }
 
-function configuredAudit(): AuditLog {
+async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
+  if (persistence) {
+    const keyPath = process.env.AUDIT_SIGNING_KEY_FILE;
+    if (!keyPath) throw new Error("AUDIT_SIGNING_KEY_FILE is required for durable audit");
+    return new AuditLog({ orgId: persistence.orgId, signingKey: readFileSync(keyPath), initial: await persistence.loadAudit(),
+      persist: (kind, value) => persistence.appendAudit(kind, value) });
+  }
   const path = process.env.AUDIT_LOG_PATH;
   if (!path) return new AuditLog();
   const keyPath = process.env.AUDIT_SIGNING_KEY_FILE;
@@ -109,36 +101,51 @@ function configuredAudit(): AuditLog {
 }
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
-  const hasAuth0 = Boolean(process.env.AUTH0_ISSUER && process.env.AUTH0_AUDIENCE);
-  const supabaseUsers = SupabaseUsers.fromEnv();
-  if (hasAuth0 && supabaseUsers) throw new Error("Choose Auth0 or Supabase authentication");
-  if (!hasAuth0 && !supabaseUsers && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
-    throw new Error("Auth0 configuration required when demo authentication is disabled (or configure Supabase Auth)");
+  const hasAuth0 = Boolean(process.env.AUTH0_ISSUER || process.env.AUTH0_AUDIENCE || process.env.AUTH0_ORG_ID);
+  const directory = UserDirectory.fromEnv();
+  if (hasAuth0 && !directory) throw new Error("Auth0 requires the Supabase user directory");
+  if (!hasAuth0 && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
+    throw new Error("Auth0 configuration required when demo authentication is disabled");
   }
   const useHunyuan = Boolean(process.env.HUNYUAN_API_KEY || process.env.HUNYUAN_MODEL);
   const useRemoteFga = Boolean(process.env.FGA_API_URL || process.env.FGA_STORE_ID ||
-    process.env.FGA_MODEL_ID || process.env.FGA_API_TOKEN);
+    process.env.FGA_MODEL_ID || process.env.FGA_CLIENT_ID || process.env.FGA_CLIENT_SECRET);
   const embedding = createHunyuanEmbeddingClientFromEnv();
-  const supabase = SupabaseIndex.fromEnv();
+  const supabase = embedding ? SupabaseIndex.fromEnv() : null;
   if (supabase && !embedding) throw new Error("Supabase hybrid search requires HUNYUAN_EMBEDDING_API_KEY");
-  const users = supabaseUsers ? await supabaseUsers.list() : undefined;
-  const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users);
-  if (connectors && !supabaseUsers && !hasAuth0) {
-    throw new Error("Live sources require Supabase or Auth0 sign-in");
+  const users = hasAuth0 ? await directory!.list() : undefined;
+  const persistence = options.brain ? undefined : Persistence.fromEnv();
+  const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
+  if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
+  if (oauthConfigs && !persistence) throw new Error("Source OAuth requires Supabase persistence");
+  const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
+  const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
+    (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
+      ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
+      authorization: userId => oauth.authorization(source, userId)
+    }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
+  if (connectors && !hasAuth0) {
+    throw new Error("Live sources require Auth0 sign-in");
   }
   const brain = options.brain ?? new Brain(useHunyuan ? createHunyuanLlmFromEnv() : undefined,
-    { audit: configuredAudit(), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
-  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(brain.users) : undefined;
+    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
+  if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
+  await brain.restore();
+  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
-  await brain.syncAll();
+  if (options.startOrchestrator === false) await brain.syncAll();
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
+    const reply = async (response: ServerResponse, status: number, data: unknown) => {
+      if (status >= 200 && status < 300) await brain.persist();
+      send(response, status, data);
+    };
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
-      if (request.method === "OPTIONS") return send(response, 204, null);
+      if (request.method === "OPTIONS") return await reply(response, 204, null);
       if (request.method === "GET" && url.pathname === "/health") {
-        return send(response, 200, {
+        return await reply(response, 200, {
           ok: true,
           sync: [...brain.states.values()],
           pending: [...brain.runs.values()].filter(run => run.status !== "complete"),
@@ -147,11 +154,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
-      const user = await identity(request, brain, auth0, supabaseUsers, !connectors);
-      if (!user) return send(response, 401, { error: "Unauthorized" });
+      const callback = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
+      if (callback && request.method === "GET" && oauth && directory) {
+        const source = callback[1] as Source;
+        const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
+        brain.connections.set(source, { source, status: "Connected", scope: {}, connectedBy: actor.id, connectedAt: new Date().toISOString() });
+        brain.audit.append("connection_created", actor.id, { source });
+        await brain.persist();
+        response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
+        response.end(); return;
+      }
+
+      const user = await identity(request, brain, auth0, !connectors);
+      if (!user) return await reply(response, 401, { error: "Unauthorized" });
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
-        return send(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
+        return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/query") {
@@ -159,13 +177,13 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (typeof input.question !== "string") throw new Error("Invalid question");
         let traceId: string | undefined;
         const answer = await brain.query(user, input.question, id => { traceId = id; },
-          () => identity(request, brain, auth0, supabaseUsers, !connectors));
-        return send(response, 200, { ...answer, traceId });
+          () => identity(request, brain, auth0, !connectors));
+        return await reply(response, 200, { ...answer, traceId, importNotice: brain.importNotice() });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/trace") {
         const traceId = url.searchParams.get("traceId") ?? brain.lastTraceIds.get(user.id);
-        if (!traceId) return send(response, 404, { error: "Not found" });
+        if (!traceId) return await reply(response, 404, { error: "Not found" });
         const entries = brain.audit.entries.filter(entry => entry.data.traceId === traceId &&
           (entry.actor === user.id || user.role === "compliance"));
         return entries.length ? send(response, 200, {
@@ -174,8 +192,44 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         }) : send(response, 404, { error: "Not found" });
       }
 
+      if (url.pathname.startsWith("/v1/admin/connections") || url.pathname === "/v1/admin/import-jobs" || url.pathname === "/v1/admin/onboard") {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+        if (url.pathname === "/v1/admin/connections" && request.method === "GET") {
+          return await reply(response, 200, { connections: [...brain.connections.values()].map(connection => ({ ...connection,
+            lastSync: brain.states.get(connection.source)?.lastSuccessfulSyncAt,
+            count: [...brain.index.documents.values()].filter(doc => doc.source === connection.source && !doc.deletedAt).length })),
+            unmatched: brain.users.flatMap(person => sources.filter(source => !person.platformIdentities?.[source]).map(source => ({ user: person.id, source }))),
+            liveMode: brain.liveMode });
+        }
+        if (url.pathname === "/v1/admin/import-jobs" && request.method === "GET") return await reply(response, 200, { jobs: [...brain.jobs.values()] });
+        if (url.pathname === "/v1/admin/onboard" && request.method === "POST") {
+          if (brain.liveMode) throw new Error("Mock onboarding only");
+          for (const source of sources) { await brain.connect(user, source); await brain.startImport(user, source); }
+          return await reply(response, 202, { jobs: [...brain.jobs.values()] });
+        }
+        const match = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)(?:\/(authorize|callback|scope|import))?$/.exec(url.pathname);
+        if (!match) return await reply(response, 404, { error: "Not found" });
+        const source = match[1] as Source;
+        if (match[2] === "authorize" && request.method === "POST") {
+          if (oauth) return await reply(response, 200, { url: oauth.begin(source, user) });
+          await brain.connect(user, source); return await reply(response, 200, { connected: true });
+        }
+        if (match[2] === "scope" && request.method === "PUT") {
+          const input = await body(request);
+          if (input.containers !== undefined && (!Array.isArray(input.containers) || !input.containers.every(id => typeof id === "string" && id.length > 0))) throw new Error("Invalid scope");
+          if (input.ids !== undefined && (!Array.isArray(input.ids) || !input.ids.every(id => typeof id === "string" && id.length > 0))) throw new Error("Invalid scope");
+          if (input.since !== undefined && (typeof input.since !== "string" || !Number.isFinite(Date.parse(input.since)))) throw new Error("Invalid scope");
+          await brain.setScope(user, source, { containers: input.containers as string[] | undefined, ids: input.ids as string[] | undefined, since: input.since as string | undefined });
+          return await reply(response, 200, { ok: true });
+        }
+        if (match[2] === "import" && request.method === "POST") { await brain.startImport(user, source); return await reply(response, 202, { ok: true }); }
+        if (!match[2] && request.method === "DELETE") { await brain.disconnect(user, source); await oauth?.remove(source); return await reply(response, 200, { ok: true }); }
+        return await reply(response, 404, { error: "Not found" });
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/workspace") {
-        return send(response, 200, { documents: await brain.visibleDocuments(user) });
+        return await reply(response, 200, { documents: await brain.visibleDocuments(user) });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/tier") {
@@ -184,7 +238,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           throw new Error("Invalid tier change");
         }
         await brain.narrowTier(user, input.docId, input.tier as Tier);
-        return send(response, 200, { ok: true });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/permissions") {
@@ -193,14 +247,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           throw new Error("Invalid permissions");
         }
         await brain.setNativePermissions(user, input.docId, input.permissions as SourcePermission);
-        return send(response, 200, { ok: true });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/admin/permissions") {
-        if (user.role !== "admin") return send(response, 403, { error: "Forbidden" });
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
         const docId = url.searchParams.get("docId") ?? "";
         const visible = (await brain.visibleDocuments(user)).some(doc => doc.docId === docId);
-        if (!visible) return send(response, 404, { error: "Not found" });
+        if (!visible) return await reply(response, 404, { error: "Not found" });
         const source = docId.split(":")[0] as keyof typeof brain.connectors;
         const permissions = await brain.connectors[source]?.fetchPermissions(docId);
         return permissions ? send(response, 200, { docId, source, permissions }) :
@@ -213,7 +267,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           throw new Error("Invalid group change");
         }
         brain.removeUserFromGroup(user, input.userId, input.group);
-        return send(response, 200, { ok: true });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/channel-member") {
@@ -222,7 +276,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           throw new Error("Invalid channel change");
         }
         await brain.removeSlackMember(user, input.docId, input.userId);
-        return send(response, 200, { ok: true });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/content") {
@@ -231,23 +285,23 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           throw new Error("Invalid content");
         }
         await brain.editContent(user, input.docId, input.content);
-        return send(response, 200, { ok: true });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/sync") {
-        if (user.role !== "admin") return send(response, 403, { error: "Forbidden" });
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
         await brain.syncAll();
-        return send(response, 200, { states: [...brain.states.values()] });
+        return await reply(response, 200, { states: [...brain.states.values()] });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/admin/preview") {
         const target = url.searchParams.get("user") ?? "alex";
-        return send(response, 200, await brain.previewAccess(user, target));
+        return await reply(response, 200, await brain.previewAccess(user, target));
       }
 
       if (url.pathname === "/v1/audit" && request.method === "GET") {
-        if (user.role !== "compliance") return send(response, 403, { error: "Forbidden" });
-        return send(response, 200, {
+        if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
+        return await reply(response, 200, {
           entries: brain.audit.entries,
           batches: brain.audit.batches,
           chainValid: brain.audit.verifyChain()
@@ -255,20 +309,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       if (url.pathname === "/v1/audit/search" && request.method === "GET") {
-        if (user.role !== "compliance") return send(response, 403, { error: "Forbidden" });
+        if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
         const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
         if (query.length > 200) throw new Error("Invalid query");
-        const entries = brain.audit.entries.filter(entry => auditMatches(query, entry));
-        return send(response, 200, { entries });
+        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users));
       }
 
       if (url.pathname === "/v1/audit/seal" && request.method === "POST") {
-        if (user.role !== "compliance") return send(response, 403, { error: "Forbidden" });
-        return send(response, 200, { batch: brain.audit.seal() ?? null });
+        if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
+        return await reply(response, 200, { batch: brain.audit.seal() ?? null });
       }
 
       if (url.pathname === "/v1/audit/proof" && request.method === "GET") {
-        if (user.role !== "compliance") return send(response, 403, { error: "Forbidden" });
+        if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
         const sequence = Number(url.searchParams.get("sequence"));
         if (!Number.isInteger(sequence) || sequence < 1) throw new Error("Invalid sequence");
         const proof = brain.audit.proof(sequence);
@@ -278,7 +331,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       if (url.pathname === "/v1/audit/verify" && request.method === "POST") {
-        if (user.role !== "compliance") return send(response, 403, { error: "Forbidden" });
+        if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
         const input = await body(request);
         const sequence = input.sequence;
         if (typeof sequence !== "number" || !Number.isInteger(sequence) || sequence < 1) {
@@ -286,7 +339,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         }
         const proof = brain.audit.proof(sequence);
         const batch = brain.audit.batches.find(item => sequence >= item.firstSequence && sequence <= item.lastSequence);
-        return send(response, 200, {
+        return await reply(response, 200, {
           verified: Boolean(proof && batch && brain.audit.verifyChain() && brain.audit.verifyBatches() &&
             AuditLog.verifyProof(proof, batch)),
           proof: proof ?? null,
@@ -294,16 +347,16 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
-      return send(response, 404, { error: "Not found" });
+      return await reply(response, 404, { error: "Not found" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Request failed";
-      if (message === "Unauthorized") return send(response, 401, { error: "Unauthorized" });
-      if (message === "Forbidden") return send(response, 403, { error: "Forbidden" });
+      if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
+      if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });
       if (message === "Unknown document" || message === "Unknown source item" || message === "Unknown user" ||
         message === "Unknown group membership" || message === "Unknown channel membership") {
-        return send(response, 404, { error: "Not found" });
+        return await reply(response, 404, { error: "Not found" });
       }
-      return send(response, 400, { error: "Invalid request" });
+      return await reply(response, 400, { error: "Invalid request" });
     }
   });
 
@@ -316,7 +369,7 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   const { orchestrator, server } = await createApiServer();
-  server.listen(3000, "127.0.0.1");
+  server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "127.0.0.1");
 
   const stop = (): void => {
     orchestrator.stop();

@@ -6,7 +6,8 @@ export interface User {
   name: string;
   email: string;
   auth0Sub: string;
-  supabaseAuthId?: string;
+  orgId?: string;
+  active?: boolean;
   platformIdentities?: Record<Source, string>;
   groups: string[];
   role: "member" | "admin" | "compliance";
@@ -27,6 +28,7 @@ export interface SourcePermission {
 }
 
 export interface SourceDocument {
+  orgId?: string;
   docId: string;
   source: Source;
   sourceNativeId: string;
@@ -42,6 +44,7 @@ export interface SourceDocument {
 }
 
 export interface SourceChunk {
+  orgId?: string;
   chunkId: string;
   docId: string;
   text: string;
@@ -58,12 +61,14 @@ export interface IndexedDocument extends SourceDocument {
 }
 
 export interface ConnectorState {
+  orgId?: string;
   source: Source;
   cursor: number;
   lastSuccessfulSyncAt?: string;
 }
 
 export interface SyncRun {
+  orgId?: string;
   source: Source;
   cursorFrom: number;
   cursorTo: number;
@@ -85,6 +90,7 @@ export interface AccessDecision {
 }
 
 export interface AuditEntry {
+  hashVersion?: 2;
   sequence: number;
   timestamp: string;
   type: string;
@@ -95,6 +101,7 @@ export interface AuditEntry {
 }
 
 export interface MerkleBatch {
+  previousRoot?: string;
   firstSequence: number;
   lastSequence: number;
   root: string;

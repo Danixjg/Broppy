@@ -13,13 +13,20 @@ function pair(left: string, right: string): string {
   return digest(`${left}:${right}`);
 }
 
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k,v]) => [k, canonical(v)]));
+  return value;
+}
+
 function entryHash(entry: AuditEntry): string {
   return digest(JSON.stringify({
+    ...(entry.hashVersion ? { hashVersion: entry.hashVersion } : {}),
     sequence: entry.sequence,
     timestamp: entry.timestamp,
     type: entry.type,
     actor: entry.actor,
-    data: entry.data,
+    data: entry.hashVersion === 2 ? canonical(entry.data) : entry.data,
     previousHash: entry.previousHash
   }));
 }
@@ -101,6 +108,9 @@ export interface AuditLogOptions {
   store?: AuditStore;
   signingKey?: KeyObject | string | Buffer;
   verificationKey?: KeyObject | string | Buffer;
+  initial?: { entries: AuditEntry[]; batches: SignedMerkleBatch[] };
+  persist?: (kind: "entry" | "batch", value: AuditEntry | SignedMerkleBatch) => Promise<void>;
+  orgId?: string;
 }
 
 function batchPayload(batch: MerkleBatch): Buffer {
@@ -108,6 +118,7 @@ function batchPayload(batch: MerkleBatch): Buffer {
     firstSequence: batch.firstSequence,
     lastSequence: batch.lastSequence,
     root: batch.root,
+    ...(batch.previousRoot !== undefined ? { previousRoot: batch.previousRoot } : {}),
     sealedAt: batch.sealedAt
   }));
 }
@@ -119,11 +130,26 @@ export class AuditLog {
   private readonly signingKey?: KeyObject | string | Buffer;
   private readonly verificationKey?: KeyObject | string | Buffer;
 
-  constructor(options: AuditLogOptions = {}) {
+  private pending: Array<{ kind: "entry" | "batch"; value: AuditEntry | SignedMerkleBatch }> = [];
+  private flushing?: Promise<void>;
+
+  async flush(): Promise<void> {
+    if (this.flushing) { await this.flushing; return this.flush(); }
+    this.flushing = (async () => {
+      while (this.pending.length) {
+        const record = this.pending[0];
+        await this.options.persist?.(record.kind, record.value);
+        this.pending.shift();
+      }
+    })();
+    try { await this.flushing; } finally { this.flushing = undefined; }
+  }
+
+  constructor(private readonly options: AuditLogOptions = {}) {
     this.store = options.store;
     this.signingKey = options.signingKey;
     this.verificationKey = options.verificationKey ?? (options.signingKey ? createPublicKey(options.signingKey) : undefined);
-    const loaded = options.store?.load() ?? { entries: [], batches: [] };
+    const loaded = options.initial ?? options.store?.load() ?? { entries: [], batches: [] };
     this.storedEntries = structuredClone(loaded.entries);
     this.storedBatches = structuredClone(loaded.batches);
     if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid stored audit log");
@@ -140,17 +166,19 @@ export class AuditLog {
   append(type: string, actor: string, data: Record<string, unknown>): AuditEntry {
     const previousHash = this.storedEntries.at(-1)?.hash ?? GENESIS;
     const entry: AuditEntry = {
+      hashVersion: 2,
       sequence: this.storedEntries.length + 1,
       timestamp: new Date().toISOString(),
       type,
       actor,
-      data: structuredClone(data),
+      data: structuredClone({ ...data, ...(this.options.orgId ? { orgId: this.options.orgId } : {}) }),
       previousHash,
       hash: ""
     };
     entry.hash = entryHash(entry);
     this.store?.appendEntry(entry);
     this.storedEntries.push(entry);
+    if (this.options.persist) this.pending.push({ kind: "entry", value: structuredClone(entry) });
     return structuredClone(entry);
   }
 
@@ -171,10 +199,13 @@ export class AuditLog {
 
   verifyBatches(): boolean {
     let nextSequence = 1;
+    let previousRoot = GENESIS;
     for (const batch of this.storedBatches) {
       if (!batch || batch.firstSequence !== nextSequence ||
         !Number.isSafeInteger(batch.lastSequence) || batch.lastSequence < nextSequence ||
         batch.lastSequence > this.storedEntries.length || !HASH.test(batch.root)) return false;
+      if (batch.previousRoot !== undefined && batch.previousRoot !== previousRoot) return false;
+      previousRoot = batch.root;
       const leaves = this.storedEntries.slice(nextSequence - 1, batch.lastSequence).map(entry => entry.hash);
       if (AuditLog.root(leaves) !== batch.root) return false;
       if (this.verificationKey && !AuditLog.verifyBatchSignature(batch, this.verificationKey)) return false;
@@ -191,6 +222,7 @@ export class AuditLog {
     const leaves = this.storedEntries.slice(firstSequence - 1).map(entry => entry.hash);
     const batch: SignedMerkleBatch = {
       firstSequence,
+      previousRoot: this.storedBatches.at(-1)?.root ?? GENESIS,
       lastSequence: this.storedEntries.length,
       root: AuditLog.root(leaves),
       sealedAt: new Date().toISOString()
@@ -198,6 +230,7 @@ export class AuditLog {
     if (this.signingKey) batch.signature = sign(null, batchPayload(batch), this.signingKey).toString("hex");
     this.store?.appendBatch(batch);
     this.storedBatches.push(batch);
+    if (this.options.persist) this.pending.push({ kind: "batch", value: structuredClone(batch) });
     return structuredClone(batch);
   }
 

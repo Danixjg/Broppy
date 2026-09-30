@@ -72,14 +72,14 @@ describe("SupabaseIndex REST adapter", () => {
       Prefer: "resolution=merge-duplicates,return=minimal"
     });
     expect(JSON.parse(documentRequest?.body as string)).toMatchObject({
-      doc_id: "drive:one", source_native_id: "one", metadata: { owner: "alice" },
+      doc_id: "demo-company-a/drive:one", source_native_id: "one", metadata: { owner: "alice" },
       permissions: { users: ["alice"] }, deleted_at: null, last_permission_sync_at: "2026-09-28T02:00:00.000Z"
     });
-    expect(fetchMock.mock.calls[1][0]).toBe("https://project.supabase.co/rest/v1/source_chunks?doc_id=eq.drive%3Aone");
+    expect(fetchMock.mock.calls[1][0]).toBe("https://project.supabase.co/rest/v1/source_chunks?doc_id=eq.demo-company-a%2Fdrive%3Aone");
     expect(fetchMock.mock.calls[1][1]?.method).toBe("DELETE");
     expect(fetchMock.mock.calls[2][0]).toBe("https://project.supabase.co/rest/v1/source_chunks?on_conflict=chunk_id");
     expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual([{
-      chunk_id: "drive:one:0", doc_id: "drive:one", ordinal: 0,
+      org_id: "demo-company-a", chunk_id: "demo-company-a/drive:one:0", doc_id: "demo-company-a/drive:one", ordinal: 0,
       content: "Move traffic in stages.", embedding: vector()
     }]);
   });
@@ -109,11 +109,11 @@ describe("SupabaseIndex REST adapter", () => {
 
   it("tombstones by document ID and detects a missing row", async () => {
     const fetchMock = mockFetch(
-      Response.json([{ doc_id: "drive:one" }]), Response.json([])
+      Response.json([{ doc_id: "demo-company-a/drive:one" }]), Response.json([])
     );
     const index = configured();
     await index.tombstone("drive:one", "2026-09-29T00:00:00.000Z");
-    expect(fetchMock.mock.calls[0][0]).toBe("https://project.supabase.co/rest/v1/source_documents?doc_id=eq.drive%3Aone&select=doc_id");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://project.supabase.co/rest/v1/source_documents?doc_id=eq.demo-company-a%2Fdrive%3Aone&select=doc_id");
     expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ deleted_at: "2026-09-29T00:00:00.000Z" });
     await expect(index.tombstone("missing", "2026-09-29T00:00:00.000Z"))
@@ -122,7 +122,7 @@ describe("SupabaseIndex REST adapter", () => {
 
   it("calls the search RPC with named arguments and maps candidate rows", async () => {
     const fetchMock = mockFetch(Response.json([
-      { doc_id: "drive:one", chunk_id: "drive:one:0", score: 0.72 }
+      { doc_id: "demo-company-a/drive:one", chunk_id: "demo-company-a/drive:one:0", score: 0.72 }
     ]));
     const index = configured();
     expect(await index.search("PAY-101 cutover", vector(), 5)).toEqual([
@@ -131,7 +131,7 @@ describe("SupabaseIndex REST adapter", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://project.supabase.co/rest/v1/rpc/hybrid_search");
     expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
-      query_text: "PAY-101 cutover", query_embedding: vector(), match_count: 5
+      organization: "demo-company-a", query_text: "PAY-101 cutover", query_embedding: vector(), match_count: 5
     });
   });
 

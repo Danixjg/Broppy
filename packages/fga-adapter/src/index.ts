@@ -10,7 +10,7 @@ const tierOrder: Record<Tier, number> = {
 };
 
 export function tierAllows(user: User, tier: Tier): boolean {
-  if (user.contractor) return false;
+  if (user.contractor) return tier !== "restricted";
   if (tier === "open") return true;
   if (tier === "internal") return !user.groups.includes("interns");
   return user.groups.includes("security") ||
@@ -21,6 +21,8 @@ export function tierAllows(user: User, tier: Tier): boolean {
 type Grant = { permissions: SourcePermission; tier: Tier };
 
 export class FgaAdapter {
+  snapshot() { return [...this.grants.entries()]; }
+  restore(grants: Array<[string, Grant]>) { this.grants = new Map(grants); }
   private grants = new Map<string, Grant>();
 
   upsert(doc: Pick<SourceDocument, "docId" | "permissions" | "tier">): void {

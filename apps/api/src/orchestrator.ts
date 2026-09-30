@@ -23,6 +23,7 @@ export class SyncOrchestrator {
     try {
       await this.brain.syncAll();
       this.brain.audit.seal();
+      await this.brain.persist();
     } catch {
       // Sync state keeps the checkpoint; the next interval resumes from it.
     } finally {

@@ -406,5 +406,139 @@
       }
     },
     "tier": "internal"
+  },
+  {
+    "docId": "slack:sec-incident",
+    "source": "slack",
+    "sourceNativeId": "sec-incident",
+    "title": "#sec-incident",
+    "content": "Security incident triage: restrict incident evidence to responders. Escalate suspicious credential usage to David.",
+    "url": "https://slack.example/sec-incident",
+    "version": 1,
+    "updatedAt": "2026-09-29T10:00:00.000Z",
+    "metadata": {
+      "channel": "sec-incident"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "security"
+      ],
+      "public": false,
+      "native": {
+        "source": "slack",
+        "channelId": "C-SEC",
+        "visibility": "private",
+        "members": [
+          "ravi@aspire.example",
+          "david@aspire.example"
+        ]
+      }
+    },
+    "tier": "restricted",
+    "orgId": "demo-company-a"
+  },
+  {
+    "docId": "slack:vendor-integration",
+    "source": "slack",
+    "sourceNativeId": "vendor-integration",
+    "title": "#vendor-integration",
+    "content": "Vendor integration checklist: validate sandbox callbacks. Wei owns the vendor handshake test.",
+    "url": "https://slack.example/vendor-integration",
+    "version": 1,
+    "updatedAt": "2026-09-29T10:00:00.000Z",
+    "metadata": {
+      "channel": "vendor-integration"
+    },
+    "permissions": {
+      "users": [
+        "wei@contractor.example"
+      ],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "slack",
+        "channelId": "C-VENDOR",
+        "visibility": "private",
+        "members": [
+          "wei@contractor.example",
+          "maya@aspire.example",
+          "ravi@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal",
+    "orgId": "demo-company-a"
+  },
+  {
+    "docId": "drive:chargeback-guide",
+    "source": "drive",
+    "sourceNativeId": "chargeback-guide",
+    "title": "Chargeback orientation",
+    "content": "Chargeback workflow: collect receipts, classify disputes, and submit evidence before the deadline.",
+    "url": "https://drive.example/chargeback-guide",
+    "version": 1,
+    "updatedAt": "2026-09-29T10:00:00.000Z",
+    "metadata": {
+      "topic": "chargebacks"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "interns",
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "chargeback-guide",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "alex@aspire.example",
+          "ravi@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "open",
+    "orgId": "demo-company-a"
+  },
+  {
+    "docId": "confluence:gateway-operations",
+    "source": "confluence",
+    "sourceNativeId": "gateway-operations",
+    "title": "Payment gateway operations",
+    "content": "Payment gateway operations: inspect authorization latency and settlement health each morning.",
+    "url": "https://confluence.example/gateway-operations",
+    "version": 1,
+    "updatedAt": "2026-09-29T10:00:00.000Z",
+    "metadata": {
+      "space": "payment-gateway"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "confluence",
+        "spaceKey": "payment-gateway",
+        "spaceViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "nur@aspire.example"
+        ],
+        "pageViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal",
+    "orgId": "demo-company-a"
   }
 ]

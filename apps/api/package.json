@@ -8,6 +8,7 @@
     "@brain/connectors": "workspace:*",
     "@brain/fga-adapter": "workspace:*",
     "@brain/retrieval": "workspace:*",
-    "@brain/types": "workspace:*"
+    "@brain/types": "workspace:*",
+    "jose": "6.1.3"
   }
 }

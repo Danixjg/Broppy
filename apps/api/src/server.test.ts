@@ -39,20 +39,9 @@ describe("API authorization and trace", () => {
   });
 
   it("returns 401 for an invalid bearer token even when a demo identity header is present", async () => {
-    const previousIssuer = process.env.AUTH0_ISSUER;
-    const previousAudience = process.env.AUTH0_AUDIENCE;
-    process.env.AUTH0_ISSUER = "https://tenant.example/";
-    process.env.AUTH0_AUDIENCE = "brain-api";
-    try {
-      const { request } = await start();
-      const result = await request("/v1/me", "maya", { headers: { authorization: "Bearer malformed" } });
-      expect(result).toEqual({ status: 401, body: { error: "Unauthorized" } });
-    } finally {
-      if (previousIssuer === undefined) delete process.env.AUTH0_ISSUER;
-      else process.env.AUTH0_ISSUER = previousIssuer;
-      if (previousAudience === undefined) delete process.env.AUTH0_AUDIENCE;
-      else process.env.AUTH0_AUDIENCE = previousAudience;
-    }
+    const { request } = await start();
+    const result = await request("/v1/me", "maya", { headers: { authorization: "Bearer malformed" } });
+    expect(result).toEqual({ status: 401, body: { error: "Unauthorized" } });
   });
 
   it("returns only live authorized workspace content", async () => {
@@ -60,12 +49,12 @@ describe("API authorization and trace", () => {
     const alex = await request("/v1/workspace", "alex");
     const ravi = await request("/v1/workspace", "ravi");
     expect(alex.status).toBe(200);
-    expect(alex.body.documents.map((doc: { docId: string }) => doc.docId)).toEqual(["drive:steering-deck"]);
+    expect(alex.body.documents.map((doc: { docId: string }) => doc.docId)).toEqual(["drive:steering-deck", "drive:chargeback-guide"]);
     expect(JSON.stringify(alex.body)).not.toContain("fraud-ops-private");
     const catchUp = await request("/v1/query", "alex", {
       method: "POST", body: JSON.stringify({ question: "Summarize cutover decisions for a new intern." })
     });
-    expect(catchUp.body.citations.map((item: { docId: string }) => item.docId)).toEqual(["drive:steering-deck"]);
+    expect(catchUp.body.citations.map((item: { docId: string }) => item.docId)).toEqual(["drive:steering-deck", "drive:chargeback-guide"]);
     expect(ravi.body.documents.some((doc: { docId: string }) => doc.docId === "jira:PAY-101")).toBe(true);
     expect(ravi.body.documents.find((doc: { docId: string }) => doc.docId === "jira:PAY-101").content)
       .toContain("PAY-101");
@@ -174,7 +163,19 @@ describe("API authorization and trace", () => {
     expect(after.body.text).toBe("No accessible information was found for this query.");
     const preview = await request("/v1/admin/preview?user=alex", "maya");
     expect(preview.status).toBe(200);
-    expect(preview.body.documents.map((doc: { docId: string }) => doc.docId)).toEqual(["drive:steering-deck"]);
+    expect(preview.body.documents.map((doc: { docId: string }) => doc.docId)).toEqual(["drive:steering-deck", "drive:chargeback-guide"]);
     expect(preview.body.reasons["drive:steering-deck"]).toContain("Group: interns");
   });
+});
+
+it("restricts connector settings and starts a background Company A import", async () => {
+  const { request, brain } = await start();
+  expect((await request("/v1/admin/connections", "ravi")).status).toBe(403);
+  expect((await request("/v1/admin/onboard", "maya", { method: "POST" })).status).toBe(202);
+  await brain.syncAll();
+  const progress = await request("/v1/admin/import-jobs", "maya");
+  expect(progress.body.jobs).toHaveLength(4);
+  expect(progress.body.jobs.every((job: { status: string }) => job.status === "complete")).toBe(true);
+  expect((await request("/v1/admin/connections/drive", "maya", { method: "DELETE" })).status).toBe(200);
+  expect((await request("/v1/workspace", "alex")).body.documents).toEqual([]);
 });

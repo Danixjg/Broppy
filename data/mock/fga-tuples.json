@@ -108,5 +108,35 @@
     "user": "group:payments#member",
     "relation": "group_reader",
     "object": "document:drive:api-spec"
+  },
+  {
+    "user": "group:security#member",
+    "relation": "group_reader",
+    "object": "document:slack:sec-incident"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:slack:vendor-integration"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:vendor-integration"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:drive:chargeback-guide"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:chargeback-guide"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:confluence:gateway-operations"
   }
 ]

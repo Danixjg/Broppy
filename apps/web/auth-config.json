@@ -2,5 +2,7 @@
   "issuer": "",
   "clientId": "",
   "audience": "",
-  "supabase": { "url": "", "publishableKey": "" }
+  "organization": "",
+  "apiUrl": "http://127.0.0.1:3000",
+  "demo": true
 }

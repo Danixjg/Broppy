@@ -11,6 +11,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         workspace: path.resolve(import.meta.dirname, "index.html"),
+        connectors: path.resolve(import.meta.dirname, "connectors.html"),
         login: path.resolve(import.meta.dirname, "login.html"),
       },
     },

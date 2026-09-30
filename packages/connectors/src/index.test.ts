@@ -23,7 +23,7 @@ describe("Stage 1 mock corpus", () => {
       "drive:cutover-plan", "drive:cutover-duplicate", "drive:recon-sheet",
       "drive:steering-deck", "drive:api-spec"
     ]));
-    expect(ids).toHaveLength(12);
+    expect(ids).toHaveLength(16);
     for (const connector of Object.values(connectors)) {
       for (const doc of await connector.listItems()) {
         expect(doc.content).toBeTruthy();
@@ -147,4 +147,14 @@ describe("Stage 1 mock corpus", () => {
       expect(await connector.checkAccess(ravi, id)).toBe(false);
     }
   });
+});
+
+it("allows contractors only on an explicit grant with native membership", async () => {
+  const { users, connectors } = loadMockCorpus();
+  const wei = users.find(user => user.id === "wei")!;
+  const doc = (await connectors.slack.listItems())[0];
+  const native = { source: "slack" as const, channelId: "vendor", visibility: "public" as const, members: [wei.email] };
+  expect(nativeAllows(wei, { users: [], groups: [], public: true, native })).toBe(false);
+  expect(nativeAllows(wei, { users: [wei.email], groups: [], public: false, native })).toBe(true);
+  expect(nativeAllows(wei, { users: [wei.email], groups: [], public: false, native: { ...native, members: [] } })).toBe(false);
 });

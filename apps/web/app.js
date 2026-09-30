@@ -1,8 +1,7 @@
 import { parseAuthConfig, startLogin, completeLogin, accessToken, clearLogin, logoutUrl } from "./auth.js";
-import { parseSupabaseConfig, supabaseAccessToken, clearSupabaseLogin } from "./supabase-auth.js";
 import { narrowerPermissionError } from "./permissions.js";
 
-const API = "http://127.0.0.1:3000";
+let API = "";
 const $ = id => document.getElementById(id);
 const state = { docs: [], selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
@@ -41,9 +40,8 @@ function statusBadge(doc) {
   return node("span", `status-badge ${tone}`, status);
 }
 async function call(path, options = {}) {
-  if (!["demo", "auth0", "supabase"].includes(state.authMode)) throw new Error("Sign-in is not configured.");
-  const token = state.authMode === "auth0" ? accessToken() :
-    state.authMode === "supabase" ? supabaseAccessToken() : null;
+  if (!["demo", "auth0"].includes(state.authMode)) throw new Error("Sign-in is not configured.");
+  const token = state.authMode === "auth0" ? accessToken() : null;
   if (state.authMode !== "demo" && !token) throw new Error("Session expired. Log in again.");
   const response = await fetch(API + path, {
     ...options,
@@ -56,9 +54,8 @@ async function call(path, options = {}) {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
     if (response.status === 401 && state.authMode !== "demo") {
-      if (state.authMode === "auth0") clearLogin(); else clearSupabaseLogin();
+      clearLogin();
       state.me = null; updateAuthUi("Session expired. Log in again."); resetIdentity();
-      if (state.authMode === "supabase") location.assign("./login.html");
     }
     throw error;
   }
@@ -89,6 +86,10 @@ function resetIdentity() {
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
   $("adminTab").hidden = role() !== "admin";
+  let connectorLink = document.getElementById("connectorSettings");
+  if (!connectorLink) { connectorLink = node("a", "", "Connectors settings"); connectorLink.id = "connectorSettings"; $("adminView").prepend(connectorLink); }
+  connectorLink.href = `./connectors.html?user=${encodeURIComponent($("user").value)}`;
+  connectorLink.hidden = role() !== "admin";
   $("complianceTab").hidden = role() !== "compliance";
   $("retrySync").hidden = role() !== "admin";
   setView("workspace");
@@ -96,7 +97,7 @@ function resetIdentity() {
   else $("workspaceNotice").textContent = "Log in to view your accessible documents.";
 }
 function updateAuthUi(message = "") {
-  const signedInMode = state.authMode === "auth0" || state.authMode === "supabase";
+  const signedInMode = state.authMode === "auth0";
   $("demoIdentity").hidden = signedInMode;
   $("user").disabled = signedInMode;
   $("authIdentity").hidden = !signedInMode;
@@ -112,17 +113,10 @@ async function initAuth() {
     const response = await fetch("./auth-config.json", { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load sign-in configuration.");
     const publicConfig = await response.json();
-    const supabase = parseSupabaseConfig(publicConfig.supabase);
+    API = typeof publicConfig.apiUrl === "string" ? publicConfig.apiUrl.replace(/\/$/, "") : "";
     state.authConfig = parseAuthConfig(publicConfig);
-    if (supabase && state.authConfig) throw new Error("Choose one sign-in provider.");
-    if (supabase) {
-      state.authMode = "supabase";
-      if (!supabaseAccessToken()) { location.assign("./login.html"); return; }
-      state.me = await call("/v1/me");
-      if (!state.me || typeof state.me.id !== "string" || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
-      updateAuthUi(); resetIdentity(); return;
-    }
     if (!state.authConfig) {
+      if (publicConfig.demo !== true) throw new Error("Organisation sign-in is not configured.");
       state.authMode = "demo"; updateAuthUi(); resetIdentity(); return;
     }
     state.authMode = "auth0"; updateAuthUi("Checking sign-in…");
@@ -133,7 +127,6 @@ async function initAuth() {
     updateAuthUi(); resetIdentity();
   } catch (error) {
     if (state.authMode === "auth0") { clearLogin(); state.me = null; }
-    else if (state.authMode === "supabase") { clearSupabaseLogin(); state.me = null; location.assign("./login.html"); }
     else state.authMode = "invalid";
     updateAuthUi(error.message);
     resetIdentity();
@@ -408,6 +401,7 @@ async function ask(question, target, displayQuestion = false) {
   const result = await post("/v1/query", { question });
   if (generation !== state.identity) return null;
   renderAnswer(target, result, displayQuestion ? question : "");
+  if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
   return result;
 }
 function applyLandingPreference() {
@@ -478,7 +472,7 @@ async function searchAudit(query) {
   if (!state.audit) await loadAudit(); if (!state.audit) return;
   $("auditStatus").textContent = "Searching audit…";
   try {
-    const result = await call(`/v1/audit/search?q=${encodeURIComponent(query)}`);
+    const result = await call(`/v1/audit/search?${new URLSearchParams({ q: query, ...($("auditFrom").value ? { from: $("auditFrom").value } : {}), ...($("auditTo").value ? { to: $("auditTo").value } : {}) })}`);
     if (generation !== state.identity || role() !== "compliance") return;
     const entries = Array.isArray(result.entries) ? result.entries : Array.isArray(result) ? result : [];
     renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching events`;
@@ -658,9 +652,6 @@ $("loginButton").addEventListener("click", async () => {
   catch (error) { $("loginButton").disabled = false; updateAuthUi(error.message); }
 });
 $("logoutButton").addEventListener("click", () => {
-  if (state.authMode === "supabase") {
-    clearSupabaseLogin(); state.me = null; resetIdentity(); location.assign("./login.html"); return;
-  }
   if (!state.authConfig) return;
   clearLogin(); state.me = null; updateAuthUi("Logging out…"); resetIdentity();
   location.assign(logoutUrl(state.authConfig));

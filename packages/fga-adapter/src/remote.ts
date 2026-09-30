@@ -1,3 +1,4 @@
+import { OpenFgaApi, CredentialsMethod, type ReadRequest, type WriteRequest, type BatchCheckRequest } from "@openfga/sdk";
 import { nativeAllows } from "@brain/connectors";
 import type { AccessDecision, SourceDocument, Tier, User } from "@brain/types";
 import { tierAllows } from "./index.js";
@@ -10,6 +11,11 @@ export interface RemoteFgaConfig {
   storeId: string;
   modelId: string;
   token?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tokenIssuer?: string;
+  audience?: string;
+  orgId?: string;
   fetch?: typeof fetch;
 }
 
@@ -39,6 +45,8 @@ function desiredTuples(doc: DocumentGrant): Tuple[] {
 
 /** HTTP adapter for the document model in infra/fga/model.fga. */
 export class RemoteFgaAdapter {
+  private readonly sdk?: OpenFgaApi;
+  private readonly orgId?: string;
   private readonly baseUrl: string;
   private readonly storeId: string;
   private readonly modelId: string;
@@ -49,6 +57,11 @@ export class RemoteFgaAdapter {
   constructor(config: RemoteFgaConfig) {
     const url = new URL(required(config.url, "FGA_API_URL"));
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("FGA_API_URL must be HTTP(S)");
+    this.orgId = config.orgId;
+    if (config.clientId) this.sdk = new OpenFgaApi({ apiUrl: config.url,
+      credentials: { method: CredentialsMethod.ClientCredentials, config: { clientId: config.clientId,
+        clientSecret: required(config.clientSecret, "FGA_CLIENT_SECRET"), apiTokenIssuer: required(config.tokenIssuer, "FGA_API_TOKEN_ISSUER"),
+        apiAudience: required(config.audience, "FGA_API_AUDIENCE") } } });
     this.baseUrl = url.toString().replace(/\/$/, "");
     this.storeId = required(config.storeId, "FGA_STORE_ID");
     this.modelId = required(config.modelId, "FGA_MODEL_ID");
@@ -61,11 +74,29 @@ export class RemoteFgaAdapter {
       url: required(env.FGA_API_URL, "FGA_API_URL"),
       storeId: required(env.FGA_STORE_ID, "FGA_STORE_ID"),
       modelId: required(env.FGA_MODEL_ID, "FGA_MODEL_ID"),
-      token: env.FGA_API_TOKEN
+      clientId: required(env.FGA_CLIENT_ID, "FGA_CLIENT_ID"), clientSecret: required(env.FGA_CLIENT_SECRET, "FGA_CLIENT_SECRET"),
+      tokenIssuer: required(env.FGA_API_TOKEN_ISSUER, "FGA_API_TOKEN_ISSUER"), audience: required(env.FGA_API_AUDIENCE, "FGA_API_AUDIENCE"),
+      orgId: required(env.AUTH0_ORG_ID, "AUTH0_ORG_ID")
     });
   }
 
   private async post(path: string, body: object): Promise<unknown> {
+    if (this.orgId) {
+      const prefix = encodeURIComponent(this.orgId) + "/";
+      const scope = (value: any): any => {
+        if (Array.isArray(value)) return value.map(scope);
+        if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, v]) =>
+          [key, (key === "user" || key === "object") && typeof v === "string" && v !== "user:*" ? v.replace(":", ":" + prefix) : scope(v)]));
+        return value;
+      };
+      body = scope(body);
+    }
+    if (this.sdk) {
+      if (path === "read") return this.sdk.read(this.storeId, body as ReadRequest);
+      if (path === "write") return this.sdk.write(this.storeId, body as WriteRequest);
+      if (path === "batch-check") return this.sdk.batchCheck(this.storeId, body as BatchCheckRequest);
+      throw new Error("Unsupported FGA operation");
+    }
     const response = await this.transport(`${this.baseUrl}/stores/${encodeURIComponent(this.storeId)}/${path}`, {
       method: "POST",
       headers: {
@@ -95,6 +126,10 @@ export class RemoteFgaAdapter {
         throw new Error("Invalid OpenFGA read response");
       }
       for (const entry of page.tuples) {
+        if (this.orgId && record(entry) && record(entry.key)) {
+          for (const key of ["user", "object"]) if (typeof entry.key[key] === "string")
+            entry.key[key] = (entry.key[key] as string).replace(":" + encodeURIComponent(this.orgId) + "/", ":");
+        }
         const key = record(entry) ? entry.key : undefined;
         if (!record(key) || typeof key.user !== "string" || typeof key.relation !== "string" ||
           key.object !== object) throw new Error("Invalid OpenFGA tuple");
@@ -125,6 +160,10 @@ export class RemoteFgaAdapter {
         ...(batchWrites.length ? { writes: { tuple_keys: batchWrites } } : {})
       });
     }
+  }
+
+  restoreGrants(grants: DocumentGrant[]): void {
+    for (const grant of grants) this.grants.set(grant.docId, structuredClone(grant));
   }
 
   /** Reconcile direct and group document grants; keep local source and tier policy. */

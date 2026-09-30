@@ -1,21 +1,20 @@
-# Web sign-in configuration
+# Web sign-in
 
-`auth-config.json` is public and has exactly these fields:
+Configure this public file for your actual tenant; never add a secret:
 
 ```json
 {
   "issuer": "https://YOUR_TENANT.auth0.com/",
-  "clientId": "YOUR_PUBLIC_SPA_CLIENT_ID",
-  "audience": "YOUR_API_IDENTIFIER"
+  "clientId": "YOUR_SPA_CLIENT_ID",
+  "audience": "YOUR_API_IDENTIFIER",
+  "organization": "org_COMPANY_A",
+  "apiUrl": "https://YOUR_API_HOST",
+  "demo": false
 }
 ```
 
-Use an Auth0 **Single Page Application** with Authorization Code + PKCE enabled. `issuer` must be an HTTPS origin with a trailing `/` and no path, query, credentials, or fragment. `clientId` is the public application ID. `audience` is the API identifier configured for the access token and must match the API's `AUTH0_AUDIENCE`. No client secret belongs in this file.
+The login page offers **Sign in with SSO** using Authorization Code with PKCE, state and signed ID-token nonce validation. Access tokens are kept in session storage. Expired tokens require signing in again. Register the exact callback and logout paths used: `/`, `/index.html`, `/login.html`; register the web origin too. API Auth0 issuer/audience/organization values must match. The API reads active status, roles and platform identities from Supabase.
 
-For the default local web server at `http://127.0.0.1:3001`, register `http://127.0.0.1:3001/` as an **Allowed Callback URL** and **Allowed Logout URL**, and `http://127.0.0.1:3001` as an **Allowed Web Origin** in the Auth0 application. The callback URL is the current page's origin and pathname; if the app is served at another pathname, register that exact URL instead. Configure the API with the same issuer and audience and an Auth0 user mapping so `/v1/me` can return the signed-in role.
+For the local fixture demo only, leave issuer/clientId/audience blank and set `demo: true`; the API independently requires `ALLOW_DEMO_AUTH=true` outside production. Partial or invalid configuration fails closed.
 
-With all three fields empty, the web app keeps the demo user switcher. The API must have `ALLOW_DEMO_AUTH=true` for that mode. A partially filled or invalid configuration displays an error and does not fall back to the demo switcher.
-
-The browser requests `openid profile`, exchanges the code with its PKCE verifier, validates state and the signed ID token (including nonce), and keeps only the access token in `sessionStorage` until expiration or logout. API calls use `Authorization: Bearer ...`; `/v1/me` supplies the role used by the UI. Register the API's web origin and allow the `Authorization` request header for browser calls.
-
-Flow reference: [Auth0 Authorization Code Flow with PKCE](https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce/add-login-using-the-authorization-code-flow-with-pkce).
+See [server and source setup](../../docs/live-sources-and-sign-in.md).

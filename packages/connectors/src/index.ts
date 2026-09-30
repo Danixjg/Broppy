@@ -9,7 +9,10 @@ export type Change = {
   cursor: number;
 };
 
+export interface ImportScope { containers?: string[]; ids?: string[]; since?: string; }
+
 export interface Connector {
+  discover(scope?: ImportScope): Promise<string[]>;
   readonly source: Source;
   listItems(): Promise<SourceDocument[]>;
   listIds(): Promise<string[]>;
@@ -25,7 +28,7 @@ export interface Connector {
 }
 
 export function nativeAllows(user: User, permission: SourcePermission): boolean {
-  if (user.contractor) return false;
+  if (user.contractor && !permission.users.includes(user.email)) return false;
   const brainAllows = permission.public ||
     permission.users.includes(user.email) ||
     permission.groups.some(group => user.groups.includes(group));
@@ -36,7 +39,7 @@ export function nativeAllows(user: User, permission: SourcePermission): boolean 
   if (!email) return false;
   switch (native.source) {
     case "slack":
-      return native.visibility === "public" || native.members.includes(email);
+      return (!user.contractor && native.visibility === "public") || native.members.includes(email);
     case "jira":
       return native.projectViewers.includes(email) &&
         (!native.issueViewers || native.issueViewers.includes(email));
@@ -96,6 +99,13 @@ export class MockConnector implements Connector {
       this.docs.set(doc.docId, copy(doc));
       this.emit(doc.docId, "content");
     }
+  }
+
+  async discover(scope: ImportScope = {}): Promise<string[]> {
+    return [...this.docs.values()].filter(doc => (!scope.containers?.length || scope.containers.includes(
+      doc.metadata.space ?? doc.metadata.project ?? (doc.permissions.native?.source === "slack" ? doc.permissions.native.channelId :
+        doc.permissions.native?.source === "jira" ? doc.permissions.native.projectKey : doc.permissions.native?.source === "confluence" ? doc.permissions.native.spaceKey : doc.sourceNativeId))) && (!scope.ids?.length || scope.ids.includes(doc.sourceNativeId)) &&
+      (!scope.since || doc.updatedAt >= scope.since)).map(doc => doc.docId);
   }
 
   async listItems(): Promise<SourceDocument[]> {

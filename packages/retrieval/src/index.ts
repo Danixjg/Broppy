@@ -70,6 +70,7 @@ function semanticCosine(a: number[], b: number[]): number {
 export function chunk(doc: SourceDocument): SourceChunk[] {
   const paragraphs = doc.content.match(/[\s\S]{1,900}(?:\s|$)/g) ?? [doc.content];
   return paragraphs.map((text, index) => ({
+    orgId: doc.orgId,
     chunkId: `${doc.docId}:${index}`,
     docId: doc.docId,
     text: text.trim(),
@@ -81,6 +82,19 @@ export class HybridIndex {
   readonly documents = new Map<string, IndexedDocument>();
   private readonly semanticVectors = new Map<string, Map<string, number[]>>();
   embeddingRefreshes = 0;
+
+  semanticSnapshot(): Array<[string, Array<[string, number[]]>]> {
+    return [...this.semanticVectors].map(([docId, vectors]) => [docId, [...vectors].map(([id, vector]) => [id, [...vector]])]);
+  }
+
+  restoreSemantic(snapshot: Array<[string, Array<[string, number[]]>]>): void {
+    for (const [docId, vectors] of snapshot) {
+      const doc = this.documents.get(docId);
+      if (!doc || doc.deletedAt) continue;
+      if (vectors.some(([id, vector]) => !doc.chunks.some(chunk => chunk.chunkId === id) || !validSemanticVector(vector))) throw new Error("Invalid stored vectors");
+      this.semanticVectors.set(docId, new Map(vectors));
+    }
+  }
 
   upsert(source: SourceDocument): { contentChanged: boolean; permissionChanged: boolean } {
     const previous = this.documents.get(source.docId);

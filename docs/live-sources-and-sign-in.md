@@ -1,51 +1,59 @@
-# Supabase sign-in and live sources
+# Auth0, durable storage and live sources
 
-The default demo still runs from local fixtures. To use real source data, configure Supabase Auth and all four source entries before starting the API. The API polls explicitly listed source IDs every five minutes and checks the requesting user's delegated source credential again during retrieval and before returning an answer.
+Auth0 validates identity; Supabase `workspace_users` supplies active status, organization, role, groups and platform identities. Supabase password login has been removed. The local demo remains available only with the explicit demo switches.
 
-## Supabase users
+## Setup
 
-1. Apply `infra/supabase/migrations/002_workspace_users.sql` to the chosen Supabase project after migration `001_initial.sql` if using Supabase search. Auth alone requires only migration `002`.
-2. Set `SUPABASE_AUTH_URL` to the HTTPS project origin, `SUPABASE_AUTH_SECRET_KEY` to the server secret key, and `SUPABASE_AUTH_PUBLISHABLE_KEY` to the browser publishable key. Keep the secret key on the API host.
-3. Set `MOCK_USER_PASSWORDS_JSON` to a JSON object mapping `ravi`, `maya`, `alex`, `david`, `nur`, and `wei` to distinct passwords of at least 12 characters. Run `pnpm exec tsx data/seed-supabase-users.ts`. This creates or updates the six demo profiles in Supabase Auth and `workspace_users`. The seed is idempotent for existing email addresses; it does not reset existing passwords.
-4. Set `apps/web/auth-config.json` to `{ "issuer": "", "clientId": "", "audience": "", "supabase": { "url": "https://YOUR-PROJECT.supabase.co", "publishableKey": "YOUR-PUBLISHABLE-KEY" } }` and open `/login.html`. The browser uses the publishable key. Auth0 configuration and Supabase configuration are mutually exclusive.
+1. Create an Auth0 RS256 API and SPA, enable Organizations, create Company A, and enable the required database and SSO connections. Use access tokens lasting 5–15 minutes. Register the web origin and exact callback/logout paths (`/`, `/index.html`, `/login.html`) used by your deployment.
+2. Apply SQL migrations `001` through `005` in order to Supabase. Migration `003` retains nullable legacy Supabase Auth IDs and keys memberships by organization and `user_id`. Migrations `004` and `005` require pgvector and Vault respectively. Existing indexed demo rows are assigned `demo-company-a`; reimport under the actual Auth0 organization before live use. Existing persisted audit rows without complete payloads require a separately verified migration; startup refuses to silently invent their history.
+3. Set `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `AUDIT_SIGNING_KEY_FILE` (an Ed25519 PEM private key). Keep keys on the API host. The directory and persistence work without an embedding service. Adding `HUNYUAN_EMBEDDING_API_KEY` enables the Supabase hybrid search index.
+4. Provision the six identities with `pnpm exec tsx data/seed-auth0-users.ts`. Also set `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET`, `AUTH0_DATABASE_CONNECTION`, and `MOCK_USER_PASSWORDS_JSON`. The M2M application needs Management API permissions to read/create users and add organization members. Existing accounts are reused; passwords are not reset. The `.example` fixture emails must be replaced with real matching platform emails for live integration.
+5. Fill the public `apps/web/auth-config.json`: `issuer`, `clientId`, `audience`, `organization`, `apiUrl`, and `demo: false`. No server key or client secret belongs here. Open `/login.html` and choose **Sign in with SSO**.
+6. Configure `HOST`, `PORT`, `API_ORIGIN` and `WEB_ORIGIN` for deployment. The web `apiUrl` can be an HTTPS API origin or empty for a same-origin reverse proxy.
 
-The API reads roles, groups, and source identity mappings from the server-only profile table on token validation, including a final validation before returning generated text. The browser cannot query that table. Existing browser sessions can be invalidated by removing their profile; new accounts added after API startup require a restart so ingestion can evaluate them. Source permission grants still require a valid delegated source credential.
+Each API process serves one `AUTH0_ORG_ID`. Tokens for another organization are rejected; directory reads, storage and FGA tuple IDs are organization scoped. Run a separate process per organization and one writer per organization. Directory membership keys are organization scoped. This deployment model does not automatically provision or route new organizations.
 
-## Live source configuration
+Directory validation runs again before an answer is returned. Setting `active=false` therefore blocks existing browser tokens immediately at the API. New directory identities require a restart to join the live ingestion user list. OAuth connection callbacks also revalidate the initiating administrator.
 
-Set `LIVE_SOURCES_JSON` on the API host to a JSON object with **all four** keys: `slack`, `jira`, `confluence`, and `drive`. Each entry has `ids`, `serviceAuthorization`, and `userAuthorizations`, keyed by the six workspace user IDs. Jira and Confluence also need an HTTPS `baseUrl` such as `https://example.atlassian.net`. The service credential reads content during ingestion; each user's credential is used for a fresh provider read to establish access. Use secrets from a server-side secret store or protected environment file; never put these values in `auth-config.json`.
+## Connect sources
+
+The admin view links to `/connectors.html`. It shows connection status, counts, last sync, scope, import progress and missing directory identity mappings. The local **Onboard Company A** action imports all four mock sources in the background. Imports checkpoint after each item, report indexed/skipped/failed counts, resume failed pending IDs during polling, and emit connection/import audit events. Answers carry an import completeness notice.
+
+`SOURCE_OAUTH_JSON` enables live OAuth connections, for example:
 
 ```json
 {
-  "slack": {
-    "ids": ["C0123456789"],
-    "serviceAuthorization": "Bearer SERVICE_TOKEN",
-    "userAuthorizations": { "ravi": "Bearer RAVI_TOKEN" }
+  "drive": {
+    "clientId": "GOOGLE_CLIENT_ID",
+    "clientSecret": "SERVER_SECRET",
+    "scopes": ["openid", "email", "https://www.googleapis.com/auth/drive.readonly"]
   },
   "jira": {
-    "baseUrl": "https://example.atlassian.net",
-    "ids": ["PAY-101"],
-    "serviceAuthorization": "Bearer SERVICE_TOKEN",
-    "userAuthorizations": { "ravi": "Bearer RAVI_TOKEN" }
-  },
-  "confluence": {
-    "baseUrl": "https://example.atlassian.net",
-    "ids": ["123456789"],
-    "serviceAuthorization": "Bearer SERVICE_TOKEN",
-    "userAuthorizations": { "ravi": "Bearer RAVI_TOKEN" }
-  },
-  "drive": {
-    "ids": ["GOOGLE_FILE_ID"],
-    "serviceAuthorization": "Bearer SERVICE_TOKEN",
-    "userAuthorizations": { "ravi": "Bearer RAVI_TOKEN" }
+    "clientId": "ATLASSIAN_CLIENT_ID",
+    "clientSecret": "SERVER_SECRET",
+    "baseUrl": "https://company.atlassian.net",
+    "cloudId": "ATLASSIAN_CLOUD_ID",
+    "scopes": ["read:jira-work", "read:me", "offline_access"]
   }
 }
 ```
 
-Each Authorization value must be a complete provider-supported header value, such as `Bearer ...`. Create provider apps and grant the required read permissions in each organization. Slack needs `conversations.info` and `conversations.history` access for the listed channels; Jira needs issue read access; Confluence needs page read access; Drive needs file metadata plus text export or media access. Google Docs and `text/*` Drive files are indexed; other binary files are skipped. Slack indexes the latest 100 returned messages per listed channel. IDs are explicit: discovery, pagination, OAuth consent and token refresh are not implemented. Credentials must be maintained outside the app. Access checks fail closed if the provider denies access or a request fails. Do not enable live mode until the four entries and delegated credentials are ready.
+Register `${API_ORIGIN}/v1/admin/connections/SOURCE/callback` with each provider. Confluence uses an Atlassian app with Confluence read scopes and its `cloudId`. Slack uses a Slack OAuth v2 app and **user** read scopes for conversations, history, replies and `users:read.email`; only channels visible to that credential are imported. The callback verifies the connected account email against the administrator's directory identity. Tokens and refresh tokens are stored in Supabase Vault; API responses and state snapshots contain no tokens. Source OAuth state expires after ten minutes and is single use; restarting the API cancels pending authorization flows. Google uses PKCE. Tokens with no refresh capability require reconnecting when expired.
 
-The application does not change permissions at these providers. Change access in Slack, Jira, Confluence, or Drive. The next query consults the provider again, and the final response check repeats access validation after generation. A provider change during the final network check can still race the return; the app cannot make an external ACL update and its HTTP response atomic.
+The connected administrator's user token can establish that administrator's source access. Other users still need their own delegated source credentials; no credential means no access. The settings people-matching list checks directory identity mappings, not credential availability. Domain-wide Google delegation and Auth0 Token Vault are not implemented. Do not infer that installing one app authorizes every employee.
+
+For explicitly managed credentials, use `LIVE_SOURCES_JSON` with all four source keys. Each entry accepts `ids`, `serviceAuthorization`, `userAuthorizations` keyed by workspace user ID, optional `discover: true`, and, for Atlassian, `baseUrl` and optional `cloudId`. Authorization values include the scheme, e.g. `Bearer ...`. Use either this mode or `SOURCE_OAUTH_JSON` per API process.
+
+Scope supports native item IDs, container IDs (Slack channels, Jira project keys, Confluence space IDs, shared Drive IDs), and a history start date. Empty scope means everything the credential can discover. Discovery paginates; Slack reads all history pages and thread replies. Jira imports current issue descriptions, Confluence current page bodies, and Drive Google Docs/text files. The date applies to Slack messages and to other items' last-updated timestamps; revision history, Jira comments and binary OCR are not imported. Retryable rate limits use bounded backoff; long delays leave a resumable error rather than claiming completion. Unreadable, empty and unsupported documents count as skipped. Disconnect purges local documents, grants, remote tuples, Supabase document/chunk rows and Vault credentials.
+
+## Persistence and audit
+
+The API checkpoints its index, grants, mock edits, source connections, import jobs and sync state. Structured cursor/run rows are updated alongside the state snapshot. Semantic vectors are restored with the index and rebuilt when absent or changed. Startup loads state, then starts polling/import work in the background; it does not await the initial full sync.
+
+Audit entries retain questions, answers, document IDs, source and space/project. Compliance search accepts `user`, `source`, `space`, `from`, `to`, or a plain-English query containing known user names, source/space names and ISO dates. Space/source filters include the related query and answer trace. This is a deterministic filter parser, not unrestricted language understanding.
+
+Supabase audit writes are ordered, idempotent and reject conflicting sequences. A failed audit flush prevents a successful query response. The database rejects UPDATE, DELETE and TRUNCATE of entries/batches. New hash entries use canonical data ordering to survive JSONB reordering. Signed Merkle batches include the preceding root. Independent write-once root anchoring remains the open infrastructure decision identified in the audit; signatures and triggers do not protect against a database owner replacing the entire database.
 
 ## OpenFGA
 
-If `FGA_*` variables select a remote OpenFGA service, install `infra/fga/model.fga` in that store and set `FGA_MODEL_ID` to the installed version. The model now contains `public_reader`; existing model versions must be updated before enabling this code. The local tier rule and source checks also apply.
+Install `infra/fga/model.fga` and set `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`. The OpenFGA SDK obtains and refreshes client-credentials tokens. Tuple subjects and objects include the organization namespace. Native Slack/Jira/Confluence/Drive permission shapes remain enforced in the connector layer, alongside tiers and fresh delegated source checks. A source-specific remote FGA schema remains a follow-up consideration; the current remote schema is the generic document intersection described in the audit.

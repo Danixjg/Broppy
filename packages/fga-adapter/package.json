@@ -6,6 +6,7 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@brain/connectors": "workspace:*",
-    "@brain/types": "workspace:*"
+    "@brain/types": "workspace:*",
+    "@openfga/sdk": "0.9.2"
   }
 }

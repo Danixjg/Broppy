@@ -12,7 +12,7 @@ export function parseAuthConfig(value) {
     throw new Error("Auth0 issuer must be an HTTPS origin ending in /.");
   }
   if (clientId !== clientId.trim() || audience !== audience.trim()) throw new Error("Auth0 configuration contains extra whitespace.");
-  return { issuer, clientId, audience };
+  return { issuer, clientId, audience, ...(value.organization ? { organization: value.organization } : {}) };
 }
 
 function randomUrlSafe() {
@@ -30,7 +30,7 @@ export async function startLogin(config) {
   const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   sessionStorage.setItem(FLOW_KEY, JSON.stringify({ verifier, state, nonce }));
   const url = new URL("authorize", config.issuer);
-  url.search = new URLSearchParams({ response_type: "code", client_id: config.clientId, redirect_uri: callbackUrl(), scope: "openid profile", audience: config.audience, state, nonce, code_challenge: challenge, code_challenge_method: "S256" }).toString();
+  url.search = new URLSearchParams({ response_type: "code", client_id: config.clientId, redirect_uri: callbackUrl(), scope: "openid profile", ...(config.organization ? { organization: config.organization } : {}), audience: config.audience, state, nonce, code_challenge: challenge, code_challenge_method: "S256" }).toString();
   location.assign(url.href);
 }
 

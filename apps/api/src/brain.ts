@@ -1,6 +1,7 @@
+import type { Persistence } from "./persistence.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
-import { loadMockCorpus, type MockConnector } from "@brain/connectors";
+import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { groundedOutput, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
 import type {
@@ -17,6 +18,11 @@ import type {
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 export class Brain {
+  readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string }>();
+  readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
+  readonly orgId: string;
+  private persistence?: Persistence;
+  private persistQueue: Promise<void> = Promise.resolve();
   readonly users: User[];
   readonly connectors: Record<Source, MockConnector>;
   readonly liveMode: boolean;
@@ -34,7 +40,9 @@ export class Brain {
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
+    this.orgId = options.orgId ?? "demo-company-a";
+    this.persistence = options.persistence;
     const fixture = loadMockCorpus();
     this.users = options.users ?? fixture.users;
     this.connectors = options.connectors ?? fixture.connectors;
@@ -44,7 +52,51 @@ export class Brain {
     this.remoteFga = options.remoteFga;
     this.embedding = options.embedding;
     this.supabase = options.supabase;
-    for (const source of sources) this.states.set(source, { source, cursor: 0 });
+    for (const source of sources) {
+      this.states.set(source, { source, cursor: 0 });
+      this.connections.set(source, { source, status: "Connected", scope: {} });
+    }
+  }
+
+  async restore(): Promise<void> {
+    const snapshot = await this.persistence?.loadState();
+    if (!snapshot) return;
+    if (snapshot.orgId !== this.orgId) throw new Error("State organization mismatch");
+    for (const doc of snapshot.documents) this.index.documents.set(doc.docId, doc);
+    this.fga.restore(snapshot.grants);
+    this.remoteFga?.restoreGrants(this.fga.snapshot().map(([docId, grant]) => ({ docId, ...grant })));
+    this.index.restoreSemantic(snapshot.semanticVectors ?? []);
+    for (const id of snapshot.remoteSynced ?? []) this.remoteSynced.add(id);
+    for (const id of snapshot.supabaseSynced ?? []) this.supabaseSynced.add(id);
+    for (const state of snapshot.states) this.states.set(state.source, state);
+    for (const run of snapshot.runs) this.runs.set(run.source, run);
+    for (const connection of snapshot.connections ?? []) this.connections.set(connection.source, connection);
+    for (const job of snapshot.jobs ?? []) this.jobs.set(job.source, job);
+    if (!this.liveMode && snapshot.connectorDocuments) {
+      for (const source of sources) {
+        this.connectors[source] = new MockConnector(source, snapshot.connectorDocuments.filter((doc: SourceDocument) => doc.source === source));
+        this.states.set(source, { source, cursor: 0 });
+      }
+    }
+    if (!this.liveMode && snapshot.users) this.users.splice(0, this.users.length, ...snapshot.users);
+  }
+
+  async persist(): Promise<void> {
+    const next = this.persistQueue.catch(() => undefined).then(async () => {
+      await this.audit.flush();
+      if (!this.persistence) return;
+      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources.map(source => this.connectors[source].listItems()))).flat();
+      await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
+        grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
+        remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
+        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], connectorDocuments });
+    });
+    this.persistQueue = next;
+    return next;
+  }
+
+  private assertOrg(user: User): void {
+    if ((user.orgId ?? "demo-company-a") !== this.orgId || user.active === false) throw new Error("Forbidden");
   }
 
   user(id: string): User | undefined {
@@ -57,7 +109,14 @@ export class Brain {
 
   async sync(source: Source): Promise<void> {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(() => this.syncSource(source));
+    const next = previous.catch(() => undefined).then(() => this.syncSource(source)).catch(async error => {
+      const connection = this.connections.get(source);
+      if (connection && connection.status !== "Not connected") connection.status = "Error";
+      const job = this.jobs.get(source);
+      if (job?.status === "running") { job.status = "failed"; job.error = error instanceof Error ? error.message : "Source discovery failed"; }
+      await this.persist();
+      throw error;
+    });
     const settled = next.catch(() => undefined).then(() => {
       if (this.syncQueues.get(source) === settled) this.syncQueues.delete(source);
     });
@@ -66,13 +125,16 @@ export class Brain {
   }
 
   private async syncSource(source: Source): Promise<void> {
+    if (this.connections.get(source)?.status === "Not connected") return;
     const connector = this.connectors[source];
     const state = this.states.get(source);
     if (!state) throw new Error("Unknown source");
+    const scoped = new Set(await connector.discover(this.connections.get(source)?.scope));
     let run = this.runs.get(source);
     if (!run || run.status === "complete") {
       const changed = await connector.listUpdatedSince(state.cursor);
-      const liveIds = new Set(await connector.listIds());
+      changed.ids = changed.ids.filter(id => scoped.has(id));
+      const liveIds = scoped;
       const missing = [...this.index.documents.values()]
         .filter(doc => doc.source === source && !liveIds.has(doc.docId) &&
           (!doc.deletedAt || this.remoteSynced.has(doc.docId) || this.supabaseSynced.has(doc.docId)))
@@ -85,14 +147,22 @@ export class Brain {
         status: "running"
       };
       this.runs.set(source, run);
+      if (!state.lastSuccessfulSyncAt && !this.jobs.has(source)) {
+        this.jobs.set(source, { source, status: "running", found: run.pendingIds.length, indexed: 0, skipped: 0, failed: 0, startedAt: new Date().toISOString() });
+        this.audit.append("import_started", "sync", { source, found: run.pendingIds.length });
+      }
     }
     this.runs.set(source, { ...run, status: "running" });
+    const resumedJob = this.jobs.get(source);
+    if (resumedJob?.status === "failed") { resumedJob.status = "running"; resumedJob.error = undefined; }
     try {
       while (run.pendingIds.length) {
         const id: string = run.pendingIds[0];
         const remaining = run.pendingIds.slice(1);
-        const doc = await connector.fetchDocument(id);
+        const doc = scoped.has(id) ? await connector.fetchDocument(id) : undefined;
+        const job = this.jobs.get(source);
         if (!doc) {
+          if (job?.status === "running") job.skipped++;
           const removed = this.index.tombstone(id);
           this.fga.remove(id);
           await this.remoteFga?.removeDocument(id);
@@ -101,7 +171,7 @@ export class Brain {
           if (deletedAt && this.supabaseSynced.has(id)) await this.supabase?.tombstone(id, deletedAt);
           this.supabaseSynced.delete(id);
           if (removed) {
-            this.audit.append("document_deleted", "sync", { docRef: auditRef(id), source });
+            this.audit.append("document_deleted", "sync", { ...this.auditDocument(id), source });
           }
         } else {
           // Read source permissions again before content enters either index.
@@ -112,6 +182,7 @@ export class Brain {
           if (!permissions || version !== doc.version || hash(permissions) !== hash(doc.permissions)) {
             throw new Error("Source changed during ingestion");
           }
+          doc.orgId = this.orgId;
           const result = this.index.upsert(doc);
           this.fga.upsert(doc);
           await this.persistSearch(doc.docId, result.contentChanged);
@@ -125,30 +196,129 @@ export class Brain {
             }
           }
           this.audit.append("document_synced", "sync", {
-            docRef: auditRef(id),
+            ...this.auditDocument(id),
             source,
             contentChanged: result.contentChanged,
             permissionChanged: result.permissionChanged
           });
         }
-        run = { ...run, checkpoint: id, pendingIds: remaining };
+        if (doc && job?.status === "running") job.indexed++;
+        run = { ...run, checkpoint: id, pendingIds: remaining, orgId: this.orgId };
         this.runs.set(source, run);
+        await this.persist();
       }
       this.states.set(source, {
-        ...state,
+        ...state, orgId: this.orgId,
         cursor: run.cursorTo,
         lastSuccessfulSyncAt: new Date().toISOString()
       });
       this.runs.set(source, { ...run, status: "complete" });
+      const job = this.jobs.get(source);
+      if (job?.status === "running") {
+        job.status = "complete"; job.finishedAt = new Date().toISOString();
+        this.audit.append("import_completed", "sync", { ...job });
+      }
+      const connection = this.connections.get(source);
+      if (connection) connection.status = "Live";
+      await this.persist();
     } catch (error: unknown) {
       this.runs.set(source, { ...run, status: "failed" });
+      const job = this.jobs.get(source);
+      if (job) { job.status = "failed"; job.failed++; job.error = error instanceof Error ? error.message : "Import failed"; }
+      const connection = this.connections.get(source);
+      if (connection) connection.status = "Error";
       this.audit.append("sync_failed", "sync", { source, checkpointRef: run.checkpoint ? auditRef(run.checkpoint) : undefined });
+      await this.persist();
       throw error;
     }
   }
 
+  async connect(actor: User, source: Source): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.liveMode) throw new Error("Live OAuth setup is required");
+    this.connections.set(source, { source, status: "Connected", scope: {}, connectedBy: actor.id, connectedAt: new Date().toISOString() });
+    this.audit.append("connection_created", actor.id, { source });
+    await this.persist();
+  }
+
+  async setScope(actor: User, source: Source, scope: ImportScope): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.syncQueues.has(source)) throw new Error("Sync running; retry scope change");
+    this.connections.get(source)!.scope = scope;
+    // Scope narrowing is applied immediately to local access. Background sync purges remote data.
+    const keep = new Set(await this.connectors[source].discover(scope));
+    for (const doc of this.index.documents.values()) if (doc.source === source && !keep.has(doc.docId)) {
+      this.index.tombstone(doc.docId); this.fga.remove(doc.docId);
+      await this.remoteFga?.removeDocument(doc.docId);
+      if (this.supabase) await this.supabase.purge(doc.docId);
+      this.remoteSynced.delete(doc.docId); this.supabaseSynced.delete(doc.docId);
+    }
+    this.runs.delete(source);
+    this.states.set(source, { source, cursor: 0 });
+    await this.persist();
+  }
+
+  async startImport(actor: User, source: Source): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.syncQueues.has(source) || this.jobs.get(source)?.status === "running") return;
+    if (this.connections.get(source)?.status === "Not connected") throw new Error("Connect source first");
+    this.jobs.set(source, { source, status: "running", found: 0, indexed: 0, skipped: 0, failed: 0, startedAt: new Date().toISOString() });
+    this.connections.get(source)!.status = "Importing";
+    this.audit.append("import_started", actor.id, { source });
+    const next = Promise.resolve().then(async () => {
+      await this.persist();
+      const ids = await this.connectors[source].discover(this.connections.get(source)?.scope);
+      const changed = await this.connectors[source].listUpdatedSince(0);
+      this.runs.set(source, { source, cursorFrom: 0, cursorTo: changed.cursor, pendingIds: ids, status: "running" });
+      this.jobs.get(source)!.found = ids.length;
+      await this.persist();
+      await this.syncSource(source);
+    }).catch(async error => {
+      const job = this.jobs.get(source)!;
+      job.status = "failed"; job.error = error instanceof Error ? error.message : "Import failed";
+      this.connections.get(source)!.status = "Error";
+      await this.persist();
+    });
+    const settled = next.catch(() => undefined).then(() => {
+      if (this.syncQueues.get(source) === settled) this.syncQueues.delete(source);
+    });
+    this.syncQueues.set(source, settled);
+  }
+
+  async disconnect(actor: User, source: Source): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    this.connections.get(source)!.status = "Not connected";
+    await this.syncQueues.get(source);
+    for (const doc of [...this.index.documents.values()]) if (doc.source === source) {
+      this.fga.remove(doc.docId);
+      this.index.tombstone(doc.docId);
+      await this.remoteFga?.removeDocument(doc.docId);
+      await this.supabase?.purge(doc.docId);
+      this.remoteSynced.delete(doc.docId); this.supabaseSynced.delete(doc.docId);
+      this.index.documents.delete(doc.docId);
+    }
+    this.runs.delete(source); this.jobs.delete(source);
+    this.states.set(source, { source, cursor: 0 });
+    this.connections.get(source)!.status = "Not connected";
+    this.audit.append("connection_removed", actor.id, { source });
+    await this.persist();
+  }
+
+  importNotice(): string | undefined {
+    const jobs = [...this.jobs.values()].filter(job => job.status === "running");
+    if (!jobs.length) return undefined;
+    const total = jobs.reduce((n,j) => n + j.found, 0);
+    const done = jobs.reduce((n,j) => n + j.indexed + j.skipped, 0);
+    return `Import ${total ? Math.floor(100 * done / total) : 0}% complete — answers may be missing older material`;
+  }
+
   async query(user: User, question: string, onTrace?: (traceId: string) => void,
     revalidateUser?: () => Promise<User | undefined>): Promise<QueryAnswer> {
+    this.assertOrg(user);
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
     const traceId = randomUUID();
@@ -156,7 +326,8 @@ export class Brain {
     onTrace?.(traceId);
     const audit = (type: string, data: Record<string, unknown>) =>
       this.audit.append(type, user.id, { traceId, ...data });
-    audit("query_received", { questionHash: hashQuestion(trimmed) });
+    audit("query_received", { question: trimmed, questionHash: hashQuestion(trimmed) });
+    await this.audit.flush();
 
     let queryVector: number[] | undefined;
     if (this.embedding) {
@@ -179,7 +350,7 @@ export class Brain {
     audit("candidates_found", { count: candidateDocIds.length });
     for (const candidate of candidates) {
       audit("candidate_ranked", {
-        docRef: auditRef(candidate.docId),
+        ...this.auditDocument(candidate.docId),
         chunkRef: auditRef(candidate.chunkId),
         score: Number(candidate.score.toFixed(4))
       });
@@ -195,7 +366,7 @@ export class Brain {
     });
     for (const decision of decisions) {
       audit("access_decision", {
-        docRef: auditRef(decision.docId),
+        ...this.auditDocument(decision.docId),
         allowed: decision.allowed,
         reason: decision.reason
       });
@@ -216,7 +387,7 @@ export class Brain {
       const indexedVersion = this.index.documents.get(candidate.docId)?.version;
       const doc = await this.liveAuthorizedDocument(user, candidate.docId);
       audit("live_access_decision", {
-        docRef: auditRef(candidate.docId), allowed: Boolean(doc),
+        ...this.auditDocument(candidate.docId), allowed: Boolean(doc),
         ...(doc ? { sourceVersion: doc.version, refreshed: doc.version !== indexedVersion } : {})
       });
       if (!doc) continue;
@@ -238,6 +409,7 @@ export class Brain {
 
     if (!context.length) return this.noResult(user, traceId);
     audit("context_sent", { chunkIds: [...citationMap.keys()] });
+    await this.audit.flush();
     const generated = await this.llm.generate(context, trimmed);
     const answer = groundedOutput(generated, citationMap,
       new Map(context.map(item => [item.citation, item.text])));
@@ -261,10 +433,12 @@ export class Brain {
         this.index.documents.get(citation.docId)?.chunks.some(item =>
           item.chunkId === citation.chunkId &&
           item.text === context.find(part => part.citation === citation.chunkId)?.text));
-      audit("output_access_decision", { docRef: auditRef(citation.docId), allowed });
+      audit("output_access_decision", { ...this.auditDocument(citation.docId), allowed });
       if (!allowed) return this.noResult(user, traceId);
     }
     audit("answer_returned", {
+      answer: answer.text,
+      documents: answer.citations.map(citation => this.auditDocument(citation.docId)),
       citationIds: answer.citations.map(citation => citation.chunkId),
       empty: answer.text === NO_RESULT
     });
@@ -273,6 +447,7 @@ export class Brain {
 
   async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
     const visible: Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
+    this.assertOrg(user);
     for (const doc of this.index.documents.values()) {
       if (doc.deletedAt || !this.fga.check(user, doc.docId).allowed) continue;
       if (!await this.liveAuthorizedDocument(user, doc.docId)) continue;
@@ -296,13 +471,15 @@ export class Brain {
   }
 
   async narrowTier(actor: User, docId: string, tier: Tier): Promise<void> {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     this.remoteFga?.narrowTier(docId, tier);
     this.fga.narrowTier(docId, tier);
-    this.audit.append("tier_narrowed", actor.id, { docRef: auditRef(docId), tier });
+    this.audit.append("tier_narrowed", actor.id, { ...this.auditDocument(docId), tier });
   }
 
   async setNativePermissions(actor: User, docId: string, permissions: SourcePermission): Promise<void> {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live source permissions must be changed at the source");
     if (!isValidPermission(permissions)) throw new Error("Invalid permissions");
@@ -313,10 +490,11 @@ export class Brain {
     }
     connector.updatePermissions(docId, permissions);
     await this.sync(connector.source);
-    this.audit.append("native_permission_changed", actor.id, { docRef: auditRef(docId) });
+    this.audit.append("native_permission_changed", actor.id, { ...this.auditDocument(docId) });
   }
 
   removeUserFromGroup(actor: User, userId: string, group: string): void {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live group membership must be changed at the identity provider");
     const target = this.user(userId);
@@ -327,6 +505,7 @@ export class Brain {
   }
 
   async removeSlackMember(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live channel membership must be changed in Slack");
     const target = this.user(userId);
@@ -342,10 +521,11 @@ export class Brain {
       native: { ...native, members: native.members.filter(member => member !== identity) }
     });
     await this.sync("slack");
-    this.audit.append("channel_membership_removed", actor.id, { docRef: auditRef(docId), userId });
+    this.audit.append("channel_membership_removed", actor.id, { ...this.auditDocument(docId), userId });
   }
 
   async editContent(actor: User, docId: string, content: string): Promise<void> {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live content must be edited at the source");
     if (!content.trim() || content.length > 50_000) throw new Error("Invalid content");
@@ -356,6 +536,7 @@ export class Brain {
   }
 
   async previewAccess(actor: User, targetUserId: string): Promise<{ user: User; documents: Awaited<ReturnType<Brain["visibleDocuments"]>>; reasons: Record<string, string[]> }> {
+    this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     const target = this.user(targetUserId);
     if (!target) throw new Error("Unknown user");
@@ -389,7 +570,7 @@ export class Brain {
       const deletedAt = this.index.documents.get(docId)?.deletedAt;
       if (deletedAt && this.supabaseSynced.has(docId)) await this.supabase?.tombstone(docId, deletedAt);
       this.supabaseSynced.delete(docId);
-      this.audit.append("document_deleted", "query", { docRef: auditRef(docId) });
+      this.audit.append("document_deleted", "query", { ...this.auditDocument(docId) });
       return undefined;
     }
     if (indexed && version === indexed.version) {
@@ -407,12 +588,13 @@ export class Brain {
             throw error;
           }
         }
-        this.audit.append("live_permission_refresh", "query", { docRef: auditRef(docId) });
+        this.audit.append("live_permission_refresh", "query", { ...this.auditDocument(docId) });
       }
       return indexed;
     }
     const doc = await connector.fetchDocument(docId);
     if (doc) {
+      doc.orgId = this.orgId;
       const result = this.index.upsert(doc);
       this.fga.upsert(doc);
       await this.persistSearch(docId, result.contentChanged);
@@ -426,7 +608,7 @@ export class Brain {
         }
       }
       this.audit.append("live_refresh", "query", {
-        docRef: auditRef(docId),
+        ...this.auditDocument(docId),
         version: doc.version,
         contentChanged: result.contentChanged,
         permissionChanged: result.permissionChanged
@@ -458,6 +640,7 @@ export class Brain {
 
   private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
+    if (this.connections.get(connector.source)?.status === "Not connected") return undefined;
     if (!await connector.checkAccess(user, docId)) {
       const indexed = this.index.documents.get(docId);
       const permissions = await connector.fetchPermissions(docId);
@@ -498,8 +681,16 @@ export class Brain {
   }
 
   private noResult(user: User, traceId: string): QueryAnswer {
-    this.audit.append("answer_returned", user.id, { traceId, citationIds: [], empty: true });
+    this.audit.append("answer_returned", user.id, { traceId, answer: NO_RESULT, citationIds: [], empty: true });
     return { text: NO_RESULT, citations: [] };
+  }
+
+  private auditDocument(docId: string): Record<string, unknown> {
+    const doc = this.index.documents.get(docId);
+    const native = doc?.permissions.native;
+    return { docRef: auditRef(docId), docId, source: doc?.source ?? docId.split(":")[0],
+      space: doc?.metadata.space ?? (native?.source === "confluence" ? native.spaceKey : undefined),
+      project: doc?.metadata.project ?? (native?.source === "jira" ? native.projectKey : undefined) };
   }
 
   private connector(docId: string): MockConnector {
