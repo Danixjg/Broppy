@@ -14,3 +14,7 @@ apps/web/public/workspace/
 !**/.env.example
 apps/web/next-env.d.ts
 *.pem
+
+# Local working notes (never committed)
+handoff.md
+plans.md

@@ -81,6 +81,15 @@ Each entry records the options that were considered, what was chosen, and the tr
 ### D9 — Decision log
 - **Chosen:** keep this file, `decisions.md`, at the repository root, for teammates and future sessions.
 
+### D10 — Branch for this work
+- **Options:** `fix/auth0-wiring` / `feat/auth0-sso` / commit straight onto `main`.
+- **Chosen:** `fix/auth0-wiring`, branched from `main` at `4225f5c`. It is not pushed yet; when to push is a separate
+  decision.
+
+### D11 — Local working notes stay out of git
+- **Chosen:** `handoff.md` and `plans.md` are local notes for handing work over between sessions and teammates. Both
+  are listed in `.gitignore` and are never committed.
+
 ### Implementation details (approved with the plan)
 - `package.json`: `"dev:sso": "tsx --env-file=.env.local apps/api/src/server.ts"`. A missing file fails loudly.
 - `.env.example` is split into a web section and an API section. It adds `AUTH0_ISSUER`, `SUPABASE_URL`,
