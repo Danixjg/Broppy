@@ -590,7 +590,7 @@ $("queryForm").addEventListener("submit", async event => {
 });
 $("catchUp").addEventListener("click", async () => {
   const target = $("catchUpResult");
-  try { await ask("Summarize the current payment migration status, PAY-101, SEC-44, and cutover decisions for a new intern. Cite accessible sources only.", target); }
+  try { await ask("Summarize the current payment migration status, PAY-101, SEC-44, cutover decisions and the chargeback workflow for a new intern. Cite accessible sources only.", target); }
   catch (error) { target.textContent = error.message; }
 });
 $("contentForm").addEventListener("submit", event => { event.preventDefault(); adminAction("/v1/admin/content", { docId: $("adminDoc").value, content: $("adminContent").value }, "Content updated and synced."); });

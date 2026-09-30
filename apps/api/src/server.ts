@@ -312,7 +312,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (user.role !== "compliance") return await reply(response, 403, { error: "Forbidden" });
         const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
         if (query.length > 200) throw new Error("Invalid query");
-        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users));
+        const documents = [...brain.index.documents.values()].map(doc => ({ docId: doc.docId, title: doc.title }));
+        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents));
       }
 
       if (url.pathname === "/v1/audit/seal" && request.method === "POST") {

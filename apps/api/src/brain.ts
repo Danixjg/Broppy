@@ -340,7 +340,9 @@ export class Brain {
     let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
       try {
-        const remote = await this.supabase.search(trimmed, queryVector, 30);
+        // Remote ranking may only reorder chunks that pass the local relevance gate.
+        const relevant = new Set(localCandidates.map(item => item.chunkId));
+        const remote = (await this.supabase.search(trimmed, queryVector, 30)).filter(item => relevant.has(item.chunkId));
         const seen = new Set(remote.map(item => item.chunkId));
         candidates = [...remote, ...localCandidates.filter(item => !seen.has(item.chunkId))];
       }

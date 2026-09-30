@@ -51,10 +51,15 @@ describe("API authorization and trace", () => {
     expect(alex.status).toBe(200);
     expect(alex.body.documents.map((doc: { docId: string }) => doc.docId)).toEqual(["drive:steering-deck", "drive:chargeback-guide"]);
     expect(JSON.stringify(alex.body)).not.toContain("fraud-ops-private");
-    const catchUp = await request("/v1/query", "alex", {
+    const cutover = await request("/v1/query", "alex", {
       method: "POST", body: JSON.stringify({ question: "Summarize cutover decisions for a new intern." })
     });
-    expect(catchUp.body.citations.map((item: { docId: string }) => item.docId)).toEqual(["drive:steering-deck", "drive:chargeback-guide"]);
+    expect(cutover.body.citations.map((item: { docId: string }) => item.docId)).toEqual(["drive:steering-deck"]);
+    const catchUp = await request("/v1/query", "alex", {
+      method: "POST", body: JSON.stringify({ question: "Summarize cutover decisions and the chargeback workflow for a new intern." })
+    });
+    expect(catchUp.body.citations.map((item: { docId: string }) => item.docId).sort())
+      .toEqual(["drive:chargeback-guide", "drive:steering-deck"]);
     expect(ravi.body.documents.some((doc: { docId: string }) => doc.docId === "jira:PAY-101")).toBe(true);
     expect(ravi.body.documents.find((doc: { docId: string }) => doc.docId === "jira:PAY-101").content)
       .toContain("PAY-101");

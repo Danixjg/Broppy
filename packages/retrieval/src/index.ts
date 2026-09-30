@@ -17,13 +17,46 @@ const synonyms: Record<string, string[]> = {
 
 export function terms(text: string): string[] {
   const raw = text.toLowerCase().match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
-  return raw.flatMap(term => [term, ...(synonyms[term] ?? [])]);
+  return raw.flatMap(term => [term, ...(Object.hasOwn(synonyms, term) ? synonyms[term] : [])]);
+}
+
+// Words that carry no topic. Matching them made every document look relevant to every question.
+const STOPWORDS = new Set([
+  "about", "after", "all", "also", "an", "and", "any", "anything", "are", "as", "at", "be", "been", "before", "being",
+  "both", "but", "by", "can", "could", "describe", "did", "do", "does", "each", "everything", "explain", "find", "for",
+  "from", "get", "give", "had", "has", "have", "he", "her", "here", "his", "how", "if", "in", "into", "is", "it", "its",
+  "just", "list", "me", "more", "most", "my", "no", "not", "of", "on", "or", "our", "out", "please", "regarding",
+  "related", "she", "should", "show", "so", "some", "something", "such", "summarise", "summarize", "tell", "than",
+  "that", "the", "their", "them", "then", "there", "these", "they", "this", "those", "to", "up", "us", "was", "we",
+  "were", "what", "when", "where", "which", "who", "whom", "why", "will", "with", "would", "you", "your",
+  // Time words narrow a question; they are not its topic.
+  "ago", "current", "currently", "day", "days", "last", "latest", "month", "months", "now", "past", "recent",
+  "recently", "since", "today", "week", "weeks", "yesterday"
+]);
+
+/** Minimum semantic cosine that makes a chunk relevant without a shared topic term. */
+export const SEMANTIC_MIN = 0.35;
+
+/** A question's topic terms: its terms without stopwords or single characters. */
+export function queryTerms(text: string): string[] {
+  return [...new Set(terms(text).filter(term => term.length > 1 && !STOPWORDS.has(term)))];
+}
+
+function vectorOf(list: string[]): Record<string, number> {
+  const vector: Record<string, number> = {};
+  for (const term of list) vector[term] = (Object.hasOwn(vector, term) ? vector[term] : 0) + 1;
+  return vector;
 }
 
 export function embed(text: string): Record<string, number> {
-  const vector: Record<string, number> = {};
-  for (const term of terms(text)) vector[term] = (vector[term] ?? 0) + 1;
-  return vector;
+  return vectorOf(terms(text));
+}
+
+// A hyphenated question term also matches text that has all of its parts as separate words.
+function mentions(chunkTerms: Record<string, number>, term: string): boolean {
+  if (Object.hasOwn(chunkTerms, term)) return true;
+  const parts = term.split("-");
+  return parts.length > 1 && parts.every(part => Object.hasOwn(chunkTerms, part));
 }
 
 function cosine(a: Record<string, number>, b: Record<string, number>): number {
@@ -32,7 +65,7 @@ function cosine(a: Record<string, number>, b: Record<string, number>): number {
   let bNorm = 0;
   for (const [term, value] of Object.entries(a)) {
     aNorm += value * value;
-    dot += value * (b[term] ?? 0);
+    dot += value * (Object.hasOwn(b, term) ? b[term] : 0);
   }
   for (const value of Object.values(b)) bNorm += value * value;
   return aNorm && bNorm ? dot / Math.sqrt(aNorm * bNorm) : 0;
@@ -167,22 +200,24 @@ export class HybridIndex {
   }
 
   search(query: string, limit = 20, queryVector?: number[]): SearchCandidate[] {
-    const queryTerms = terms(query);
-    const sparseQueryVector = embed(query);
+    const topics = queryTerms(query);
+    const sparseQueryVector = vectorOf(topics);
     const semanticQueryVector = validSemanticVector(queryVector) ? queryVector : undefined;
     const results: SearchCandidate[] = [];
     for (const doc of this.documents.values()) {
       if (doc.deletedAt) continue;
       for (const item of doc.chunks) {
-        const haystack = `${doc.title} ${item.text}`.toLowerCase();
-        const keyword = queryTerms.length
-          ? queryTerms.filter(term => haystack.includes(term)).length / queryTerms.length
+        // Chunk terms include the title, so whole-word matching covers both.
+        const keyword = topics.length
+          ? topics.filter(term => mentions(item.embedding, term)).length / topics.length
           : 0;
         const semanticVector = semanticQueryVector ? this.semanticVectors.get(doc.docId)?.get(item.chunkId) : undefined;
-        const vector = semanticQueryVector && semanticVector
+        const semantic = semanticQueryVector && semanticVector
           ? semanticCosine(semanticQueryVector, semanticVector)
-          : cosine(sparseQueryVector, item.embedding);
-        if (keyword === 0 && vector <= 0) continue;
+          : undefined;
+        // Relevant means a shared topic term, or strong semantic similarity.
+        if (keyword === 0 && (semantic === undefined || semantic < SEMANTIC_MIN)) continue;
+        const vector = semantic ?? cosine(sparseQueryVector, item.embedding);
         const ageDays = Math.max(0, (Date.now() - Date.parse(doc.updatedAt)) / 86_400_000);
         const freshness = 1 / (1 + ageDays / 30);
         results.push({

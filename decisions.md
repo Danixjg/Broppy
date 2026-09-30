@@ -112,14 +112,70 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-09-30 — Roadmap to the submission
+
+- **Input:** the challenge brief and the `docs/` folder.
+- **How decided:** every option below was chosen explicitly in a planning session; none were defaulted.
+
+### D12 — Submission deadline
+- **Chosen:** the final submission is on Fri 16 Oct 2026. Work is planned back from a freeze on Thu 15 Oct.
+
+### D13 — What "the five scenarios" are
+- **Options:** take them from the challenge brief / infer them from the five-stage plan.
+- **Chosen:** the challenge brief's five scenarios. Each needs a worked example in the submission. The brief's example
+  user `jdoe` maps to our fixture users.
+
+### D14 — Order of work
+- **Options for the first track:** scenario fixes / dev-only demo mode / docs and diagrams / additional features.
+- **Chosen:** scenario fixes first: the relevance gate, the scenario 5 space match, and a document filter for audit
+  queries. The order of the later rounds is a recommendation kept in the local plan (`plans.md`, never committed),
+  and it can change.
+
+### D15 — Delivery while repository access is being set up
+- **Options:** push the current branch first, then branch per round / keep stacking commits locally.
+- **Chosen:** keep stacking commits on `fix/auth0-wiring`, with a patch backup after each round. Nothing is pushed
+  until the team says so.
+
+### D16 — Deployment
+- **Options:** repo plus a demo video / a running deployment / not sure yet.
+- **Chosen:** repo plus a demo video. There is no deployment round.
+
+### D17 — Hunyuan for the demo
+- **Options:** keys available / stay deterministic / not sure yet.
+- **Chosen:** not decided yet. Decide by Tue 6 Oct, before the worked examples are captured.
+
+### D18 — Intern catch-up after the relevance fix
+- **Context:** the chargeback guide reached the intern catch-up only through false keyword matches (the padding bug).
+  With the fix, a cutover-only question returns just the steering deck.
+- **Options:** ask about both topics / steering deck only until the role-aware catch-up / keep the old padding.
+- **Chosen:** ask about both. The catch-up question now also asks about the chargeback workflow, so interns get both
+  documents because both are relevant. Tests cover the cutover-only question and the combined one.
+
+### Implementation details (scenario fixes)
+- **Relevance gate** (`packages/retrieval/src/index.ts`):
+  - Questions are matched on topic terms: stopwords and single characters are dropped, and whole words must match
+    (substrings no longer count).
+  - A hyphenated term such as `payment-gateway` also matches text containing all of its parts.
+  - A chunk is a candidate only if it shares a topic term, or, with semantic vectors, reaches `SEMANTIC_MIN`
+    (0.35).
+  - The ranking weights (0.65 / 0.25 / 0.10) are unchanged.
+  - Supabase candidates pass through the same gate (`apps/api/src/brain.ts`).
+- **Word handling fix:** terms that are also object property names, such as "constructor" and "toString", used to
+  throw in `terms()` or produce NaN scores. They are now handled safely.
+- **Audit search** (`apps/api/src/audit-search.ts`):
+  - Sources and spaces are matched on whole words, preferring the longest space, so `payment-gateway` is no longer
+    read as `PAY`.
+  - A new document filter answers "who retrieved <doc>". It accepts a doc ID, a native key such as `PAY-101`, or a
+    full title.
+- **Tests:** `apps/api/src/scenarios.test.ts` holds the brief-aligned scenario suite; scenarios 3 and 5 are covered
+  now.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
 - **Dev-only demo mode:** bring back the persona switcher behind a flag in the Next.js host (audit v0.3 §4).
-- **Scenario 5 space match:** `apps/api/src/audit-search.ts` matches spaces by substring, so "payment-gateway"
-  filters to `PAY`.
-- **Relevance threshold:** unrelated accessible chunks pad answers. The intern and contractor should get the fixed
-  "nothing found" reply.
 - **Additional features:** Slack "ok" → Jira suggestion card; task → doc "Mark done"; latest-doc badge scoring;
   duplicate merge; intern catch-up; master page hard-coded to `PAY`.
 - **Brain as an MCP server:** not started.
