@@ -1,0 +1,50 @@
+# The Internal Brain APIs behind Caddy, which gets and renews HTTPS certificates automatically.
+# Demo only:        docker compose up -d --build
+# Demo and SSO:     docker compose --profile sso up -d --build
+# See README.md in this folder.
+
+x-api: &api
+  build:
+    context: ../..
+    dockerfile: infra/tencent/Dockerfile
+  image: internal-brain-api
+  restart: unless-stopped
+
+services:
+  # Public, mock data only: the API refuses to start in this mode next to any real identity or data setting.
+  demo-api:
+    <<: *api
+    environment:
+      PUBLIC_DEMO: "true"
+
+  # Real sign-in: Auth0 tokens, the Supabase directory and durable audit.
+  sso-api:
+    <<: *api
+    profiles: ["sso"]
+    env_file: sso.env
+    environment:
+      AUDIT_SIGNING_KEY_FILE: /run/secrets/audit-signing-key.pem
+    volumes:
+      # The long form fails when the key file is missing instead of creating an empty folder in its place.
+      - type: bind
+        source: ./audit-signing-key.pem
+        target: /run/secrets/audit-signing-key.pem
+        read_only: true
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DEMO_HOST: ${DEMO_HOST:?Set DEMO_HOST in .env}
+      SSO_HOST: ${SSO_HOST:?Set SSO_HOST in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
