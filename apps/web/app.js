@@ -2,7 +2,7 @@ import { narrowerPermissionError } from "./permissions.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
-const state = { docs: [], selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { docs: [], selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
@@ -51,7 +51,9 @@ async function call(path, options = {}) {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
     if (response.status === 401 && state.authMode !== "demo") {
-      state.me = null; updateAuthUi("Session expired. Log in again."); resetIdentity();
+      // The proxy marks an API rejection of a live session; anything else means the session is gone.
+      if (payload.code !== "account_rejected") state.signedIn = false;
+      state.me = null; updateAuthUi(error.message); resetIdentity();
     }
     throw error;
   }
@@ -90,7 +92,7 @@ function resetIdentity() {
   $("retrySync").hidden = role() !== "admin";
   setView("workspace");
   if (state.authMode === "demo" || state.me) loadWorkspace();
-  else $("workspaceNotice").textContent = "Log in to view your accessible documents.";
+  else $("workspaceNotice").textContent = state.signedIn ? "Your accessible documents are unavailable for this account." : "Log in to view your accessible documents.";
 }
 function updateAuthUi(message = "") {
   const signedInMode = state.authMode === "auth0";
@@ -98,8 +100,8 @@ function updateAuthUi(message = "") {
   $("user").disabled = signedInMode;
   $("authIdentity").hidden = !signedInMode;
   $("authName").textContent = state.me?.name || "";
-  $("loginButton").hidden = Boolean(state.me) || state.authMode !== "auth0";
-  $("logoutButton").hidden = !signedInMode || !state.me;
+  $("loginButton").hidden = state.signedIn || state.authMode !== "auth0";
+  $("logoutButton").hidden = !signedInMode || !state.signedIn;
   $("authStatus").hidden = !message;
   $("authStatus").textContent = message;
 }
@@ -110,6 +112,7 @@ async function initAuth() {
     const response = await fetch("/api/session", { cache: "no-store" });
     if (response.status === 401) { location.assign("/auth/login"); return; }
     if (!response.ok) throw new Error("SSO session is unavailable.");
+    state.signedIn = true;
     state.me = await call("/v1/me");
     if (!state.me || typeof state.me.id !== "string" || typeof state.me.name !== "string" || !Array.isArray(state.me.groups) || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
     updateAuthUi(); resetIdentity();
@@ -587,7 +590,7 @@ $("queryForm").addEventListener("submit", async event => {
 });
 $("catchUp").addEventListener("click", async () => {
   const target = $("catchUpResult");
-  try { await ask("Summarize the current payment migration status, PAY-101, SEC-44, and cutover decisions for a new intern. Cite accessible sources only.", target); }
+  try { await ask("Summarize the current payment migration status, PAY-101, SEC-44, cutover decisions and the chargeback workflow for a new intern. Cite accessible sources only.", target); }
   catch (error) { target.textContent = error.message; }
 });
 $("contentForm").addEventListener("submit", event => { event.preventDefault(); adminAction("/v1/admin/content", { docId: $("adminDoc").value, content: $("adminContent").value }, "Content updated and synced."); });

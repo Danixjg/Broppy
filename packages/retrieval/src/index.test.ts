@@ -112,3 +112,30 @@ describe("HybridIndex semantic scoring", () => {
     expect(index.search("unrelated", 20, vector(0))).toEqual([]);
   });
 });
+
+describe("HybridIndex relevance", () => {
+  it("ignores stopwords and partial words when matching a question", () => {
+    const index = new HybridIndex();
+    index.upsert(document("vendor", "Vendor checklist: validate the sandbox callbacks before the deadline."));
+    index.upsert(document("channel", "Channel members review each alert."));
+    index.upsert(document("report", "Security incident report for the breach."));
+    expect(index.search("Show me the security incident report from the Q3 breach").map(result => result.docId))
+      .toEqual(["report"]);
+    expect(index.search("Show me all of the ones from last week")).toEqual([]);
+  });
+
+  it("matches a hyphenated question term against its separate words", () => {
+    const index = new HybridIndex();
+    index.upsert(document("gateway", "Payment gateway operations and settlement health."));
+    index.upsert(document("other", "Gateway timeouts for the partner portal."));
+    expect(index.search("payment-gateway").map(result => result.docId)).toEqual(["gateway"]);
+  });
+
+  it("scores words that are also object property names", () => {
+    const index = new HybridIndex();
+    index.upsert(document("builder", "The payment constructor sets toString defaults."));
+    const results = index.search("payment constructor toString");
+    expect(results.map(result => result.docId)).toEqual(["builder"]);
+    expect(Number.isFinite(results[0].score)).toBe(true);
+  });
+});

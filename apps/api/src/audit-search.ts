@@ -1,8 +1,33 @@
 import type { AuditEntry, User } from "@brain/types";
-export function searchAudit(entries: AuditEntry[], params: URLSearchParams, users: readonly User[], now = new Date()) {
+
+interface AuditDocument { docId: string; title: string }
+
+const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// A document is named by its ID, its native key (e.g. PAY-101), or its full title.
+function namedDocument(q: string, tokens: Set<string>, documents: readonly AuditDocument[]): string | undefined {
+  const byId = documents.find(doc => q.includes(doc.docId.toLowerCase()) ||
+    tokens.has(doc.docId.slice(doc.docId.indexOf(":") + 1).toLowerCase()));
+  if (byId) return byId.docId;
+  const padded = ` ${words(q)} `;
+  return documents.filter(doc => words(doc.title).length > 3 && padded.includes(` ${words(doc.title)} `))
+    .sort((a, b) => words(b.title).length - words(a.title).length)[0]?.docId;
+}
+
+function mentionsDocument(entry: AuditEntry, docId: string): boolean {
+  const { data } = entry;
+  return data.docId === docId ||
+    (Array.isArray(data.chunkIds) && data.chunkIds.some(id => typeof id === "string" && id.startsWith(`${docId}:`))) ||
+    (Array.isArray(data.documents) && data.documents.some(item =>
+      Boolean(item) && typeof item === "object" && (item as { docId?: unknown }).docId === docId));
+}
+
+export function searchAudit(entries: AuditEntry[], params: URLSearchParams, users: readonly User[], now = new Date(),
+  documents: readonly AuditDocument[] = []) {
   const question = params.get("q") ?? "";
   if (question.length > 500) throw new Error("Invalid query");
   const q = question.toLowerCase();
+  const tokens = new Set(q.split(/[^a-z0-9_-]+/).filter(Boolean));
   const dates = q.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
   const date = (value: string | undefined, end = false) => {
     if (!value) return undefined;
@@ -23,16 +48,19 @@ export function searchAudit(entries: AuditEntry[], params: URLSearchParams, user
   if (from !== undefined && to !== undefined && from > to) throw new Error("Invalid date range");
   const user = params.get("user") ?? users.find(user => [user.id, user.email, user.name.toLowerCase()].some(value =>
     q.split(/[^a-z0-9@._-]+/).includes(value.toLowerCase())))?.id;
-  const source = params.get("source") ?? ["slack", "jira", "confluence", "drive"].find(source => q.includes(source));
+  const source = params.get("source") ?? ["slack", "jira", "confluence", "drive"].find(source => tokens.has(source));
   const spaces = [...new Set(entries.flatMap(e => [e.data.space, e.data.project]).filter((v): v is string => typeof v === "string"))];
-  const space = params.get("space") ?? spaces.find(space => q.includes(space.toLowerCase()));
-  const filters = { user, source, space, from: from === undefined ? undefined : new Date(from).toISOString(), to: to === undefined ? undefined : new Date(to).toISOString() };
+  // Whole words only, longest first, so "payment-gateway" is not read as the PAY space.
+  const space = params.get("space") ?? spaces.filter(space => tokens.has(space.toLowerCase()))
+    .sort((a, b) => b.length - a.length)[0];
+  const doc = params.get("doc") ?? namedDocument(q, tokens, documents);
+  const filters = { user, source, space, doc, from: from === undefined ? undefined : new Date(from).toISOString(), to: to === undefined ? undefined : new Date(to).toISOString() };
   const matching = entries.filter(entry => {
     const time = Date.parse(entry.timestamp);
     return (!user || entry.actor === user) && (from === undefined || time >= from) && (to === undefined || time <= to);
   });
   const relevant = matching.filter(entry => (!source || entry.data.source === source) &&
-    (!space || entry.data.space === space || entry.data.project === space));
+    (!space || entry.data.space === space || entry.data.project === space) && (!doc || mentionsDocument(entry, doc)));
   const traces = new Set(relevant.map(e => e.data.traceId).filter(Boolean));
   const allowed = /\b(denied|deny|rejected)\b/.test(q) ? false : /\b(allowed|allow|approved)\b/.test(q) ? true : undefined;
   const filtered = matching.filter(e => (relevant.includes(e) || traces.has(e.data.traceId)) && (allowed === undefined || e.data.allowed === allowed));

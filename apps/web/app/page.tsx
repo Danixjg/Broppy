@@ -14,7 +14,6 @@ export default async function Home() {
       <p><a href="/auth/logout">Sign out</a></p>
     </> : <>
       <p><a href="/auth/login">Sign in with SSO</a></p>
-      <p><a href="/auth/login?screen_hint=signup">Sign up</a></p>
     </>}
   </main>;
 }
