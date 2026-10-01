@@ -97,7 +97,12 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "confluence:payment-master",
+      "slack:payments-cutover",
+      "drive:cutover-plan"
+    ]
   },
   {
     "docId": "jira:SEC-44",
@@ -171,7 +176,10 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "drive:api-spec-copy"
+    ]
   },
   {
     "docId": "confluence:payment-master",
@@ -184,7 +192,8 @@
     "updatedAt": "2026-09-26T12:00:00.000Z",
     "metadata": {
       "space": "PAY",
-      "status": "final"
+      "status": "final",
+      "label": "master"
     },
     "permissions": {
       "users": [],
@@ -209,7 +218,17 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "jira:PAY-101",
+      "jira:SEC-44",
+      "jira:SETL-27",
+      "slack:payments-cutover",
+      "drive:cutover-plan",
+      "drive:recon-sheet",
+      "drive:steering-deck",
+      "drive:api-spec"
+    ]
   },
   {
     "docId": "confluence:q3-incident",
@@ -577,7 +596,12 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "confluence:db-migration-plan",
+      "slack:db-migration",
+      "drive:db-wave-checklist"
+    ]
   },
   {
     "docId": "jira:DB-15",
@@ -615,14 +639,17 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "slack:db-oncall"
+    ]
   },
   {
     "docId": "slack:db-migration",
     "source": "slack",
     "sourceNativeId": "C-DB-01",
     "title": "#db-migration",
-    "content": "Database migration project standup: waves one and two of the ledger move are complete. Blocker raised: the backfill job keeps timing out on the ledger database, so the final migration wave is on hold until DB-15 is fixed.",
+    "content": "Database migration project standup: waves one and two of the ledger move are complete. Blocker raised: the backfill job keeps timing out on the ledger database, so the final migration wave is on hold until DB-15 is fixed. Agreed: Maya raises the replica storage quota before the final wave.",
     "url": "https://slack.example/archives/C-DB-01",
     "version": 1,
     "updatedAt": "2026-09-27T02:00:00.000Z",
@@ -725,7 +752,8 @@
     "updatedAt": "2026-09-24T03:00:00.000Z",
     "metadata": {
       "space": "DB",
-      "status": "final"
+      "status": "final",
+      "label": "master"
     },
     "permissions": {
       "users": [],
@@ -750,7 +778,14 @@
         ]
       }
     },
-    "tier": "internal"
+    "tier": "internal",
+    "links": [
+      "jira:DB-12",
+      "jira:DB-15",
+      "slack:db-migration",
+      "slack:db-planning",
+      "drive:db-wave-checklist"
+    ]
   },
   {
     "docId": "confluence:payment-service-runbook",
@@ -812,6 +847,70 @@
       "native": {
         "source": "drive",
         "fileId": "FILE-200",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal"
+  },
+  {
+    "docId": "drive:db-wave-checklist",
+    "source": "drive",
+    "sourceNativeId": "FILE-110",
+    "title": "Wave three checklist",
+    "content": "Wave three checklist: pause ledger writes, verify backfill row counts, then move reads to the Postgres 16 cluster.",
+    "url": "https://drive.example/file/d/FILE-110",
+    "version": 2,
+    "updatedAt": "2026-09-28T04:00:00.000Z",
+    "metadata": {
+      "status": "final",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-110",
+        "owner": "maya@aspire.example",
+        "sharedUsers": [
+          "ravi@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal"
+  },
+  {
+    "docId": "drive:api-spec-copy",
+    "source": "drive",
+    "sourceNativeId": "FILE-111",
+    "title": "Settlement API notes",
+    "content": "Settlement API specification for SETL integrations.",
+    "url": "https://drive.example/file/d/FILE-111",
+    "version": 1,
+    "updatedAt": "2026-09-22T09:00:00.000Z",
+    "metadata": {
+      "status": "draft",
+      "mimeType": "text/plain"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "drive",
+        "fileId": "FILE-111",
         "owner": "maya@aspire.example",
         "sharedUsers": [
           "ravi@aspire.example",

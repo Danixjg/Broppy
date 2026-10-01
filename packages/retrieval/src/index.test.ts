@@ -83,6 +83,25 @@ describe("HybridIndex semantic scoring", () => {
     expect(await index.refreshSemantic("doc", client)).toBe(false);
   });
 
+  it("keeps a document's links with its metadata, so a link-only change never re-chunks or re-embeds", async () => {
+    const index = new HybridIndex();
+    const client = { embed: vi.fn(async () => vector(0)) };
+    const original = { ...document("doc", "Reimbursement procedure"), links: ["jira:PAY-1"] };
+    if (index.upsert(original).contentChanged) await index.refreshSemantic("doc", client);
+    const before = index.documents.get("doc")!;
+
+    const update = index.upsert({ ...original, links: ["jira:PAY-1", "slack:C1"] });
+    if (update.contentChanged) await index.refreshSemantic("doc", client);
+    expect(update).toEqual({ contentChanged: false, permissionChanged: false });
+    const after = index.documents.get("doc")!;
+    expect(after.links).toEqual(["jira:PAY-1", "slack:C1"]);
+    expect(after.metadataHash).not.toBe(before.metadataHash);
+    expect(after.chunks).toEqual(before.chunks);
+    expect(after.lastIndexedAt).toBe(before.lastIndexedAt);
+    expect(client.embed).toHaveBeenCalledTimes(1);
+    expect(index.search("payment", 20, vector(0))).toHaveLength(1);
+  });
+
   it("falls back to sparse scoring for invalid vectors and failed refreshes", async () => {
     const index = new HybridIndex();
     index.upsert(document("doc", "Payment procedure"));

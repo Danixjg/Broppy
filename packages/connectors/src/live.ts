@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { MockConnector, type Change, type ImportScope } from "./index.js";
+import { linkFromUrl, withLinks } from "./links.js";
 import type { Source, SourceDocument, SourcePermission, User } from "@brain/types";
 
 export type LiveSettings = {
@@ -22,12 +23,34 @@ function object(value: unknown): Record<string, unknown> {
 
 function text(value: unknown): string { return typeof value === "string" ? value : ""; }
 
+// Optional fields, such as links and labels, are skipped rather than failing the item when they're malformed.
+function optional(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function adf(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
   const node = value as Record<string, unknown>;
   return [text(node.text), ...(Array.isArray(node.content) ? node.content.map(adf) : [])]
     .filter(Boolean).join(" ");
+}
+
+// Links in a Jira description: link marks on text, and inline, block or embedded cards.
+function adfLinks(value: unknown): string[] {
+  const node = optional(value);
+  const marks = Array.isArray(node.marks) ? node.marks.map(optional) : [];
+  const urls = [text(optional(node.attrs).url), ...marks.filter(mark => mark.type === "link").map(mark => text(optional(mark.attrs).href))];
+  return [...urls.filter(Boolean).map(linkFromUrl).filter((link): link is string => Boolean(link)),
+    ...(Array.isArray(node.content) ? node.content.flatMap(adfLinks) : [])];
+}
+
+// Links in a Confluence page's storage format, read before the markup is stripped: hrefs and Jira issue macros.
+function storageLinks(value: string): string[] {
+  const hrefs = [...value.matchAll(/href="([^"]+)"/g)].map(match => linkFromUrl(match[1].replace(/&amp;/g, "&")));
+  const keys = [...value.matchAll(/<ac:parameter ac:name="key">([A-Z][A-Z0-9]{1,9}-\d+)<\/ac:parameter>/g)]
+    .map(match => `jira:${match[1]}`);
+  return [...hrefs.filter((link): link is string => Boolean(link)), ...keys];
 }
 
 function plainHtml(value: string): string {
@@ -157,7 +180,7 @@ export class LiveConnector extends MockConnector {
     return value;
   }
 
-  private async read(id: string, authorization: string): Promise<{ title: string; content: string; updatedAt: string; url: string; metadata: Record<string, string> } | undefined> {
+  private async read(id: string, authorization: string): Promise<{ title: string; content: string; updatedAt: string; url: string; metadata: Record<string, string>; links?: string[] } | undefined> {
     const escaped = encodeURIComponent(id);
     if (this.source === "slack") {
       const info = await this.get(`/api/conversations.info?channel=${escaped}`, authorization);
@@ -177,22 +200,32 @@ export class LiveConnector extends MockConnector {
         metadata: { channel: text(channel.name), sourceStatus: channel.is_private === true ? "private" : "public" } };
     }
     if (this.source === "jira") {
-      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project`, authorization);
+      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks`, authorization);
       if (!result) return undefined;
       const issue = object(result); const fields = object(issue.fields);
       const updatedAt = text(fields.updated);
+      // Issue links name the other issue by key; links in the description point anywhere.
+      const issueLinks = (Array.isArray(fields.issuelinks) ? fields.issuelinks : []).map(link => {
+        const entry = optional(link);
+        return text(optional(entry.outwardIssue ?? entry.inwardIssue).key);
+      }).filter(key => /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(key)).map(key => `jira:${key}`);
       return { title: text(fields.summary) || id, content: adf(fields.description), updatedAt,
-        url: `${this.origin}/browse/${escaped}`, metadata: { status: text(object(fields.status ?? {}).name), project: text(object(fields.project ?? {}).key) } };
+        url: `${this.origin}/browse/${escaped}`, metadata: { status: text(object(fields.status ?? {}).name), project: text(object(fields.project ?? {}).key) },
+        links: [...issueLinks, ...adfLinks(fields.description)] };
     }
     if (this.source === "confluence") {
-      const result = await this.get(`/wiki/api/v2/pages/${escaped}?body-format=storage`, authorization);
+      const result = await this.get(`/wiki/api/v2/pages/${escaped}?body-format=storage&include-labels=true`, authorization);
       if (!result) return undefined;
       const page = object(result); const body = object(page.body ?? {});
       const storage = object(body.storage ?? {});
       const changed = object(page.version ?? {});
+      // A page labelled "master" is a project's source of truth.
+      const labels = optional(page.labels).results;
+      const master = Array.isArray(labels) && labels.some(label => text(optional(label).name).toLowerCase() === "master");
       return { title: text(page.title) || id, content: plainHtml(text(storage.value)),
         updatedAt: text(changed.createdAt), url: `${this.origin}/wiki/pages/viewpage.action?pageId=${escaped}`,
-        metadata: { status: text(page.status), space: text(page.spaceId) } };
+        metadata: { status: text(page.status), space: text(page.spaceId), ...(master ? { label: "master" } : {}) },
+        links: storageLinks(text(storage.value)) };
     }
     const metadata = await this.get(`/drive/v3/files/${escaped}?fields=id,name,mimeType,modifiedTime,webViewLink&supportsAllDrives=true`, authorization);
     if (!metadata) return undefined;
@@ -228,9 +261,9 @@ export class LiveConnector extends MockConnector {
     if (!permissions?.users.length) return undefined;
     const content = read.content.trim();
     if (!content || !read.updatedAt || !Number.isFinite(Date.parse(read.updatedAt))) return undefined;
-    return { docId, source: this.source, sourceNativeId: id, title: read.title,
+    return withLinks({ docId, source: this.source, sourceNativeId: id, title: read.title,
       content, url: read.url, updatedAt: read.updatedAt, version: version(read.updatedAt, content),
-      metadata: read.metadata, permissions, tier: "internal" };
+      metadata: read.metadata, permissions, tier: "internal", links: read.links ?? [] });
   }
   override async fetchContent(docId: string): Promise<string | undefined> {
     return (await this.fetchDocument(docId))?.content;

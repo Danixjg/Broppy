@@ -17,6 +17,7 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 > Database migration project standup: waves one and two of the ledger move are complete. [slack:db-migration:0]
 > Blocker raised: the backfill job keeps timing out on the ledger database, so the final migration wave is on hold until DB-15 is fixed. [slack:db-migration:0]
+> Agreed: Maya raises the replica storage quota before the final wave. [slack:db-migration:0]
 > DB-12 (in progress) tracks the ledger database migration project. [jira:DB-12:0]
 > Move the ledger database to Postgres 16 in three waves. [confluence:db-migration-plan:0]
 > DB-15 (blocked): Replica lag stays above five minutes during the backfill, so the final wave of the database migration cannot start. [jira:DB-15:0]
@@ -32,7 +33,7 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 | Document | Match | Access check | Live check at the source | Sent to the writer | Rechecked after writing | Cited |
 | --- | --- | --- | --- | --- | --- | --- |
-| `slack:db-migration` | 0.49 | allowed | allowed, v1 | yes | allowed | yes |
+| `slack:db-migration` | 0.45 | allowed | allowed, v1 | yes | allowed | yes |
 | `jira:DB-12` | 0.41 | allowed | allowed, v4 | yes | allowed | yes |
 | `slack:db-oncall` | 0.40 | **denied** | – | no | – | no |
 | `confluence:db-migration-plan` | 0.28 | allowed | allowed, v3 | yes | allowed | yes |
@@ -141,7 +142,7 @@ Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 
 
 | Entries | Time | Question | Documents checked | Refused | Sent to the writer | Answer |
 | --- | --- | --- | --- | --- | --- | --- |
-| 33–81 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 8 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
+| 35–83 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 8 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
 
 - From the `payment-gateway` space, `confluence:gateway-operations`. Access check: allowed; live check at the source: allowed, v1; sent to the writer: yes; rechecked after writing: allowed.
 
@@ -154,9 +155,9 @@ Read as: document `confluence:gateway-operations`. Retrieved for: Ravi.
 ### Tamper evidence
 
 - Every entry carries the hash of the one before it. The chain verifies: yes.
-- Nur seals the log into a Merkle batch of entries 1 to 149. The proof for Ravi's answer, entry 81, verifies against it: yes.
+- Nur seals the log into a Merkle batch of entries 1 to 151. The proof for Ravi's answer, entry 83, verifies against it: yes.
 - A copy of the log with that answer changed is refused ("Invalid stored audit log").
-- A copy with entry 75 deleted is refused ("Invalid stored audit log").
+- A copy with entry 76 deleted is refused ("Invalid stored audit log").
 
 ![Nur's audit search](images/s5-nur.png)
 

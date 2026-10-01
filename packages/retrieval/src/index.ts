@@ -136,11 +136,13 @@ export class HybridIndex {
     const previous = this.documents.get(source.docId);
     const contentHash = hash(source.content);
     const permissionHash = hash(source.permissions);
+    // Links travel with the metadata: a link-only change never re-chunks or re-embeds.
     const metadataHash = hash({
       title: source.title,
       url: source.url,
       metadata: source.metadata,
-      version: source.version
+      version: source.version,
+      links: source.links ?? []
     });
     const contentChanged = !previous || previous.contentHash !== contentHash || previous.title !== source.title;
     const permissionChanged = !previous || previous.permissionHash !== permissionHash;

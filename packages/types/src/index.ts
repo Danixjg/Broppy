@@ -40,6 +40,9 @@ export interface SourceDocument {
   metadata: Record<string, string>;
   permissions: SourcePermission;
   tier: Tier;
+  /** IDs of the items this one links to, as its source says: issue links, attachments, page links, or keys and links
+   * in its text. A link to an ID that names no item goes nowhere. */
+  links?: string[];
   deletedAt?: string;
 }
 

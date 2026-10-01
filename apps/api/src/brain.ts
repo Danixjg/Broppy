@@ -482,6 +482,17 @@ export class Brain {
     return scope ? { ...answer, scope } : answer;
   }
 
+  /** The items one link away, in either direction, that still exist: what this item links to, and what links to it. */
+  linkedIds(docId: string): string[] {
+    const exists = (id: string) => { const doc = this.index.documents.get(id); return Boolean(doc && !doc.deletedAt); };
+    if (!exists(docId)) return [];
+    const found = new Set((this.index.documents.get(docId)!.links ?? []).filter(id => id !== docId && exists(id)));
+    for (const doc of this.index.documents.values()) {
+      if (doc.docId !== docId && !doc.deletedAt && doc.links?.includes(docId)) found.add(doc.docId);
+    }
+    return [...found].sort();
+  }
+
   async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
     const visible: Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
     this.assertOrg(user);

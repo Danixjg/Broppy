@@ -1,6 +1,9 @@
 import documents from "../../../data/mock/documents.json" with { type: "json" };
 import users from "../../../data/mock/users.json" with { type: "json" };
 import type { NativePermission, Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import { withLinks } from "./links.js";
+
+export { linkFromUrl, linksIn, withLinks } from "./links.js";
 
 export type Change = {
   source: Source;
@@ -131,7 +134,7 @@ export class MockConnector implements Connector {
 
   async fetchDocument(id: string): Promise<SourceDocument | undefined> {
     const doc = this.docs.get(id);
-    return doc ? copy(doc) : undefined;
+    return doc ? withLinks(copy(doc)) : undefined;
   }
 
   async fetchPermissions(id: string): Promise<SourcePermission | undefined> {
