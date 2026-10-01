@@ -393,6 +393,49 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-01 — Worked examples for the five scenarios (R7)
+
+- **Input:** the brief asks for a worked example of each scenario. Scenario tests and a README table covered them,
+  but there was no walk-through to read.
+- **How decided:** chosen explicitly in a planning session.
+
+### D32 — Worked examples before the model is chosen
+- **Options:** start now with the built-in writer / wait for the model measurement.
+- **Chosen:** start now. `docs/worked-examples.md` uses the built-in writer, and `pnpm scenarios:model` captures the
+  chosen model's version in `docs/worked-examples-model.md`.
+- **Trade-off:** the checked examples show quoted sentences rather than a model's choice. The model's version is a
+  separate, unchecked file.
+
+### D33 — The tests check the worked examples
+- **Options:** `pnpm test` fails when the page no longer matches the code / regenerate it by hand.
+- **Chosen:** the tests check it. `pnpm scenarios` rewrites the page.
+- **Trade-off:** a change that alters an example needs `pnpm scenarios` and a review of the diff.
+
+### D34 — 'jdoe' in scenario 5
+- **Options:** Ravi stands in / a new 'jdoe' persona.
+- **Chosen:** Ravi stands in, and the page says so.
+- **Trade-off:** the brief's sentence isn't run word for word, but no persona, permissions or SSO seed change.
+
+### D35 — Screenshots
+- **Options:** images only / images and the capture script, with Playwright as a dependency / no screenshots.
+- **Chosen:** images only, in `docs/images`. The capture script stays out of the repository.
+- **Trade-off:** re-taking them needs the script, which is kept with the team's notes.
+
+### Implementation details (worked examples)
+- **Generator** (`apps/api/src/worked-examples.ts`):
+  - Each scenario runs on a fresh Brain with a fixed clock: Thursday 15 October 2026, with scenario 2 at 12:00,
+    13:00 and 14:05 UTC.
+  - Every claim in the text, such as "cites it: no", is computed from the run.
+  - The output never changes between runs: no trace IDs or hashes, and dates in UTC with fixed month names.
+- **Check:** `worked-examples.test.ts` compares the page with a vitest file snapshot.
+- **Asker's view:** `actorTrace` is exported from `server.ts`, so the page can show the asker's own trace.
+- **Model capture:** it uses no HTTP server, so the Auth0 and Supabase settings in `.env.local` are never used. Its
+  calls count against the usage meter.
+- **Screenshots:** taken in the public demo, with the API's and the browser's clocks set to 15 October 2026, 14:05
+  UTC.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
