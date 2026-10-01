@@ -76,6 +76,8 @@ const SEMANTIC_DIMENSIONS = 1024;
 
 export interface SemanticEmbeddingClient {
   embed(text: string): Promise<number[]>;
+  /** False while the client can't be used, e.g. over its token budget. Absent means always available. */
+  available?(): boolean;
 }
 
 function validSemanticVector(value: unknown): value is number[] {

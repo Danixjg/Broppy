@@ -7,8 +7,7 @@ import { pathToFileURL } from "node:url";
 import { Brain } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
-import { createHunyuanLlmFromEnv } from "./hunyuan.js";
-import { createHunyuanEmbeddingClientFromEnv } from "./embedding.js";
+import { modelsFromEnv } from "./llm-budget.js";
 import { UserDirectory } from "./user-directory.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
 import { MockConnector, loadMockCorpus } from "@brain/connectors";
@@ -123,10 +122,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (!hasAuth0 && !demoOnly && (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_AUTH !== "true")) {
     throw new Error("Auth0 configuration required when demo authentication is disabled");
   }
-  const useHunyuan = Boolean(process.env.HUNYUAN_API_KEY || process.env.HUNYUAN_MODEL);
   const useRemoteFga = Boolean(process.env.FGA_API_URL || process.env.FGA_STORE_ID ||
     process.env.FGA_MODEL_ID || process.env.FGA_CLIENT_ID || process.env.FGA_CLIENT_SECRET);
-  const embedding = createHunyuanEmbeddingClientFromEnv();
+  const models = modelsFromEnv(process.env);
+  const embedding = models.embedding;
   const supabase = embedding ? SupabaseIndex.fromEnv() : null;
   if (supabase && !embedding) throw new Error("Supabase hybrid search requires HUNYUAN_EMBEDDING_API_KEY");
   const users = hasAuth0 ? await directory!.list() : undefined;
@@ -143,7 +142,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (connectors && !hasAuth0) {
     throw new Error("Live sources require Auth0 sign-in");
   }
-  const brain = options.brain ?? new Brain(useHunyuan ? createHunyuanLlmFromEnv() : undefined,
+  const brain = options.brain ?? new Brain(models.llm,
     { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
