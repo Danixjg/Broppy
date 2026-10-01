@@ -14,8 +14,15 @@ services:
   # Public, mock data only: the API refuses to start in this mode next to any real identity or data setting.
   demo-api:
     <<: *api
+    # Optional model settings (see demo.env.example). Without them, the built-in writer answers.
+    env_file:
+      - path: demo.env
+        required: false
     environment:
       PUBLIC_DEMO: "true"
+      LLM_USAGE_FILE: /data/usage-demo.json
+    volumes:
+      - model-usage:/data
 
   # Real sign-in: Auth0 tokens, the Supabase directory and durable audit.
   sso-api:
@@ -24,7 +31,9 @@ services:
     env_file: sso.env
     environment:
       AUDIT_SIGNING_KEY_FILE: /run/secrets/audit-signing-key.pem
+      LLM_USAGE_FILE: /data/usage-sso.json
     volumes:
+      - model-usage:/data
       # The long form fails when the key file is missing instead of creating an empty folder in its place.
       - type: bind
         source: ./audit-signing-key.pem
@@ -48,3 +57,5 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  # Model token and answer counts, kept across restarts and rebuilds.
+  model-usage:
