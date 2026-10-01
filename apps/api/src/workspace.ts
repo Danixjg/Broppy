@@ -32,7 +32,7 @@ export interface Suggestion {
 }
 
 const DAY = 86_400_000;
-const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+export const sentences = (text: string) => text.split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
 
 /**
  * One project per master page the viewer may open: a Confluence page labelled "master". Its items are what the page
@@ -134,8 +134,20 @@ export function duplicatesFor(docs: readonly WorkspaceDocument[], now: Date): Du
 // Fixed phrases at the start of a sentence: predictable, free, and the card quotes the sentence it matched.
 const AGREEMENT = /^(?:agreed[:,]|decision:|decided:|approved:|ok,? let's|let's go with)\s*/i;
 
+/** What an agreement sentence commits to, as a task summary, or nothing when the sentence isn't an agreement. */
+export function agreementSummary(sentence: string): string | undefined {
+  const phrase = sentence.match(AGREEMENT)?.[0];
+  const rest = phrase === undefined ? "" : sentence.slice(phrase.length).replace(/[.!?]+$/, "").trim();
+  return rest ? (rest[0].toUpperCase() + rest.slice(1)).slice(0, 80) : undefined;
+}
+
+/** Whether a visible issue already quotes the sentence. */
+export function tracked(sentence: string, issues: readonly WorkspaceDocument[]): boolean {
+  return issues.some(issue => normalizeSentence(issue.content).includes(normalizeSentence(sentence)));
+}
+
 /** The Jira project a thread belongs to: that of the issues it links to, else its own project tag. */
-function projectOf(thread: WorkspaceDocument, issues: readonly WorkspaceDocument[]): string | undefined {
+export function projectOf(thread: WorkspaceDocument, issues: readonly WorkspaceDocument[]): string | undefined {
   const counts = new Map<string, number>();
   for (const issue of issues) {
     if (thread.links.includes(issue.docId) && issue.metadata.project) {
@@ -157,12 +169,11 @@ export function agreementsFor(docs: readonly WorkspaceDocument[], live: boolean)
     const project = projectOf(thread, issues);
     if (!project) continue;
     for (const sentence of sentences(thread.content)) {
-      const phrase = sentence.match(AGREEMENT)?.[0];
-      const rest = phrase === undefined ? "" : sentence.slice(phrase.length).replace(/[.!?]+$/, "").trim();
-      if (!rest || issues.some(issue => normalizeSentence(issue.content).includes(normalizeSentence(sentence)))) continue;
+      const summary = agreementSummary(sentence);
+      if (!summary || tracked(sentence, issues)) continue;
       const example = issues.find(issue => issue.metadata.project === project);
-      suggestions.push({ threadDocId: thread.docId, sentence, project, summary: (rest[0].toUpperCase() + rest.slice(1)).slice(0, 80),
-        canCreate: !live, ...(live && example ? { jiraUrl: example.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${project}`) } : {}) });
+      suggestions.push({ threadDocId: thread.docId, sentence, project, summary, canCreate: !live,
+        ...(live && example ? { jiraUrl: example.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${project}`) } : {}) });
     }
   }
   return suggestions;

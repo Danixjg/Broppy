@@ -1,7 +1,8 @@
 import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
-import { agreementsFor, duplicatesFor, latestFor, projectsFor, type WorkspaceDocument } from "./workspace.js";
+import { agreementSummary, agreementsFor, duplicatesFor, latestFor, projectOf, projectsFor, sentences, tracked,
+  type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
@@ -596,6 +597,56 @@ export class Brain {
     const projects = projectsFor(documents);
     return { documents, projects, latest: latestFor(documents, projects, now), duplicates: duplicatesFor(documents, now),
       suggestions: agreementsFor(documents, this.liveMode) };
+  }
+
+  /**
+   * Creates a Jira task from an agreement in a thread, on mock sources only: the app only reads live ones. The task's
+   * title and text come from the agreed sentence alone. It copies the permissions and tier of the project issue it's
+   * modelled on (the one the thread links to, else the project's latest), so it is never visible to more people.
+   */
+  async createTask(actor: User, threadDocId: string, sentence: string): Promise<{ docId: string; title: string }> {
+    this.assertOrg(actor);
+    if (this.liveMode) throw new Error("Live sources are read-only");
+    const documents = await this.visibleDocuments(actor);
+    const thread = documents.find(doc => doc.docId === threadDocId && doc.source === "slack");
+    if (!thread) throw new Error("Unknown document");
+    const issues = documents.filter(doc => doc.source === "jira");
+    const summary = sentences(thread.content).includes(sentence) ? agreementSummary(sentence) : undefined;
+    const project = projectOf(thread, issues);
+    if (!summary || !project || !/^[A-Z][A-Z0-9]{0,9}$/.test(project)) throw new Error("Not an agreement in that thread");
+    if (tracked(sentence, issues)) throw new Error("Already tracked");
+    const declared = this.index.documents.get(threadDocId)?.links ?? [];
+    const inProject = issues.filter(issue => issue.metadata.project === project);
+    const model = inProject.find(issue => declared.includes(issue.docId)) ??
+      [...inProject].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    const permissions = model && await this.connectors.jira.fetchPermissions(model.docId);
+    if (!model || !permissions) throw new Error("Unknown document");
+    const numbers = (await this.connectors.jira.listIds()).map(id => id.match(new RegExp(`^jira:${project}-(\\d+)$`))?.[1])
+      .filter((value): value is string => Boolean(value)).map(Number);
+    const key = `${project}-${Math.max(0, ...numbers) + 1}`;
+    const doc: SourceDocument = {
+      docId: `jira:${key}`, source: "jira", sourceNativeId: key, title: `${key} ${summary}`,
+      content: `${key} tracks the agreement in ${thread.title}: "${sentence}"`,
+      url: model.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${key}`), version: 1, updatedAt: new Date().toISOString(),
+      metadata: { project, status: "open" }, permissions, tier: model.tier, links: [threadDocId]
+    };
+    this.connectors.jira.create(doc);
+    await this.sync("jira");
+    this.audit.append("task_created", actor.id, { ...this.auditDocument(doc.docId), fromDocId: threadDocId });
+    return { docId: doc.docId, title: doc.title };
+  }
+
+  /** Marks a Jira task done, on mock sources only. A status is metadata, so nothing is re-chunked or re-embedded. */
+  async markDone(actor: User, docId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (this.liveMode) throw new Error("Live sources are read-only");
+    if (!docId.startsWith("jira:")) throw new Error("Only Jira tasks can be marked done");
+    const issue = this.fga.check(actor, docId).allowed ? await this.liveAuthorizedDocument(actor, docId) : undefined;
+    if (!issue) throw new Error("Unknown document");
+    if (issue.metadata.status === "done") return;
+    this.connectors.jira.updateMetadata(docId, { status: "done" });
+    await this.sync("jira");
+    this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });
   }
 
   async narrowTier(actor: User, docId: string, tier: Tier): Promise<void> {

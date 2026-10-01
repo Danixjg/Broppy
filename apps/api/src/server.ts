@@ -249,6 +249,21 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, await brain.workspace(user));
       }
 
+      if (request.method === "POST" && url.pathname === "/v1/tasks") {
+        const input = await body(request);
+        if (typeof input.threadDocId !== "string" || typeof input.sentence !== "string" || input.sentence.length > 1000) {
+          throw new Error("Invalid task");
+        }
+        return await reply(response, 201, await brain.createTask(user, input.threadDocId, input.sentence));
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/tasks/done") {
+        const input = await body(request);
+        if (typeof input.docId !== "string") throw new Error("Invalid task");
+        await brain.markDone(user, input.docId);
+        return await reply(response, 200, { ok: true });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/admin/tier") {
         const input = await body(request);
         if (typeof input.docId !== "string" || !["open", "internal", "restricted"].includes(String(input.tier))) {
@@ -370,6 +385,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
       if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });
+      if (message === "Live sources are read-only") {
+        return await reply(response, 409, { error: "This app only reads live sources. Make the change in Jira." });
+      }
+      if (message === "Already tracked") return await reply(response, 409, { error: "A Jira task already quotes this agreement." });
       if (message === "Unknown document" || message === "Unknown source item" || message === "Unknown user" ||
         message === "Unknown group membership" || message === "Unknown channel membership") {
         return await reply(response, 404, { error: "Not found" });
