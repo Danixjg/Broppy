@@ -12,7 +12,8 @@ const synonyms: Record<string, string[]> = {
   outage: ["incident", "failover"],
   launch: ["cutover"],
   access: ["permission"],
-  payment: ["pay", "payments"]
+  payment: ["pay", "payments"],
+  blockers: ["blocker"]
 };
 
 export function terms(text: string): string[] {
@@ -240,21 +241,21 @@ export class LocalGroundedLlm implements LlmClient {
     const queryTerms = new Set(terms(question).filter(term =>
       !["what", "which", "does", "the", "for", "and", "before", "after", "about"].includes(term)));
     const prerequisite = /\b(need|needs|required|require|requires|before|prerequisite|depend|depends)\b/i.test(question);
-    return context.slice(0, 4)
-      .map(item => {
-        const normalized = item.text.replace(/\s+/g, " ").trim();
-        const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
-        const sentence = sentences.sort((left, right) => {
-          const score = (value: string) => {
-            const overlap = [...new Set(terms(value))].filter(term => queryTerms.has(term)).length;
-            const required = prerequisite && /\b(before|requires?|complete|must|depends?|prerequisite)\b/i.test(value) ? 3 : 0;
-            return overlap + required;
-          };
-          return score(right) - score(left);
-        })[0] ?? normalized;
-        return `${sentence} [${item.citation}]`;
-      })
-      .join("\n");
+    const score = (value: string) => {
+      const overlap = [...new Set(terms(value))].filter(term => queryTerms.has(term)).length;
+      const required = prerequisite && /\b(before|requires?|complete|must|depends?|prerequisite)\b/i.test(value) ? 3 : 0;
+      return overlap + required;
+    };
+    const sentences = (text: string) => text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+    const [first, ...rest] = context;
+    if (!first) return "";
+    // The most relevant source is quoted in full, so a runbook keeps every step; the next three add their best sentence.
+    const lines = sentences(first.text).slice(0, 6).map(sentence => `${sentence} [${first.citation}]`);
+    for (const item of rest.slice(0, 3)) {
+      const best = sentences(item.text).sort((left, right) => score(right) - score(left))[0];
+      if (best) lines.push(`${best} [${item.citation}]`);
+    }
+    return lines.join("\n");
   }
 }
 

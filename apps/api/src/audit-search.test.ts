@@ -14,3 +14,11 @@ it("reconstructs the question and answer for user, source, space and date filter
   expect(searchAudit(brain.audit.entries, new URLSearchParams({ from: "2000-01-01", to: "2000-01-02" }), brain.users).entries).toEqual([]);
   expect(() => searchAudit([], new URLSearchParams({ from: "bad" }), [])).toThrow("Invalid date");
 });
+
+it("reads the same relative windows as questions, including 'past'", () => {
+  const now = new Date("2026-10-15T08:00:00.000Z");
+  const window = (q: string) => searchAudit([], new URLSearchParams({ q }), [], now).filters;
+  expect(window("everything ravi accessed last week")).toMatchObject({ from: "2026-10-08T00:00:00.000Z", to: now.toISOString() });
+  expect(window("everything ravi accessed in the past 30 days")).toMatchObject({ from: "2026-09-15T00:00:00.000Z" });
+  expect(window("denied access yesterday")).toMatchObject({ from: "2026-10-14T00:00:00.000Z", to: "2026-10-14T23:59:59.999Z" });
+});

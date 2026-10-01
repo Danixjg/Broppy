@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "ALLOW_DEMO_AUTH=true tsx apps/api/src/server.ts",
     "dev:sso": "tsx --env-file=.env.local apps/api/src/server.ts",
+    "doctor:sso": "tsx --env-file=.env.local apps/api/src/doctor.ts",
     "test": "vitest run && node --test apps/web/*.nodecheck.js",
     "typecheck": "tsc --noEmit && pnpm --filter @brain/web typecheck"
   },

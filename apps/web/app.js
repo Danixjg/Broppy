@@ -9,6 +9,10 @@ const fmtDate = value => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
+const fmtDay = value => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date);
+};
 const node = (tag, className, text) => {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -39,10 +43,12 @@ function statusBadge(doc) {
   return node("span", `status-badge ${tone}`, status);
 }
 async function call(path, options = {}) {
-  if (state.authMode !== "auth0") throw new Error("Please sign in with SSO.");
+  if (!["auth0", "demo"].includes(state.authMode)) throw new Error("Please sign in with SSO.");
+  // Demo visitors act as the persona chosen in the header; the host ignores this header for signed-in users.
+  const persona = state.authMode === "demo" ? { "x-demo-user": $("user").value } : {};
   const response = await fetch(API + path, {
     ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    headers: { "content-type": "application/json", ...persona, ...(options.headers || {}) },
     cache: "no-store"
   });
   let payload;
@@ -96,22 +102,30 @@ function resetIdentity() {
 }
 function updateAuthUi(message = "") {
   const signedInMode = state.authMode === "auth0";
-  $("demoIdentity").hidden = signedInMode;
-  $("user").disabled = signedInMode;
-  $("authIdentity").hidden = !signedInMode;
-  $("authName").textContent = state.me?.name || "";
-  $("loginButton").hidden = state.signedIn || state.authMode !== "auth0";
-  $("logoutButton").hidden = !signedInMode || !state.signedIn;
+  const demo = state.authMode === "demo";
+  $("demoIdentity").hidden = !demo;
+  $("user").disabled = !demo;
+  $("authIdentity").hidden = !signedInMode && !demo;
+  $("authName").textContent = demo ? "" : state.me?.name || "";
+  $("loginButton").hidden = demo || state.signedIn || !signedInMode;
+  $("logoutButton").hidden = !demo && (!signedInMode || !state.signedIn);
+  $("logoutButton").textContent = demo ? "Leave demo" : "Log out";
   $("authStatus").hidden = !message;
   $("authStatus").textContent = message;
 }
 async function initAuth() {
   updateAuthUi("Loading sign-in configuration…");
   try {
-    state.authMode = "auth0";
     const response = await fetch("/api/session", { cache: "no-store" });
     if (response.status === 401) { location.assign("/auth/login"); return; }
     if (!response.ok) throw new Error("SSO session is unavailable.");
+    if ((await response.json()).demo === true) {
+      state.authMode = "demo";
+      updateAuthUi("Demo mode: all people and data are fictional. Choose who you are viewing as.");
+      resetIdentity();
+      return;
+    }
+    state.authMode = "auth0";
     state.signedIn = true;
     state.me = await call("/v1/me");
     if (!state.me || typeof state.me.id !== "string" || typeof state.me.name !== "string" || !Array.isArray(state.me.groups) || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
@@ -376,10 +390,20 @@ function renderCitations(parent, citations) {
   }
   parent.append(list);
 }
+// Where the answer looked first and the dates it kept to, when the question named them.
+function scopeText(scope) {
+  const names = Array.isArray(scope?.sources) ? scope.sources.map(sourceName).join(" and ") : "";
+  const dates = scope?.from && scope?.to ? `${fmtDay(scope.from)} – ${fmtDay(scope.to)}` : "";
+  if (names && dates) return `Searched ${names} (${dates}) first, then the other sources at any date.`;
+  if (names) return `Searched ${names} first, then the other sources.`;
+  return dates ? `Searched everything from ${dates}.` : "";
+}
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
   appendText(target, "div", "", safeText(result.text) || "No answer returned.");
+  const scope = scopeText(result.scope);
+  if (scope) appendText(target, "p", "muted", scope);
   renderCitations(target, result.citations);
   if (result.traceId) {
     const button = node("button", "text-button", "Why this result? View trace ↗"); button.type = "button";
@@ -636,5 +660,5 @@ $("retrySync").addEventListener("click", async () => {
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
 });
 $("loginButton").addEventListener("click", () => location.assign("/auth/login"));
-$("logoutButton").addEventListener("click", () => location.assign("/auth/logout"));
+$("logoutButton").addEventListener("click", () => location.assign(state.authMode === "demo" ? "/demo/exit" : "/auth/logout"));
 initAuth();

@@ -1,4 +1,5 @@
 import type { Persistence } from "./persistence.js";
+import { balanceBySource, planQuery } from "./query-plan.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
@@ -8,6 +9,7 @@ import type {
   Citation,
   ConnectorState,
   QueryAnswer,
+  QueryScope,
   Source,
   SourceDocument,
   SourcePermission,
@@ -328,6 +330,11 @@ export class Brain {
       this.audit.append(type, user.id, { traceId, ...data });
     audit("query_received", { question: trimmed, questionHash: hashQuestion(trimmed) });
     await this.audit.flush();
+    // Platforms the question names come first in the answer; a time range it names applies to those platforms, or to
+    // every platform when it names none.
+    const plan = planQuery(trimmed);
+    const scope: QueryScope | undefined = plan.sources.length || plan.window ? { sources: plan.sources, ...plan.window } : undefined;
+    audit("query_planned", { sources: plan.sources, ...plan.window });
 
     let queryVector: number[] | undefined;
     if (this.embedding) {
@@ -336,17 +343,27 @@ export class Brain {
     }
     // Keep the full local candidate set so denied hits cannot crowd an
     // accessible document out of the authorization pass.
-    const localCandidates = this.index.search(trimmed, Number.MAX_SAFE_INTEGER, queryVector);
+    const localCandidates = this.index.search(plan.searchText, Number.MAX_SAFE_INTEGER, queryVector);
     let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
       try {
         // Remote ranking may only reorder chunks that pass the local relevance gate.
         const relevant = new Set(localCandidates.map(item => item.chunkId));
-        const remote = (await this.supabase.search(trimmed, queryVector, 30)).filter(item => relevant.has(item.chunkId));
+        const remote = (await this.supabase.search(plan.searchText, queryVector, 30)).filter(item => relevant.has(item.chunkId));
         const seen = new Set(remote.map(item => item.chunkId));
         candidates = [...remote, ...localCandidates.filter(item => !seen.has(item.chunkId))];
       }
       catch { audit("search_fallback", {}); }
+    }
+    if (plan.window) {
+      const from = Date.parse(plan.window.from);
+      const to = Date.parse(plan.window.to);
+      candidates = candidates.filter(item => {
+        const doc = this.index.documents.get(item.docId);
+        if (!doc || (plan.sources.length && !plan.sources.includes(doc.source))) return true;
+        const updated = Date.parse(doc.updatedAt);
+        return updated >= from && updated <= to;
+      });
     }
     const candidateDocIds = [...new Set(candidates.map(candidate => candidate.docId))];
     audit("candidates_found", { count: candidateDocIds.length });
@@ -375,14 +392,16 @@ export class Brain {
     }
 
     const allowedIds = new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
-    if (!allowedIds.size) return this.noResult(user, traceId);
+    if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
     const authorizedCandidates = candidates.filter(item => allowedIds.has(item.docId));
     const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
     const currentCandidates = authorizedCandidates.filter(item =>
       this.index.documents.get(item.docId)?.metadata.status !== "superseded");
-    const answerCandidates = !asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates;
+    const answerCandidates = balanceBySource(!asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates,
+      plan.sources, docId => this.index.documents.get(docId)?.source);
     const context: Array<{ citation: string; text: string }> = [];
+    const chunkTexts = new Map<string, string>();
     const citationMap = new Map<string, Citation>();
     for (const candidate of answerCandidates) {
       if (context.length >= 8) break;
@@ -397,7 +416,8 @@ export class Brain {
       const indexed = this.index.documents.get(candidate.docId);
       const freshChunk = indexed?.chunks.find(item => item.chunkId === candidate.chunkId);
       if (!indexed || !freshChunk) continue;
-      context.push({ citation: freshChunk.chunkId, text: freshChunk.text });
+      context.push({ citation: freshChunk.chunkId, text: withJiraStatus(indexed, freshChunk.text) });
+      chunkTexts.set(freshChunk.chunkId, freshChunk.text);
       citationMap.set(freshChunk.chunkId, {
         docId: indexed.docId,
         chunkId: freshChunk.chunkId,
@@ -409,7 +429,7 @@ export class Brain {
       });
     }
 
-    if (!context.length) return this.noResult(user, traceId);
+    if (!context.length) return this.noResult(user, traceId, scope);
     audit("context_sent", { chunkIds: [...citationMap.keys()] });
     await this.audit.flush();
     const generated = await this.llm.generate(context, trimmed);
@@ -419,10 +439,10 @@ export class Brain {
     if (revalidateUser) {
       try {
         const current = await revalidateUser();
-        if (!current || current.id !== user.id) return this.noResult(user, traceId);
+        if (!current || current.id !== user.id) return this.noResult(user, traceId, scope);
         outputUser = current;
       } catch {
-        return this.noResult(user, traceId);
+        return this.noResult(user, traceId, scope);
       }
     }
     // Generation can outlive a source ACL change. Recheck every source that
@@ -433,10 +453,9 @@ export class Brain {
       catch { current = undefined; }
       const allowed = Boolean(current && current.version === citation.version &&
         this.index.documents.get(citation.docId)?.chunks.some(item =>
-          item.chunkId === citation.chunkId &&
-          item.text === context.find(part => part.citation === citation.chunkId)?.text));
+          item.chunkId === citation.chunkId && item.text === chunkTexts.get(citation.chunkId)));
       audit("output_access_decision", { ...this.auditDocument(citation.docId), allowed });
-      if (!allowed) return this.noResult(user, traceId);
+      if (!allowed) return this.noResult(user, traceId, scope);
     }
     audit("answer_returned", {
       answer: answer.text,
@@ -444,7 +463,7 @@ export class Brain {
       citationIds: answer.citations.map(citation => citation.chunkId),
       empty: answer.text === NO_RESULT
     });
-    return answer;
+    return scope ? { ...answer, scope } : answer;
   }
 
   async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
@@ -682,9 +701,10 @@ export class Brain {
     return await connector.checkAccess(user, docId) ? doc : undefined;
   }
 
-  private noResult(user: User, traceId: string): QueryAnswer {
+  private noResult(user: User, traceId: string, scope?: QueryScope): QueryAnswer {
     this.audit.append("answer_returned", user.id, { traceId, answer: NO_RESULT, citationIds: [], empty: true });
-    return { text: NO_RESULT, citations: [] };
+    // The scope comes from the question alone, so it reveals nothing about what exists.
+    return { text: NO_RESULT, citations: [], ...(scope ? { scope } : {}) };
   }
 
   private auditDocument(docId: string): Record<string, unknown> {
@@ -701,6 +721,15 @@ export class Brain {
     if (!connector) throw new Error("Unknown source");
     return connector;
   }
+}
+
+// A Jira issue's status lives in its fields, not its text, so the answer context states it next to the issue key:
+// "DB-12 (in progress) tracks …", or "DB-15 (blocked): …" when the text doesn't start with the key.
+function withJiraStatus(doc: SourceDocument, text: string): string {
+  const status = doc.source === "jira" ? doc.metadata.status : undefined;
+  if (!status) return text;
+  const key = doc.sourceNativeId;
+  return text.startsWith(`${key} `) ? `${key} (${status})${text.slice(key.length)}` : `${key} (${status}): ${text}`;
 }
 
 function hashQuestion(question: string): string {

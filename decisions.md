@@ -170,12 +170,141 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Tests:** `apps/api/src/scenarios.test.ts` holds the brief-aligned scenario suite; scenarios 3 and 5 are covered
   now.
 
+### D19 — How to confirm the SSO setup
+- **Context:** sign-in was reported as failing, and the tenant and Supabase settings live only in each person's
+  `.env.local`.
+- **Options:** a local check script / opening the development sandbox's network to the tenant / sending the exact
+  error.
+- **Chosen:** a local check script, `pnpm doctor:sso`. It runs on the machine that has `.env.local`, so secrets
+  never leave it.
+  - It checks the settings, the Auth0 tenant (reachable, issuer, signing keys, client credentials, sign-in request,
+    logout URL), the Supabase tables and demo users, and whether the API runs in Auth0 mode and the web host has its
+    settings.
+  - It only reads, and it prints no secret values.
+  - To test the client secret it makes one token request with a made-up code. Auth0 refuses it (a failed-exchange
+    log entry) and issues no token.
+  - The code is in `apps/api/src/doctor.ts`, with tests in `doctor.test.ts`.
+
+---
+
+## 2026-10-01 — Hosted demo and sign-in
+
+- **Input:** the repository's website, `https://broppy-one.vercel.app`, is a Vercel project. It deploys only the
+  Next.js host, so the workspace there had no API behind it.
+- **How decided:** each option below was chosen explicitly in a planning session, except D24, where no preference was
+  given and the recommended option applies.
+
+### D20 — What the Vercel site is for (supersedes D16)
+- **Options:** a public demo without sign-in / an SSO showcase / both / local only for now.
+- **Chosen:** both. The start page offers **Try the demo** (fictional people and data, no sign-in) and **Sign in
+  with SSO** (the real Auth0 login). A signed-in session always takes priority over demo mode. Preview deployments
+  offer the demo only.
+- **Trade-off:** the most setup of the four: hosted APIs, Vercel settings and Auth0 URLs. The demo is public, and its
+  state is shared by all visitors until the demo API restarts.
+
+### D21 — Where the API runs
+- **Options:** inside the Vercel app / a separate Node host (Render, Railway or Fly.io) / Tencent Cloud / not
+  decided yet.
+- **Chosen:** Tencent Cloud, on condition that it's free. It is: as of 30 Sep 2026, Lighthouse's free trial for new
+  users (2 vCPU, 2 GB, 3 months, no card) covers the hackathon. Auto-renew stays off.
+- **Trade-off:** someone needs a Tencent Cloud account, and the trial ends after 3 months. The hackathon's credits
+  don't cover hosting.
+
+### D22 — One backend or two
+- **Options:** two backends / one backend for both.
+- **Chosen:** two. A demo API (`PUBLIC_DEMO=true`) serves only the mock corpus, and it refuses to start next to any
+  real identity or data setting. A separate SSO API uses Auth0 and Supabase. The web host sends demo visitors only to
+  `DEMO_API_URL`, with just a persona name. It sends signed-in people only to `BRAIN_API_URL`, with their token.
+- **Trade-off:** two services to run, in exchange for demo visitors never reaching the data behind the SSO showcase.
+
+### D23 — Public address and how the server runs
+- **Address options:** a free sslip.io address / our own domain.
+- **Chosen address:** sslip.io names such as `demo-api.43-156-1-2.sslip.io`, with Caddy getting and renewing HTTPS
+  certificates. There's no domain to buy.
+- **Runtime options:** Docker Compose / plain Node with systemd.
+- **Chosen runtime:** Docker Compose. One command starts the demo API, the optional SSO API (profile `sso`) and
+  Caddy. The guide is `infra/tencent/README.md`.
+
+### D24 — Where the demo persona is chosen
+- **Options:** a switcher in the workspace header / the start page.
+- **Chosen:** no preference was given, so the recommended header switcher applies. **Viewing as** in the workspace
+  header switches the persona, next to a demo banner and a **Leave demo** button.
+
+### Implementation details (hosted demo)
+- **API:** with `PUBLIC_DEMO=true`, the API accepts `x-demo-user` even under `NODE_ENV=production`. Startup fails if
+  any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present.
+- **Web host:**
+  - `/demo` sets an HttpOnly cookie for 8 hours, and `/demo/exit` clears it. The cookie selects the mode, never an
+    identity.
+  - `/api/session` reports demo mode.
+  - Redirects and the same-origin write check use the host the browser used.
+- **Image:** it holds only what the API runs, with nothing from `infra/`, where the server keeps `sso.env` and the
+  audit key. `.dockerignore` also excludes env and key files anywhere in the tree.
+- **Server:** the guide uses Ubuntu 24.04 with Docker's install script. Lighthouse's Docker CE image, whose documented
+  base is CentOS 7.6, works too if its Compose is v2 or later.
+- **Constraints found while writing the guide:**
+  - **One SSO API per Supabase project.** The audit chain accepts one writer per organization (see
+    `docs/live-sources-and-sign-in.md`). The hosted SSO API and a local `pnpm dev:sso` on the same project therefore
+    break each other.
+  - **The team's existing audit signing key.** The hosted SSO API must use it, because stored audit batches are
+    verified at startup.
+
+---
+
+## 2026-10-01 — Scenarios 1, 2 and 4
+
+- **Input:** the brief's scenarios 1, 2 and 4 each need a worked example. A run of the code on 1 Oct showed three
+  gaps:
+  - A question that named Slack and "last week" was answered without any Slack message.
+  - There was no runbook to find.
+  - By 16 Oct, the fixed late-September mock dates would fall outside "last week".
+- **How decided:** both options below were chosen explicitly in a planning session.
+
+### D25 — The project behind scenario 1
+- **Options:**
+  - the brief's exact example, through a new database migration project;
+  - reuse of the payment migration story.
+- **Chosen:** the brief's exact example. The question works word for word, and the existing payment documents and
+  their tests are unchanged. The new mock data:
+  - Jira issues DB-12 and DB-15, with statuses;
+  - private #db-migration, with a blocker raised last week;
+  - private #db-oncall, which David isn't in;
+  - public #db-planning, which is older;
+  - a Confluence plan page.
+- **Trade-off:** eight more fixture documents to keep consistent, counting scenario 2's runbook and its old copy.
+
+### D26 — Cross-links between platforms
+- **Options:** later, with R9 / in this round.
+- **Chosen:** later, with R9, next to the Slack-to-Jira card and the per-project master page. Search already finds
+  items on every platform when they share words or keys such as PAY-101.
+
+### Implementation details (scenarios 1, 2 and 4)
+- **Query plan** (`apps/api/src/query-plan.ts`):
+  - Platforms a question names come first, up to three items each.
+  - A relative time ("last week", "past 3 days", "yesterday") limits the named platforms, or every platform when none
+    is named. The parsing is shared with audit search (`time-window.ts`), which now also accepts "past".
+  - Platforms whose best match scores at least half the top score then take turns, and the rest follow by score.
+  - The plan is audited as `query_planned` and shown in the asker's own trace. Answers carry it as `scope`, which the
+    workspace shows under the answer.
+- **Jira status:** a Jira chunk enters the answer context with its status after the key, as in "DB-12 (in progress)
+  tracks…". The index is unchanged, and the integrity check after generation still compares the raw chunk text.
+- **Local answer writer:** quotes the most relevant source in full, up to six sentences. It then adds the best
+  sentence from up to three more sources. Every line is still one checked claim.
+- **Search:** "blockers" also matches "blocker".
+- **Mock dates:** `loadMockCorpus(now)` moves the fixture dates forward by the whole days since 30 Sep 2026. State
+  saved to Supabase keeps the dates it was first saved with.
+- **Tests:** `scenarios.test.ts` now covers scenarios 1 to 5. Scenario 2 uses a fake clock for the 1:00 PM edit and
+  the 2:05 PM question.
+
 ---
 
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
-- **Dev-only demo mode:** bring back the persona switcher behind a flag in the Next.js host (audit v0.3 §4).
+- **Hosted SSO next to local SSO work:** the audit chain allows one writer per organization. Either stop the hosted
+  SSO API during local `pnpm dev:sso` work, or give it its own Supabase project.
+- **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or
+  per-visitor state aren't decided.
 - **Additional features:** Slack "ok" → Jira suggestion card; task → doc "Mark done"; latest-doc badge scoring;
   duplicate merge; intern catch-up; master page hard-coded to `PAY`.
 - **Brain as an MCP server:** not started.
@@ -185,4 +314,5 @@ These are open. Pick them up in a later round and record the decision here.
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,
-  source-specific FGA types, and webhooks.
+  source-specific FGA types, and webhooks. The snapshot write runs after every successful response, `/health`
+  included, which matters once the SSO API is reachable from the internet.

@@ -1,0 +1,8 @@
+# One site per API. Until the SSO API runs, its address answers 502.
+{$DEMO_HOST} {
+	reverse_proxy demo-api:3000
+}
+
+{$SSO_HOST} {
+	reverse_proxy sso-api:3000
+}

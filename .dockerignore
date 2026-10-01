@@ -1,0 +1,16 @@
+# Patterns without **/ match only at the repository root.
+**/node_modules
+.git
+**/.next
+apps/web/dist
+apps/web/public/workspace
+coverage
+**/*.log
+# Secrets anywhere in the tree, e.g. infra/tencent/sso.env and the audit signing key
+**/.env
+**/.env.*
+!**/.env.example
+**/*.env
+**/*.pem
+handoff.md
+plans.md

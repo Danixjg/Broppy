@@ -1,7 +1,9 @@
 const api = "/api/brain";
 const status = document.getElementById("status");
+// In demo mode the workspace links here with the persona it was viewing as; the host ignores it for signed-in users.
+const persona = new URLSearchParams(location.search).get("user");
 async function request(path, method = "GET", data) {
-  const response = await fetch(api + path, { method, headers: { "content-type": "application/json" },
+  const response = await fetch(api + path, { method, headers: { "content-type": "application/json", ...(persona ? { "x-demo-user": persona } : {}) },
     ...(data ? { body: JSON.stringify(data) } : {}) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Request failed");
