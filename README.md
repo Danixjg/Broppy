@@ -78,7 +78,7 @@ Without a model, the built-in writer answers: it quotes the most relevant source
 The project pays for no model use (`decisions.md`, D27 and D28):
 
 - **Providers:** `LLM_PROVIDER` is `tokenhub`, `hunyuan` or `groq`.
-  - `tokenhub` is Tencent's international model service, TokenHub. Hunyuan's model there is `hy3-preview`. Each language model gets 1M free tokens for 90 days, and calls stop when they run out unless post-paid billing is enabled. It is off by default; keep it off.
+  - `tokenhub` is Tencent's international model service, TokenHub. Hunyuan's model there is `hy3`. Each language model gets 1M free tokens for 90 days, claimed under **New User Free Trial** in the Model Gallery or automatically on the first call, and calls stop when they run out unless post-paid billing is enabled. It is off by default; keep it off.
   - `hunyuan` is Tencent's China-site Hunyuan API (for example `hunyuan-t1-latest`), where the same rule applies under **Postpaid Settings** in the Tencent HY console.
   - Groq's free plan has no card on file, so it can never bill.
   - Every provider but Groq only starts with a usage file and budgets set below the free tokens, a second stop that keeps tokens for the showcase.

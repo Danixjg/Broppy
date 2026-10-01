@@ -163,7 +163,7 @@ describe("modelsFromEnv", () => {
   });
 
   it("refuses to start TokenHub without a usage file and budget, since Tencent bills if post-paid is turned on", () => {
-    const tokenhub = { LLM_PROVIDER: "tokenhub", LLM_API_KEY: "key", LLM_MODEL: "hy3-preview" };
+    const tokenhub = { LLM_PROVIDER: "tokenhub", LLM_API_KEY: "key", LLM_MODEL: "hy3" };
     expect(() => modelsFromEnv(tokenhub)).toThrow(/^TokenHub needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET/);
     expect(() => modelsFromEnv({ ...tokenhub, LLM_TOKEN_BUDGET: "100000" })).toThrow(/LLM_USAGE_FILE/);
     expect(modelsFromEnv({ ...tokenhub, LLM_USAGE_FILE: usageFile(), LLM_TOKEN_BUDGET: "100000" }).llm)

@@ -361,6 +361,8 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Chosen:** `LLM_PROVIDER=tokenhub`, with TokenHub's address built in, no Hunyuan-only fields, and the same required
   usage file and budget. D27's rule is unchanged; the team measures `hy3-preview` on TokenHub.
 - **Trade-off:** one more setting. Semantic search keeps the China-site embedding client, unconfirmed on TokenHub.
+- **Correction (1 Oct):** the console lists the released model as `hy3`; `hy3-preview` was its preview name. The
+  free trial is claimed under New User Free Trial in the Model Gallery, or automatically on the first call.
 
 ### Implementation details (language model)
 - **Client:** `apps/api/src/llm.ts` serves every provider through its OpenAI-style chat API, with fixed presets.
