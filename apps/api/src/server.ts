@@ -246,7 +246,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       if (request.method === "GET" && url.pathname === "/v1/workspace") {
-        return await reply(response, 200, { documents: await brain.visibleDocuments(user) });
+        return await reply(response, 200, await brain.workspace(user));
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/tier") {

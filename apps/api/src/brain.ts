@@ -1,6 +1,7 @@
 import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
+import { agreementsFor, duplicatesFor, latestFor, projectsFor, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
@@ -505,13 +506,23 @@ export class Brain {
 
   /** The items one link away, in either direction, that still exist: what this item links to, and what links to it. */
   linkedIds(docId: string): string[] {
+    return this.linkGraph()(docId);
+  }
+
+  // Reads every item's links once, so looking up many items costs one pass over the index.
+  private linkGraph(): (docId: string) => string[] {
     const exists = (id: string) => { const doc = this.index.documents.get(id); return Boolean(doc && !doc.deletedAt); };
-    if (!exists(docId)) return [];
-    const found = new Set((this.index.documents.get(docId)!.links ?? []).filter(id => id !== docId && exists(id)));
+    const incoming = new Map<string, string[]>();
     for (const doc of this.index.documents.values()) {
-      if (doc.docId !== docId && !doc.deletedAt && doc.links?.includes(docId)) found.add(doc.docId);
+      if (doc.deletedAt) continue;
+      for (const target of doc.links ?? []) incoming.set(target, [...(incoming.get(target) ?? []), doc.docId]);
     }
-    return [...found].sort();
+    return docId => {
+      if (!exists(docId)) return [];
+      const found = new Set([...(this.index.documents.get(docId)!.links ?? []), ...(incoming.get(docId) ?? [])]);
+      found.delete(docId);
+      return [...found].filter(exists).sort();
+    };
   }
 
   /**
@@ -533,8 +544,9 @@ export class Brain {
     const sources = [...best.values()].filter(item => item.score >= top / 2).sort((a, b) => b.score - a.score).slice(0, 8);
     const searched = new Set(candidates.map(item => item.docId));
     const linked = new Map<string, SearchCandidate & { linkedFrom: string }>();
+    const linkedTo = this.linkGraph();
     for (const from of sources) {
-      for (const docId of this.linkedIds(from.docId)) {
+      for (const docId of linkedTo(from.docId)) {
         const doc = this.index.documents.get(docId);
         const first = doc?.chunks[0];
         const score = from.score / 2;
@@ -550,8 +562,8 @@ export class Brain {
     return ranked;
   }
 
-  async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
-    const visible: Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
+  async visibleDocuments(user: User): Promise<Array<WorkspaceDocument & { tier: Tier; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
+    const visible: Array<Omit<WorkspaceDocument, "links"> & { tier: Tier; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
     this.assertOrg(user);
     for (const doc of this.index.documents.values()) {
       if (doc.deletedAt || !this.fga.check(user, doc.docId).allowed) continue;
@@ -572,7 +584,18 @@ export class Brain {
         lastPermissionSyncAt: fresh.lastPermissionSyncAt
       });
     }
-    return visible;
+    // Links name only what this person may also open, so a link never reveals a hidden item.
+    const ids = new Set(visible.map(doc => doc.docId));
+    const linked = this.linkGraph();
+    return visible.map(doc => ({ ...doc, links: linked(doc.docId).filter(id => ids.has(id)) }));
+  }
+
+  /** Everything the workspace shows, computed from the documents this person may open and nothing else. */
+  async workspace(user: User, now = new Date()) {
+    const documents = await this.visibleDocuments(user);
+    const projects = projectsFor(documents);
+    return { documents, projects, latest: latestFor(documents, projects, now), duplicates: duplicatesFor(documents, now),
+      suggestions: agreementsFor(documents, this.liveMode) };
   }
 
   async narrowTier(actor: User, docId: string, tier: Tier): Promise<void> {
