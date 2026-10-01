@@ -50,4 +50,17 @@ describe("balanceBySource", () => {
     const many = scored([["slack:1", 0.9], ["slack:2", 0.85], ["slack:3", 0.8], ["slack:4", 0.75], ["jira:5", 0.7]]);
     expect(ids(balanceBySource(many, ["slack"], sourceOf))).toEqual(["slack:1", "slack:2", "slack:3", "jira:5", "slack:4"]);
   });
+
+  it("keeps a named platform's first places for what the question matched, not for linked items", () => {
+    const withLinked = [{ docId: "slack:a", score: 0.9 }, { docId: "slack:linked", score: 0.8, linkedFrom: "jira:x" },
+      { docId: "jira:c", score: 0.7 }, { docId: "slack:b", score: 0.2 }];
+    expect(ids(balanceBySource(withLinked, ["slack"], sourceOf, 2))).toEqual(["slack:a", "slack:b", "jira:c", "slack:linked"]);
+  });
+
+  it("doesn't let a linked item make its platform clearly relevant", () => {
+    // Drive's own best match (0.2) is under half the top (0.45), so a linked Drive item can't pull it into the turns.
+    const withLinked = [{ docId: "jira:a", score: 0.9 }, { docId: "confluence:b", score: 0.5 },
+      { docId: "drive:linked", score: 0.45, linkedFrom: "jira:a" }, { docId: "jira:c", score: 0.4 }, { docId: "drive:d", score: 0.2 }];
+    expect(ids(balanceBySource(withLinked, [], sourceOf))).toEqual(["jira:a", "confluence:b", "jira:c", "drive:linked", "drive:d"]);
+  });
 });

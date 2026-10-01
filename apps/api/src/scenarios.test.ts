@@ -4,7 +4,7 @@ import { LocalGroundedLlm, NO_RESULT, type LlmClient } from "@brain/retrieval";
 import type { AuditEntry } from "@brain/types";
 import { Brain } from "./brain.js";
 import { searchAudit } from "./audit-search.js";
-import { createApiServer } from "./server.js";
+import { actorTrace, createApiServer } from "./server.js";
 
 // Worked scenarios from the challenge brief.
 
@@ -118,6 +118,111 @@ describe("Scenario 1: unified natural-language query", () => {
       "What's the status of the database migration project and were there any blockers raised in Slack?");
     expect(sent()).toContain("slack:db-planning");
     expect(anyTime.scope).toEqual({ sources: ["slack"] });
+  });
+});
+
+describe("Context assembly: linked items", () => {
+  const traceOf = (brain: Brain, traceId: string) => brain.audit.entries.filter(entry => entry.data.traceId === traceId);
+  const linked = (entries: AuditEntry[]) => entries.filter(entry => entry.type === "candidate_linked").map(entry => entry.data.docId);
+
+  it("brings in an item linked from a match, even one that shares no words with the question", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("david")!, "What's the status of DB-12?");
+    expect(sent()).toContain("drive:db-wave-checklist");
+    expect(answer.text).toContain("Wave three checklist: pause ledger writes");
+    expect(answer.citations.find(citation => citation.docId === "drive:db-wave-checklist")?.linkedFrom).toBe("jira:DB-12");
+    expect(answer.citations.find(citation => citation.docId === "jira:DB-12")?.linkedFrom).toBeUndefined();
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "candidate_linked",
+      data: expect.objectContaining({ docId: "drive:db-wave-checklist", fromDocId: "jira:DB-12" }) }));
+  });
+
+  it("never follows links from a document the asker may not open", async () => {
+    const askWithLink = async (from: string) => {
+      const { llm, sent } = recordingLlm();
+      const brain = new Brain(llm);
+      await brain.syncAll();
+      // As if the source declared it: a link to the chargeback guide, which matches nothing in the question.
+      brain.index.documents.get(from)!.links = ["drive:chargeback-guide"];
+      await brain.query(brain.user("alex")!, "Q3 incident milestones");
+      return { sent: sent(), linked: linked(brain.audit.entries) };
+    };
+    const fromRestricted = await askWithLink("confluence:q3-incident");
+    expect(fromRestricted.sent).toEqual(["drive:steering-deck"]);
+    expect(fromRestricted.linked).not.toContain("drive:chargeback-guide");
+    const fromOpen = await askWithLink("drive:steering-deck");
+    expect(fromOpen.linked).toContain("drive:chargeback-guide");
+    expect(fromOpen.sent).toContain("drive:chargeback-guide");
+  });
+
+  it("checks a linked item like any other, and keeps a refused one out of the asker's trace", async () => {
+    const question = "Why is DB-15 blocked?";
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    let traceId = "";
+    await brain.query(brain.user("david")!, question, id => { traceId = id; });
+    const trace = traceOf(brain, traceId);
+    expect(linked(trace)).toContain("slack:db-oncall");
+    expect(trace).toContainEqual(expect.objectContaining({ type: "access_decision",
+      data: expect.objectContaining({ docId: "slack:db-oncall", allowed: false }) }));
+    expect(sent()).not.toContain("slack:db-oncall");
+    expect(JSON.stringify(actorTrace(trace))).not.toContain("db-oncall");
+
+    const ravi = recordingLlm();
+    const raviBrain = new Brain(ravi.llm);
+    await raviBrain.syncAll();
+    let raviTrace = "";
+    await raviBrain.query(raviBrain.user("ravi")!, question, id => { raviTrace = id; });
+    expect(ravi.sent()).toContain("slack:db-oncall");
+    // Ravi's own trace says how the thread was reached.
+    expect(actorTrace(traceOf(raviBrain, raviTrace))).toContainEqual(expect.objectContaining({ type: "candidate_linked",
+      data: expect.objectContaining({ docId: "slack:db-oncall", fromDocId: "jira:DB-15" }) }));
+  });
+
+  it("applies the question's time window and access changes to linked items", async () => {
+    const { llm, sent, contexts } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    let traceId = "";
+    await brain.query(brain.user("david")!, migrationQuestion, id => { traceId = id; });
+    // The plan page links to #db-planning, but it's older than "last week".
+    expect(linked(traceOf(brain, traceId))).toContain("drive:db-wave-checklist");
+    expect(linked(traceOf(brain, traceId))).not.toContain("slack:db-planning");
+    expect(sent()).not.toContain("slack:db-planning");
+
+    // Scenario 4's removal also holds for the thread DB-12 links to.
+    await brain.removeSlackMember(brain.user("maya")!, "slack:db-migration", "david");
+    const before = contexts.length;
+    await brain.query(brain.user("david")!, "What's the status of DB-12?");
+    const latest = contexts.slice(before).flat().map(item => item.citation.slice(0, item.citation.lastIndexOf(":")));
+    expect(latest).toContain("jira:DB-12");
+    expect(latest).not.toContain("slack:db-migration");
+  });
+
+  it("drops what was reached through an item that fails its live check", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    // DB-12 is closed to David at the source, but not yet synced: the index still allows it.
+    const permissions = (await brain.connectors.jira.fetchPermissions("jira:DB-12"))!;
+    const native = permissions.native as Extract<typeof permissions.native, { source: "jira" }>;
+    brain.connectors.jira.updatePermissions("jira:DB-12", { ...permissions, native: { ...native,
+      issueViewers: native.issueViewers!.filter(viewer => viewer !== "david@aspire.example") } });
+    const answer = await brain.query(brain.user("david")!, "What's the status of DB-12?");
+    expect(linked(brain.audit.entries)).toContain("drive:db-wave-checklist");
+    expect(sent()).not.toContain("drive:db-wave-checklist");
+    expect(cited(answer)).not.toContain("drive:db-wave-checklist");
+  });
+
+  it("keeps scenario 1's cited lines, and sends the checklist attached to DB-12 to the writer", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("david")!, migrationQuestion);
+    expect(cited(answer)).toEqual(["slack:db-migration", "jira:DB-12", "confluence:db-migration-plan", "jira:DB-15"]);
+    expect(sent()).toContain("drive:db-wave-checklist");
   });
 });
 

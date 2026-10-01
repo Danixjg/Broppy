@@ -1,6 +1,6 @@
 import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
-import { balanceBySource, planQuery } from "./query-plan.js";
+import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
@@ -11,6 +11,7 @@ import type {
   ConnectorState,
   QueryAnswer,
   QueryScope,
+  SearchCandidate,
   Source,
   SourceDocument,
   SourcePermission,
@@ -359,13 +360,9 @@ export class Brain {
       catch { audit("search_fallback", {}); }
     }
     if (plan.window) {
-      const from = Date.parse(plan.window.from);
-      const to = Date.parse(plan.window.to);
       candidates = candidates.filter(item => {
         const doc = this.index.documents.get(item.docId);
-        if (!doc || (plan.sources.length && !plan.sources.includes(doc.source))) return true;
-        const updated = Date.parse(doc.updatedAt);
-        return updated >= from && updated <= to;
+        return !doc || inWindow(doc, plan);
       });
     }
     const candidateDocIds = [...new Set(candidates.map(candidate => candidate.docId))];
@@ -378,43 +375,66 @@ export class Brain {
       });
     }
 
-    const localDecisions = this.fga.batchCheck(user, candidateDocIds);
-    const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, candidateDocIds) : undefined;
-    const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
-    const decisions = localDecisions.map(decision => {
-      const remote = remoteById.get(decision.docId);
-      return decision.allowed && remote && !remote.allowed ? remote :
-        remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
-    });
-    for (const decision of decisions) {
-      audit("access_decision", {
-        ...this.auditDocument(decision.docId),
-        allowed: decision.allowed,
-        reason: decision.reason
+    // ② Access is decided on document IDs only, and every decision is audited.
+    const authorize = async (docIds: string[]): Promise<Set<string>> => {
+      const localDecisions = this.fga.batchCheck(user, docIds);
+      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
+      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
+      const decisions = localDecisions.map(decision => {
+        const remote = remoteById.get(decision.docId);
+        return decision.allowed && remote && !remote.allowed ? remote :
+          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
       });
-    }
+      for (const decision of decisions) {
+        audit("access_decision", {
+          ...this.auditDocument(decision.docId),
+          allowed: decision.allowed,
+          reason: decision.reason
+        });
+      }
+      return new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
+    };
 
-    const allowedIds = new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
+    const allowedIds = await authorize(candidateDocIds);
     if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
-    const authorizedCandidates = candidates.filter(item => allowedIds.has(item.docId));
+    const linked = this.linkedCandidates(candidates, allowedIds, plan, audit);
+    const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
+    const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
+      ...candidates.filter(item => allowedIds.has(item.docId)),
+      ...linked.filter(item => linkedAllowed.has(item.docId))
+    ];
     const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
     const currentCandidates = authorizedCandidates.filter(item =>
       this.index.documents.get(item.docId)?.metadata.status !== "superseded");
     const answerCandidates = balanceBySource(!asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates,
       plan.sources, docId => this.index.documents.get(docId)?.source);
+
+    // ④ Each document is checked at its source once per question, before its text is used.
+    const liveChecks = new Map<string, Promise<SourceDocument | undefined>>();
+    const liveCheck = (docId: string) => {
+      let check = liveChecks.get(docId);
+      if (!check) {
+        const indexedVersion = this.index.documents.get(docId)?.version;
+        check = this.liveAuthorizedDocument(user, docId).then(doc => {
+          audit("live_access_decision", {
+            ...this.auditDocument(docId), allowed: Boolean(doc),
+            ...(doc ? { sourceVersion: doc.version, refreshed: doc.version !== indexedVersion } : {})
+          });
+          return doc;
+        });
+        liveChecks.set(docId, check);
+      }
+      return check;
+    };
     const context: Array<{ citation: string; text: string }> = [];
     const chunkTexts = new Map<string, string>();
     const citationMap = new Map<string, Citation>();
     for (const candidate of answerCandidates) {
       if (context.length >= 8) break;
-      const indexedVersion = this.index.documents.get(candidate.docId)?.version;
-      const doc = await this.liveAuthorizedDocument(user, candidate.docId);
-      audit("live_access_decision", {
-        ...this.auditDocument(candidate.docId), allowed: Boolean(doc),
-        ...(doc ? { sourceVersion: doc.version, refreshed: doc.version !== indexedVersion } : {})
-      });
-      if (!doc) continue;
+      // A linked item counts only while the item it came through still passes its own live check.
+      if (candidate.linkedFrom && !await liveCheck(candidate.linkedFrom)) continue;
+      if (!await liveCheck(candidate.docId)) continue;
 
       const indexed = this.index.documents.get(candidate.docId);
       const freshChunk = indexed?.chunks.find(item => item.chunkId === candidate.chunkId);
@@ -428,7 +448,8 @@ export class Brain {
         url: indexed.url,
         version: indexed.version,
         updatedAt: indexed.updatedAt,
-        lastIndexedAt: indexed.lastIndexedAt
+        lastIndexedAt: indexed.lastIndexedAt,
+        ...(candidate.linkedFrom ? { linkedFrom: candidate.linkedFrom } : {})
       });
     }
 
@@ -491,6 +512,42 @@ export class Brain {
       if (doc.docId !== docId && !doc.deletedAt && doc.links?.includes(docId)) found.add(doc.docId);
     }
     return [...found].sort();
+  }
+
+  /**
+   * Candidates reached by one link from what search found. Links are followed only from documents the asker may open
+   * that clearly match, scoring at least half the best of them, up to eight: a denied document's links are never
+   * followed, so nothing hidden can steer an answer. Links add only what search didn't find. A linked item matched
+   * nothing in the question, so it brings its first chunk, scores half the item it came through, and keeps to the
+   * question's time window like any search result.
+   */
+  private linkedCandidates(candidates: SearchCandidate[], allowedIds: Set<string>, plan: QueryPlan,
+    audit: (type: string, data: Record<string, unknown>) => void): Array<SearchCandidate & { linkedFrom: string }> {
+    const best = new Map<string, SearchCandidate>();
+    for (const candidate of candidates) {
+      if (!allowedIds.has(candidate.docId)) continue;
+      const current = best.get(candidate.docId);
+      if (!current || candidate.score > current.score) best.set(candidate.docId, candidate);
+    }
+    const top = Math.max(0, ...[...best.values()].map(item => item.score));
+    const sources = [...best.values()].filter(item => item.score >= top / 2).sort((a, b) => b.score - a.score).slice(0, 8);
+    const searched = new Set(candidates.map(item => item.docId));
+    const linked = new Map<string, SearchCandidate & { linkedFrom: string }>();
+    for (const from of sources) {
+      for (const docId of this.linkedIds(from.docId)) {
+        const doc = this.index.documents.get(docId);
+        const first = doc?.chunks[0];
+        const score = from.score / 2;
+        if (searched.has(docId) || !doc || !first || !inWindow(doc, plan) || (linked.get(docId)?.score ?? -1) >= score) continue;
+        linked.set(docId, { docId, chunkId: first.chunkId, score, linkedFrom: from.docId });
+      }
+    }
+    const ranked = [...linked.values()].sort((a, b) => b.score - a.score);
+    for (const item of ranked) {
+      audit("candidate_linked", { ...this.auditDocument(item.docId), chunkRef: auditRef(item.chunkId),
+        score: Number(item.score.toFixed(4)), fromDocId: item.linkedFrom, fromRef: auditRef(item.linkedFrom) });
+    }
+    return ranked;
   }
 
   async visibleDocuments(user: User): Promise<Array<Pick<SourceDocument, "docId" | "source" | "title" | "content" | "url" | "updatedAt" | "metadata" | "tier"> & { version: number; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
@@ -750,6 +807,13 @@ export class Brain {
     if (!connector) throw new Error("Unknown source");
     return connector;
   }
+}
+
+// The question's time window: it applies to the platforms the question names, or to every platform when it names none.
+function inWindow(doc: SourceDocument, plan: QueryPlan): boolean {
+  if (!plan.window || (plan.sources.length && !plan.sources.includes(doc.source))) return true;
+  const updated = Date.parse(doc.updatedAt);
+  return updated >= Date.parse(plan.window.from) && updated <= Date.parse(plan.window.to);
 }
 
 // A Jira issue's status lives in its fields, not its text, so the answer context states it next to the issue key:

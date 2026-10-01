@@ -87,7 +87,8 @@ export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "seque
     entry.type === "live_access_decision" && entry.data.allowed === true)
     .map(entry => entry.data.docRef));
   const visible = entries.filter(entry => {
-    if (entry.type === "candidate_ranked" || entry.type === "access_decision") {
+    // A linked item shows only once it passed the live check, and only items the asker may open are followed.
+    if (entry.type === "candidate_ranked" || entry.type === "candidate_linked" || entry.type === "access_decision") {
       return allowedRefs.has(entry.data.docRef) &&
         (entry.type !== "access_decision" || entry.data.allowed === true);
     }
