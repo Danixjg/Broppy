@@ -49,7 +49,7 @@ curl -s http://127.0.0.1:3000/v1/query \
 | Ravi (`ravi`) | Head of payments (member), payments/security/fraud groups | Ask about PAY-101, SEC-44, and the cutover plan; Maya can remove his Slack channel membership to show a live access change on the next query. |
 | Maya (`maya`) | Admin | Edit mock source content, narrow a tier, revoke brain grants, remove a group or native Slack channel member, run sync, and preview access. |
 | Alex (`alex`) | Intern | Try a security or restricted incident query; the fixed no-result reply conceals inaccessible results. Catch up on the open steering deck and chargeback guide. |
-| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; he isn't in the private #db-oncall channel, so it never reaches his answers. Compare with Ravi's view. |
+| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; he isn't in the private #db-oncall channel, so it never reaches his answers. Compare with Ravi's view. Turn the #db-migration agreement into a Jira task, then mark it done. |
 | Nur (`nur`) | Compliance | Inspect and search audit events, seal a batch, inspect and verify a proof, view traces, and export CSV. |
 | Wei Ming (`wei`) | Contractor | Access explicitly shared vendor integration material; payment/security material remains denied. |
 
@@ -67,9 +67,32 @@ The challenge brief's scenarios run on the mock data as written:
 
 A question that names a platform (Slack, Jira, Confluence, Drive) gets that platform first. A time it names ("last week", "past 3 days", "yesterday") limits that platform, or every platform when none is named. Other platforms with a clearly relevant match take turns, so one answer can cite all four. The most relevant source is quoted in full, and the next three add their best sentence. Mock dates move forward with the clock, so "last week" keeps finding the demo data.
 
-In the default demo, changes made through admin routes alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
+In the default demo, changes made through admin routes or workspace actions alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
 
 With `HUNYUAN_EMBEDDING_API_KEY`, sync embeds changed document chunks and a query embeds its question. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Embedding or Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
+
+## Workspace
+
+What each person sees beside the chat is built only from what they may open: their projects, links, files and
+suggestions.
+
+- **Projects:** choose one in the header. Its Confluence master page, threads, tasks and files follow. A project is
+  listed only to people who can open its master page.
+- **Links:** a document lists the linked items the person may also open. Answers bring in a ticket's linked thread,
+  page and files, and say what linked them ("linked from DB-12").
+- **From conversation to task:** an agreement such as "Agreed: …" in a thread becomes a suggested Jira task.
+  - In the demo, David creates DB-16 from the #db-migration agreement, then marks it done from the task.
+  - With live sources, the card links to Jira instead, because the app only reads them.
+- **Latest and duplicates:** "Why latest?" lists the reason for every point, and a likely duplicate gets a merge
+  preview that changes nothing.
+- **Catch-up:** chosen by role and groups.
+  - Alex, an intern, gets an onboarding overview, and Wei what is shared with him.
+  - Team members get a project's status, blockers and decisions, from that project only.
+  - Nur gets the last 7 days of the audit trail.
+
+![David's Database migration page, with an agreement waiting to become a task](docs/images/workspace-project.png)
+
+![The Payment migration files: why the cutover plan is the latest, a merge preview, and an answer citing linked items](docs/images/workspace-duplicates.png)
 
 ## Language model (optional, free only)
 

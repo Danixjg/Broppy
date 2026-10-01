@@ -23,7 +23,7 @@ covers hosting and sign-in, and [worked examples](worked-examples.md) shows each
 | --- | --- | --- |
 | **Heterogeneous sources, without flattening permissions** | Each document keeps its platform's own permission shape: Slack channel members, Jira project and issue viewers, Confluence space and page viewers, Drive owner and shared users. [`nativeAllows`](../packages/connectors/src/index.ts) applies that shape on top of brain grants and the tier. Contractors see only what is shared with them by name. | [Connector tests](../packages/connectors/src/index.test.ts): "applies native permission changes without changing content and reports changes". [FGA tests](../packages/fga-adapter/src/remote.test.ts): "denies when native source or local tier denies, even if remote allows". [Scenario 4](worked-examples.md#scenario-4-access-changes-apply-to-the-next-question). |
 | **Permission-aware retrieval** | Search returns IDs only, and access is decided on document IDs before any text is read (① ②). Each document is checked again at its source before its text enters the context (④). When nothing is allowed, every asker gets the same fixed reply. | [Brain tests](../apps/api/src/brain.test.ts): "never sends denied titles or private channel names to the LLM", "applies a live permission revocation on the next query". [Scenario 3](worked-examples.md#scenario-3-no-hint-that-restricted-content-exists). |
-| **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts), scenario 1. [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
+| **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names. Links the sources make themselves (Jira issue links and attachments, Confluence page links, and issue keys and links in text) bring in a ticket's linked thread, page and files, one hop from the documents the asker may open. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts): scenario 1, and "Context assembly: linked items", such as "never follows links from a document the asker may not open". [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
 | **Audit trail: tamper-evident, complete, queryable** | Every step of sync and of each question appends an event to a hash chain (⑤). Merkle batches are sealed on every sync and signed in SSO mode, and Supabase rejects updates and deletes. Compliance search reads plain-English questions and answers "who retrieved this document". | Brain tests: "produces a verifiable Merkle inclusion proof". [Audit tests](../packages/audit/src/index.test.ts). [Scenario 5](worked-examples.md#scenario-5-the-audit-trail-answers-compliance-questions), including the tamper checks. |
 | **LLM safety** | A writer sees only the question and passages the asker may see, freshly checked. Every answer line must be copied word for word from a passage it cites. A model runs behind a usage meter, and the built-in writer takes over when it can't answer. | Brain tests: "removes uncited output" and the "When the language model can't answer" suite. [Usage meter tests](../apps/api/src/llm-budget.test.ts). |
 
@@ -58,7 +58,8 @@ flowchart TB
     Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms named,<br/>time window"]
     Plan --> Search["① Hybrid search over the<br/>whole index: keywords,<br/>vectors and freshness;<br/>returns IDs only"]
     Search --> Check["② Access check on<br/>document IDs only"]
-    Check --> Live["④ Live check at the source:<br/>permission and version"]
+    Check --> Links["Follow links one hop,<br/>from allowed documents<br/>only, then ② again"]
+    Links --> Live["④ Live check at the source:<br/>permission and version"]
     Live --> Context["Context: up to 8 passages,<br/>platforms take turns"]
     Context --> Writer["Writer: built-in,<br/>or a metered model"]
     Writer --> Ground["Grounding: only lines<br/>copied word for word"]
@@ -121,17 +122,52 @@ flowchart TB
 3. **Access check on IDs:** local grants, native rules and the tier decide each candidate document. Contractors are
    denied unless a document is shared with them by name, and remote FGA must agree when it is set. With nothing
    allowed, the API returns the fixed reply.
-4. **Choose passages:** superseded documents are set aside unless the question asks for history ("old",
+4. **Follow links:** links are followed one hop, in either direction, from the allowed documents that clearly match
+   (at least half the best of them, up to eight).
+   - A denied document's links are never followed, so nothing hidden can steer an answer.
+   - A linked item scores half the item it came through, keeps to the question's time window and passes the same
+     access check.
+   - It never takes the places of a platform the question named, nor makes a platform count as clearly relevant.
+5. **Choose passages:** superseded documents are set aside unless the question asks for history ("old",
    "previous"). Platforms with a clearly relevant match take turns.
-5. **Live check:** each passage's document is checked at the source before its text is used, up to 8 passages.
-6. **Write and ground:** the writer answers from those passages, and only lines copied word for word, each with its
+6. **Live check:** each passage's document is checked at the source once before its text is used, up to 8 passages.
+   A linked item counts only while the item it came through passes too.
+7. **Write and ground:** the writer answers from those passages, and only lines copied word for word, each with its
    citation, are kept.
-7. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
-8. **Answer:** citations carry the title, link, version, edit time and index time. Answers also say which platforms
-   and dates were searched.
+8. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
+9. **Answer:** citations carry the title, link, version, edit time and index time, and the item a link came through.
+   Answers also say which platforms and dates were searched, and which project they kept to.
 
 The fixed reply, "No accessible information was found for this query.", is the same for a denied document and for
 one that doesn't exist. The asker's own trace of such a question is a single event.
+
+## The workspace
+
+Everything the workspace shows is built in [`workspace.ts`](../apps/api/src/workspace.ts) from the documents the
+person may open, and nothing else, so nothing hidden can show up. Each document lists only the linked items the
+person may also open.
+
+- **Projects:** a Confluence page labelled "master" defines a project. A project holds:
+  - what the page links to;
+  - the issues, pages and channels tagged with its key;
+  - the files and threads those issues link to.
+
+  It is listed only to people who can open its master page.
+- **Latest:** each project's latest Drive file, with the reason for every point: status, a recent edit, the version,
+  and a link from the master page. Superseded files never count.
+- **Duplicates:** files with the same title where one is superseded, or sharing at least 60% of their words. The
+  merge is a preview that changes nothing.
+- **From conversation to task:** sentences such as "Agreed: …" or "Decision: …" in a thread become a suggested Jira
+  task in the thread's project.
+  - Creating it and marking a task done work on mock sources only.
+  - The task's text comes from the agreed sentence alone. It links back to the thread and copies the permissions of
+    the issue it is modelled on.
+  - With live sources the app stays read-only and links to the project in Jira.
+- **Catch-up** (`/v1/catch-up`): chosen by role and groups, and asked like any question.
+  - Interns get what a new hire should read first.
+  - People in no group see what is shared with them.
+  - Everyone else gets a project's status, blockers and recent decisions, kept to that project's items.
+  - Compliance gets the last 7 days of the audit trail instead.
 
 ## Writers
 
@@ -181,6 +217,11 @@ one that doesn't exist. The asker's own trace of such a question is a single eve
   unconfirmed.
 - **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
+- **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.
+- **Links by path:** a link is recognised by its path, whatever the host. A link to another company's Jira issue with
+  the same key would point at ours, though that item still passes every access check.
+- **Saved demo data:** an API that saves its state to Supabase keeps the mock data it first saved, with its dates.
+  Newer demo data, such as links, appears only once that saved state is reset.
 
 ## More
 
