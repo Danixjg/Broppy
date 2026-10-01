@@ -77,7 +77,8 @@ async function identity(request: IncomingMessage, brain: Brain, auth0?: Auth0Tok
   return typeof id === "string" ? brain.user(id) : undefined;
 }
 
-function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "sequence" | "timestamp" | "type" | "data">> {
+/** The asker's own view of a query's trace: only documents they were allowed, and no trace ID. */
+export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "sequence" | "timestamp" | "type" | "data">> {
   const answer = [...entries].reverse().find(entry => entry.type === "answer_returned");
   if (answer?.data.empty === true) {
     return [{ sequence: 1, timestamp: answer.timestamp, type: "answer_returned", data: { empty: true } }];

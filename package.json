@@ -9,6 +9,8 @@
     "doctor:sso": "tsx --env-file=.env.local apps/api/src/doctor.ts",
     "llm:usage": "tsx --env-file=.env.local apps/api/src/llm-usage.ts",
     "llm:calibrate": "tsx --env-file=.env.local apps/api/src/llm-calibrate.ts",
+    "scenarios": "vitest run apps/api/src/worked-examples.test.ts --update",
+    "scenarios:model": "WORKED_EXAMPLES=model node --env-file=.env.local node_modules/vitest/vitest.mjs run apps/api/src/worked-examples.test.ts",
     "test": "vitest run && node --test apps/web/*.nodecheck.js",
     "typecheck": "tsc --noEmit && pnpm --filter @brain/web typecheck"
   },
