@@ -435,15 +435,22 @@ export class Brain {
     if (!context.length) return this.noResult(user, traceId, scope);
     audit("context_sent", { chunkIds: [...citationMap.keys()] });
     await this.audit.flush();
+    const evidence = new Map(context.map(item => [item.citation, item.text]));
     let generated: string;
+    let fromModel = !(this.llm instanceof LocalGroundedLlm);
     try {
       generated = await this.llm.generate(context, trimmed);
     } catch (error) {
       audit("llm_fallback", { reason: error instanceof ModelUnavailable ? error.reason : "error" });
       generated = await this.fallbackLlm.generate(context, trimmed);
+      fromModel = false;
     }
-    const answer = groundedOutput(generated, citationMap,
-      new Map(context.map(item => [item.citation, item.text])));
+    let answer = groundedOutput(generated, citationMap, evidence);
+    // Nothing the model wrote was copied word for word from the sources: answer as if no model were set.
+    if (fromModel && answer.text === NO_RESULT) {
+      audit("llm_fallback", { reason: "ungrounded" });
+      answer = groundedOutput(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+    }
     let outputUser = user;
     if (revalidateUser) {
       try {

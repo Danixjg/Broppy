@@ -34,6 +34,20 @@ describe("pnpm llm:usage", () => {
     expect(formatUsageReport(report)).toContain("No model answers were measured");
   });
 
+  it("reports a reply with nothing copied word for word as no usable answer, counting its tokens", async () => {
+    const paraphrasing = { generateWithUsage: vi.fn(async () => ({
+      text: "PAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]",
+      usage: { prompt: 900, completion: 100, total: 1000 }
+    })) };
+    const report = await measureUsage(paraphrasing, { questions: [["ravi", "What does PAY-101 need before cutover?"]] });
+    expect(report.calls[0]).toMatchObject({ usage: { total: 1000 }, fallback: "ungrounded" });
+    expect(report.fits).toBe(false);
+    const text = formatUsageReport(report);
+    expect(text).toContain("no model answer (ungrounded)");
+    expect(text).toContain("No model answers were measured");
+    expect(text).toContain("word for word");
+  });
+
   it("counts the tokens of an answer cut off at the limit, and says why it gave no answer", async () => {
     const cutOff = {
       generateWithUsage: vi.fn(async (context: Array<{ citation: string; text: string }>, question: string) => {

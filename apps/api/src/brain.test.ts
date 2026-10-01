@@ -363,10 +363,30 @@ describe("When the language model can't answer", () => {
     }
   });
 
-  it("still drops a model's line that isn't copied word for word", async () => {
+  it("answers with the built-in writer when nothing in the model's reply is copied word for word", async () => {
+    const reference = new Brain();
+    await reference.syncAll();
+    const expected = await reference.query(reference.user("ravi")!, question);
     const brain = new Brain({ generate: async () => "PAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]" });
     await brain.syncAll();
-    expect(await brain.query(brain.user("ravi")!, question)).toEqual({ text: NO_RESULT, citations: [] });
+    const answer = await brain.query(brain.user("ravi")!, question);
+    // The paraphrase is still dropped; the asker gets the built-in writer's answer from the same sources.
+    expect(answer.text).not.toContain("just needs");
+    expect(answer.text).toBe(expected.text);
+    expect(answer.citations.map(citation => citation.chunkId)).toEqual(expected.citations.map(citation => citation.chunkId));
+    expect(brain.audit.entries.filter(entry => entry.type === "llm_fallback").map(entry => entry.data.reason))
+      .toEqual(["ungrounded"]);
+  });
+
+  it("keeps a model's lines that are copied word for word and drops the rest, without falling back", async () => {
+    const brain = new Brain({ generate: async context => `${context[0].text.split(/(?<=[.!?])\s+/)[0]} ` +
+      `[${context[0].citation}]\nPAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]` });
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("ravi")!, question);
+    expect(answer.text.split("\n")).toHaveLength(1);
+    expect(answer.text).not.toContain("just needs");
+    expect(answer.citations).toHaveLength(1);
+    expect(brain.audit.entries.some(entry => entry.type === "llm_fallback")).toBe(false);
   });
 
   it("keeps syncing and answering by keywords once embeddings are over budget", async () => {

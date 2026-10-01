@@ -85,13 +85,15 @@ export function formatUsageReport(report: UsageReport): string {
   });
   const modelCalls = report.calls.filter(call => call.usage || call.fallback).length;
   const answered = report.calls.filter(call => call.usage && !call.fallback).length;
+  const reasons = "\"ungrounded\" means the model didn't copy sentences word for word, and an answer cut off at " +
+    "LLM_MAX_TOKENS needs a higher limit.";
   if (!answered) {
-    lines.push("", "No model answers were measured. Check the reasons above, then the provider, key and model settings.");
+    lines.push("", `No model answers were measured. ${reasons} Otherwise, check the provider, key and model settings.`);
     return lines.join("\n");
   }
   if (answered < modelCalls) {
     lines.push("", `${modelCalls - answered} of ${modelCalls} model calls gave no usable answer, so the built-in ` +
-      "writer answered those. An answer cut off at LLM_MAX_TOKENS needs a higher limit.");
+      `writer answered those. ${reasons}`);
   }
   const share = Math.round(100 * report.projected / report.freeTokens);
   lines.push("", `Average: ${number(report.average)} tokens per model call.`,
