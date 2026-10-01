@@ -75,8 +75,8 @@ Without a model, the built-in writer answers: it quotes the most relevant source
 
 The project pays for no model use (`decisions.md`, D27 and D28):
 
-- **Providers:** `LLM_PROVIDER` is `hunyuan` or `groq`. Groq's free plan has no card on file, so it can never bill. Hunyuan bills automatically once its free tokens run out, so it only starts with a usage file and budgets set below the free tokens.
-- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
+- **Providers:** `LLM_PROVIDER` is `hunyuan` or `groq`. Groq's free plan has no card on file, so it can never bill. Tencent bills past Hunyuan's free tokens only when **Postpaid Settings** is turned on in the Tencent HY console. It is off by default; keep it off. Hunyuan also only starts with a usage file and budgets set below the free tokens, a second stop that keeps tokens for the showcase.
+- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or no line of its reply is copied word for word, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
   - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
   - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
 - **One account, one budget:** each machine counts only its own calls. When a laptop and the server share a Tencent Cloud account, their `LLM_TOKEN_BUDGET` values together must stay below the free tokens, for example 100000 and 700000. The same goes for `EMBEDDING_TOKEN_BUDGET`.

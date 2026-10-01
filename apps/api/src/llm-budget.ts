@@ -219,7 +219,8 @@ export function modelsFromEnv(env: NodeJS.ProcessEnv = process.env): { llm?: Bud
     dailyAnswers: positiveInteger(env.LLM_DAILY_ANSWERS, "LLM_DAILY_ANSWERS")
   };
   if (!chat && !embedder) return {};
-  // Hunyuan bills automatically once its free tokens run out, so it only runs with a budget that survives restarts.
+  // Past its free tokens, Tencent bills only if postpaid is turned on in its console. The budget is a second stop that
+  // survives restarts, whatever that setting says.
   if (chat?.provider === "hunyuan" && (!file || limits.chatTokens === undefined)) {
     throw new Error("Hunyuan needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET, so it stops before its free tokens run out");
   }

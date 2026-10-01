@@ -305,7 +305,9 @@ Each entry records the options that were considered, what was chosen, and the tr
   - hunyuan-T1 (chat) and hunyuan-embedding each get 1M tokens at first activation, valid for a year;
   - the translation models get 100M, but they can't write answers.
 
-  After the free tokens, Tencent bills pay-as-you-go automatically.
+  Tencent's billing page says a used-up or expired free package doesn't switch to pay-as-you-go. Calls fail with a
+  billing error unless **Postpaid Settings** is turned on in the Tencent HY console, and it is off by default. This
+  came from search results, so the team confirms it in the console.
 - **Measured:** a model call here costs about 510 tokens without "thinking": 200–520 in and 60–170 out. Questions with
   nothing the asker may see never call the model. About 350 answers are expected across development, worked examples,
   the video, the team and the judges.
@@ -316,7 +318,9 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Chosen:** Hunyuan, if `pnpm llm:usage` shows the plan fits its free 1M tokens: under 70%, which is about 2,000
   tokens per answer. Otherwise, Groq's free plan.
 - **How "never paying" is kept:**
-  - Hunyuan only starts with a usage file and budgets set below the free tokens.
+  - Postpaid Settings stays off in the Tencent HY console, so calls past the free tokens fail instead of billing.
+  - Hunyuan only starts with a usage file and budgets set below the free tokens. That's a second stop, and it also
+    keeps tokens for the showcase.
   - Groq has no card on file, so it can't bill.
   - At any limit, the built-in writer answers instead.
 - **Trade-off:** T1 is a reasoning model whose thinking tokens aren't known until measured, so the choice waits for
@@ -327,6 +331,22 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Chosen:** with Groq, a small daily allowance shared by every visitor (`LLM_DAILY_ANSWERS`, 100 to start). With
   Hunyuan, decided after measuring; until then the demo uses the built-in writer.
 - **Trade-off:** visitors share one allowance, so a busy day ends in built-in answers until midnight UTC.
+
+### D29 — A model reply with nothing copied word for word
+- **Context:** every answer keeps only lines copied word for word from sources the asker may see. A model that
+  paraphrases, or a model that only translates, can lose every line.
+- **Options:** the built-in writer's answer / the fixed "nothing found" reply.
+- **Chosen:** the built-in writer's answer, from the same authorized sources. The audit records `llm_fallback` with
+  reason `ungrounded`, and `pnpm llm:usage` counts it as no usable answer.
+- **Trade-off:** as with every fallback, the asker isn't told which writer answered.
+
+### D30 — No second model as a backup
+- **Context:** the built-in writer is code in this repository, not a model. It needs no key, network or allowance, so
+  it is the step that always works.
+- **Options:** one model, then the built-in writer / Hunyuan, then Groq, then the built-in writer.
+- **Chosen:** one model, then the built-in writer. The model is whichever one `pnpm llm:usage` picks (D27).
+- **Trade-off:** when the chosen model can't answer, the built-in writer quotes sources instead of picking sentences.
+  The measurement's 30% margin is meant to keep that rare during the showcase.
 
 ### Implementation details (language model)
 - **Client:** `apps/api/src/llm.ts` serves both providers through their OpenAI-style chat API, with fixed presets.
@@ -348,8 +368,8 @@ Each entry records the options that were considered, what was chosen, and the tr
   - Each place that uses one Tencent Cloud account counts only its own calls. Their budgets together must stay below
     the free tokens, e.g. 100000 on a laptop and 700000 on the server.
 - **Fallbacks:**
-  - Answers: over a limit, rate limited or failing, the built-in writer answers from the same authorized context,
-    and the audit records `llm_fallback` with the reason.
+  - Answers: over a limit, rate limited, failing, or with no line copied word for word (`ungrounded`, D29), the
+    built-in writer answers from the same authorized context, and the audit records `llm_fallback` with the reason.
   - Embeddings: over budget, embeddings pause, so sync and questions use keyword search.
 - **Scripts:**
   - `pnpm llm:usage` measures ten typical questions and gives the verdict.

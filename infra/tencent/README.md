@@ -177,6 +177,8 @@ Paste the Groq API key into `demo.env`. All visitors share `LLM_DAILY_ANSWERS` (
 built-in writer answers until midnight UTC.
 
 **The SSO API on Hunyuan, within its free tokens.** Do this only after `pnpm llm:usage` reports that the plan fits.
+First, in the Tencent HY console, check that **Settings > Postpaid Settings** is off, as it is by default. Calls past
+the free tokens then fail instead of billing, and the budgets below are a second stop.
 Uncomment the Hunyuan lines in `sso.env`. Every machine using the same Tencent Cloud account draws on the same free
 tokens, and each counts only its own calls. So the server's budgets plus the laptops' must stay below 800000 each: the
 example's 700000 leaves 100000 for local runs. Then run `sudo docker compose --profile sso up -d`. The API refuses to
@@ -223,7 +225,7 @@ Start with `sudo docker compose ps` and `sudo docker compose logs --tail 50 <ser
 | The start page has no **Try the demo** | `DEMO_API_URL` isn't set for that environment, or the deployment predates it | Step 5, then redeploy |
 | The workspace says "The demo API did not accept this persona" | `DEMO_API_URL` points at the SSO API | Use the `demo-api.…` address |
 | The workspace says "The demo API is not reachable; check DEMO_API_URL" | Wrong address, or the demo API is down | Run the step 4 checks |
-| Answers no longer come from the model | The daily allowance or the budget is used up, or the model is rate limited. Ask the audit log for `llm_fallback` to see which. | Wait for midnight UTC, or check the counts (step 7). Raise a Hunyuan budget only within its free tokens. |
+| Answers no longer come from the model | The daily allowance or the budget is used up, the model is rate limited, or its replies weren't copied word for word (`ungrounded`). Ask the audit log for `llm_fallback` to see which. | Wait for midnight UTC, or check the counts (step 7). Raise a Hunyuan budget only within its free tokens. |
 | An API stops at startup with `Hunyuan needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET…` | The Hunyuan settings have no budget | Set the budgets in `sso.env` (step 7) |
 | The build stops with `exit code: 137` | The server ran out of memory while building | Add swap (below), then build again |
 
