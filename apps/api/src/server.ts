@@ -249,6 +249,17 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, await brain.workspace(user));
       }
 
+      if (request.method === "POST" && url.pathname === "/v1/catch-up") {
+        const input = await body(request);
+        if (input.project !== undefined && (typeof input.project !== "string" || input.project.length > 64)) {
+          throw new Error("Invalid project");
+        }
+        let traceId: string | undefined;
+        const result = await brain.catchUp(user, input.project as string | undefined, id => { traceId = id; },
+          () => identity(request, brain, auth0, !connectors));
+        return await reply(response, 200, result.kind === "audit" ? result : { ...result, traceId });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/tasks") {
         const input = await body(request);
         if (typeof input.threadDocId !== "string" || typeof input.sentence !== "string" || input.sentence.length > 1000) {

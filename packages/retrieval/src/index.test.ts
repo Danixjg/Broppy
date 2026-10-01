@@ -193,6 +193,15 @@ describe("LocalGroundedLlm", () => {
     expect(answer.citations.map(item => item.chunkId)).toEqual(["runbook:0", "thread:0", "issue:0", "plan:0"]);
   });
 
+  it("picks a source's best sentence by topic words, not by small words such as 'is' or 'of'", async () => {
+    const context = [
+      { citation: "first:0", text: "First source." },
+      { citation: "thread:0", text: "The standup is one of the notes we are keeping. Blocker raised on the ledger database." }
+    ];
+    const output = await new LocalGroundedLlm().generate(context, "What is the status of the database, and what are the blockers?");
+    expect(output.split("\n")[1]).toBe("Blocker raised on the ledger database. [thread:0]");
+  });
+
   it("quotes at most six sentences of the first source", async () => {
     const text = Array.from({ length: 9 }, (_, index) => `Sentence ${index + 1}.`).join(" ");
     const output = await new LocalGroundedLlm().generate([{ citation: "long:0", text }], "sentence");

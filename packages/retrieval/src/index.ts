@@ -242,11 +242,10 @@ export interface LlmClient {
 
 export class LocalGroundedLlm implements LlmClient {
   async generate(context: Array<{ citation: string; text: string }>, question: string): Promise<string> {
-    const queryTerms = new Set(terms(question).filter(term =>
-      !["what", "which", "does", "the", "for", "and", "before", "after", "about"].includes(term)));
+    const topics = new Set(queryTerms(question));
     const prerequisite = /\b(need|needs|required|require|requires|before|prerequisite|depend|depends)\b/i.test(question);
     const score = (value: string) => {
-      const overlap = [...new Set(terms(value))].filter(term => queryTerms.has(term)).length;
+      const overlap = [...new Set(terms(value))].filter(term => topics.has(term)).length;
       const required = prerequisite && /\b(before|requires?|complete|must|depends?|prerequisite)\b/i.test(value) ? 3 : 0;
       return overlap + required;
     };

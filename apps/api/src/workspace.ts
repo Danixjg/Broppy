@@ -1,5 +1,5 @@
 import { queryTerms } from "@brain/retrieval";
-import type { Source } from "@brain/types";
+import type { AuditEntry, MerkleBatch, Source, User } from "@brain/types";
 
 // What the workspace shows beside the documents: projects, the latest file, likely duplicates and task suggestions.
 // Every function here reads only the documents the viewer may open, so nothing they can't see can show up.
@@ -177,4 +177,42 @@ export function agreementsFor(docs: readonly WorkspaceDocument[], live: boolean)
     }
   }
   return suggestions;
+}
+
+/**
+ * The catch-up question for a person, chosen by role and groups: interns get an onboarding overview, someone in no
+ * group what is shared with them, everyone else a project's status, blockers and decisions. Compliance gets the audit
+ * summary instead, so no question.
+ */
+export function catchUpQuestion(person: Pick<User, "name" | "groups" | "role">, project?: Pick<Project, "name">): string | undefined {
+  if (person.role === "compliance") return undefined;
+  if (person.groups.includes("interns")) {
+    return `What should a new hire read first${project ? ` about ${project.name}` : ""}: the overview, the milestones and the workflow guides?`;
+  }
+  if (!person.groups.length) return `What has been shared with ${person.name}, and what does ${person.name} own?`;
+  return `What is the status of ${project ? project.name : "the work I can see"}, what are the blockers, and what was decided recently?`;
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const PERMISSION_CHANGES = ["tier_narrowed", "native_permission_changed", "group_membership_removed", "channel_membership_removed"];
+
+/** Compliance's catch-up: the last 7 days of the audit trail, counted from its entries. */
+export function auditSummary(entries: readonly AuditEntry[], batches: ReadonlyArray<Pick<MerkleBatch, "sealedAt">>,
+  nameOf: (actor: string) => string, now: Date, verifies: boolean): string[] {
+  const since = now.getTime() - 7 * DAY;
+  const recent = entries.filter(entry => Date.parse(entry.timestamp) >= since);
+  const count = (types: readonly string[]) => recent.filter(entry => types.includes(entry.type)).length;
+  const askers = [...new Set(recent.filter(entry => entry.type === "query_received").map(entry => nameOf(entry.actor)))].sort();
+  const denied = recent.filter(entry => ["access_decision", "live_access_decision"].includes(entry.type) && entry.data.allowed === false).length;
+  const names = askers.length > 1 ? `${askers.slice(0, -1).join(", ")} and ${askers.at(-1)}` : askers[0];
+  return [
+    `${plural(count(["query_received"]), "question", "questions")} in the last 7 days${names ? `, from ${names}` : ""}.`,
+    `${plural(denied, "document check", "document checks")} denied access.`,
+    `${plural(count(PERMISSION_CHANGES), "permission change", "permission changes")} and ` +
+      `${plural(count(["source_content_changed"]), "content edit", "content edits")}.`,
+    `${plural(count(["task_created"]), "Jira task", "Jira tasks")} created from the workspace and ` +
+      `${count(["task_status_changed"])} marked done.`,
+    `${plural(batches.filter(batch => Date.parse(batch.sealedAt) >= since).length, "Merkle batch", "Merkle batches")} sealed. ` +
+      `The chain verifies: ${verifies ? "yes" : "no"}.`
+  ];
 }

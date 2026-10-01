@@ -1,8 +1,8 @@
 import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
-import { agreementSummary, agreementsFor, duplicatesFor, latestFor, projectOf, projectsFor, sentences, tracked,
-  type WorkspaceDocument } from "./workspace.js";
+import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplicatesFor, latestFor, projectOf, projectsFor,
+  sentences, tracked, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
@@ -324,8 +324,13 @@ export class Brain {
     return `Import ${total ? Math.floor(100 * done / total) : 0}% complete — answers may be missing older material`;
   }
 
+  /**
+   * Answers a question from what the person may see. `within` keeps the answer to one project's items, as the
+   * workspace's catch-up does.
+   */
   async query(user: User, question: string, onTrace?: (traceId: string) => void,
-    revalidateUser?: () => Promise<User | undefined>): Promise<QueryAnswer> {
+    revalidateUser?: () => Promise<User | undefined>,
+    options: { within?: { project: string; docIds: readonly string[] } } = {}): Promise<QueryAnswer> {
     this.assertOrg(user);
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
@@ -339,8 +344,11 @@ export class Brain {
     // Platforms the question names come first in the answer; a time range it names applies to those platforms, or to
     // every platform when it names none.
     const plan = planQuery(trimmed);
-    const scope: QueryScope | undefined = plan.sources.length || plan.window ? { sources: plan.sources, ...plan.window } : undefined;
-    audit("query_planned", { sources: plan.sources, ...plan.window });
+    const within = options.within ? new Set(options.within.docIds) : undefined;
+    const project = options.within?.project;
+    const scope: QueryScope | undefined = plan.sources.length || plan.window || project
+      ? { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) } : undefined;
+    audit("query_planned", { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) });
 
     let queryVector: number[] | undefined;
     if (this.embedding && (this.embedding.available?.() ?? true)) {
@@ -367,6 +375,7 @@ export class Brain {
         return !doc || inWindow(doc, plan);
       });
     }
+    if (within) candidates = candidates.filter(item => within.has(item.docId));
     const candidateDocIds = [...new Set(candidates.map(candidate => candidate.docId))];
     audit("candidates_found", { count: candidateDocIds.length });
     for (const candidate of candidates) {
@@ -400,7 +409,7 @@ export class Brain {
     const allowedIds = await authorize(candidateDocIds);
     if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
-    const linked = this.linkedCandidates(candidates, allowedIds, plan, audit);
+    const linked = this.linkedCandidates(candidates, allowedIds, plan, audit, within);
     const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
     const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
       ...candidates.filter(item => allowedIds.has(item.docId)),
@@ -534,7 +543,7 @@ export class Brain {
    * question's time window like any search result.
    */
   private linkedCandidates(candidates: SearchCandidate[], allowedIds: Set<string>, plan: QueryPlan,
-    audit: (type: string, data: Record<string, unknown>) => void): Array<SearchCandidate & { linkedFrom: string }> {
+    audit: (type: string, data: Record<string, unknown>) => void, within?: Set<string>): Array<SearchCandidate & { linkedFrom: string }> {
     const best = new Map<string, SearchCandidate>();
     for (const candidate of candidates) {
       if (!allowedIds.has(candidate.docId)) continue;
@@ -551,7 +560,8 @@ export class Brain {
         const doc = this.index.documents.get(docId);
         const first = doc?.chunks[0];
         const score = from.score / 2;
-        if (searched.has(docId) || !doc || !first || !inWindow(doc, plan) || (linked.get(docId)?.score ?? -1) >= score) continue;
+        if (searched.has(docId) || !doc || !first || !inWindow(doc, plan) || (within && !within.has(docId)) ||
+          (linked.get(docId)?.score ?? -1) >= score) continue;
         linked.set(docId, { docId, chunkId: first.chunkId, score, linkedFrom: from.docId });
       }
     }
@@ -589,6 +599,26 @@ export class Brain {
     const ids = new Set(visible.map(doc => doc.docId));
     const linked = this.linkGraph();
     return visible.map(doc => ({ ...doc, links: linked(doc.docId).filter(id => ids.has(id)) }));
+  }
+
+  /**
+   * A catch-up chosen by the person's role and groups, asked like any question, so it is checked and audited the same
+   * way. A project counts only if the person may open its master page; the answer then keeps to that project's items.
+   * Compliance gets the last 7 days of the audit trail instead.
+   */
+  async catchUp(user: User, projectKey?: string, onTrace?: (traceId: string) => void,
+    revalidateUser?: () => Promise<User | undefined>, now = new Date()): Promise<
+    { kind: "audit"; lines: string[] } | { kind: "question"; question: string; answer: QueryAnswer }> {
+    this.assertOrg(user);
+    if (user.role === "compliance") {
+      return { kind: "audit", lines: auditSummary(this.audit.entries, this.audit.batches, actor => this.user(actor)?.name ?? actor,
+        now, this.audit.verifyChain() && this.audit.verifyBatches()) };
+    }
+    const project = projectKey ? projectsFor(await this.visibleDocuments(user)).find(item => item.key === projectKey) : undefined;
+    const question = catchUpQuestion(user, project)!;
+    const answer = await this.query(user, question, onTrace, revalidateUser,
+      project ? { within: { project: project.name, docIds: project.docIds } } : {});
+    return { kind: "question", question, answer };
   }
 
   /** Everything the workspace shows, computed from the documents this person may open and nothing else. */

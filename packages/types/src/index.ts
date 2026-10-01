@@ -129,11 +129,13 @@ export interface Citation {
   linkedFrom?: string;
 }
 
-/** Where an answer looked first and the time range it kept to, when the question named them. */
+/** Where an answer looked first and the time range it kept to, when the question named them, and the project it kept
+ * to, when it was asked about one. */
 export interface QueryScope {
   sources: Source[];
   from?: string;
   to?: string;
+  project?: string;
 }
 
 export interface QueryAnswer {
