@@ -118,7 +118,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const { llm } = modelsFromEnv(process.env);
   if (!llm) {
     console.error("No model is configured. Set LLM_PROVIDER, LLM_API_KEY and LLM_MODEL in .env.local " +
-      "(for Hunyuan also LLM_USAGE_FILE and LLM_TOKEN_BUDGET).");
+      "(for Hunyuan or TokenHub also LLM_USAGE_FILE and LLM_TOKEN_BUDGET).");
     process.exit(1);
   }
   const report = await measureUsage(llm, { plannedCalls: option("calls"), freeTokens: option("free") });

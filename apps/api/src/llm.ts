@@ -1,6 +1,6 @@
 import type { LlmClient } from "@brain/retrieval";
 
-export type LlmProvider = "hunyuan" | "groq";
+export type LlmProvider = "hunyuan" | "tokenhub" | "groq";
 export type UnavailableReason = "budget" | "daily_limit" | "rate_limited" | "meter";
 
 /** The model can't be used right now, so the caller answers without it. */
@@ -30,9 +30,11 @@ export class ModelCallError extends Error {
 /** How long a model call may take before the built-in writer answers instead. */
 export const REQUEST_TIMEOUT_MS = 60_000;
 
-// Both speak the same chat completions API; Hunyuan's search enhancement is turned off so answers use only our context.
+// All speak the same chat completions API. Hunyuan (Tencent's China site) has its search enhancement turned off, so
+// answers use only our context; TokenHub is Tencent's international model service.
 const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unknown> }> = {
   hunyuan: { baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", extra: { enable_enhancement: false } },
+  tokenhub: { baseUrl: "https://tokenhub-intl.tencentcloudmaas.com/v1", extra: {} },
   groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
 };
 
@@ -212,7 +214,9 @@ export function chatLlmFromEnv(env: NodeJS.ProcessEnv = process.env, fetcher?: t
   const legacy = Boolean(env.HUNYUAN_API_KEY || env.HUNYUAN_MODEL);
   if (!legacy && !env.LLM_PROVIDER && !env.LLM_API_KEY && !env.LLM_MODEL) return undefined;
   const provider = env.LLM_PROVIDER || (legacy ? "hunyuan" : undefined);
-  if (provider !== "hunyuan" && provider !== "groq") throw new Error("LLM_PROVIDER must be hunyuan or groq");
+  if (provider !== "hunyuan" && provider !== "tokenhub" && provider !== "groq") {
+    throw new Error("LLM_PROVIDER must be hunyuan, tokenhub or groq");
+  }
   return new ChatLlm({
     provider,
     apiKey: env.LLM_API_KEY || (provider === "hunyuan" ? env.HUNYUAN_API_KEY : undefined) || "",

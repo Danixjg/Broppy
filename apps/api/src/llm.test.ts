@@ -29,6 +29,18 @@ describe("ChatLlm", () => {
     expect(init.body).not.toContain("restricted-title-sentinel");
   });
 
+  it("uses TokenHub's international endpoint without Hunyuan-only fields", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "At 2 PM. [jira:PAY-101:0]" }));
+    const client = new ChatLlm({ provider: "tokenhub", apiKey: "th-key", model: "hy3", fetch: fetcher as typeof fetch });
+    await client.generate(context, "When is cutover?");
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions");
+    expect(init.headers).toEqual({ Authorization: "Bearer th-key", "Content-Type": "application/json" });
+    const body = JSON.parse(init.body as string);
+    expect(body).not.toHaveProperty("enable_enhancement");
+    expect(body).toMatchObject({ model: "hy3", stream: false, max_tokens: 1500 });
+  });
+
   it("uses Groq's endpoint without Hunyuan-only fields", async () => {
     const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "At 2 PM. [jira:PAY-101:0]" }));
     const client = new ChatLlm({ provider: "groq", apiKey: "gsk-key", model: "llama-3.3-70b-versatile",
@@ -167,7 +179,11 @@ describe("chatLlmFromEnv", () => {
     const groq = chatLlmFromEnv({ LLM_PROVIDER: "groq", LLM_API_KEY: "key", LLM_MODEL: "llama-3.3-70b-versatile" });
     expect(groq?.provider).toBe("groq");
     expect(groq?.endpoint).toBe("https://api.groq.com/openai/v1/chat/completions");
-    expect(() => chatLlmFromEnv({ LLM_PROVIDER: "other", LLM_API_KEY: "key", LLM_MODEL: "model" })).toThrow("LLM_PROVIDER");
+    const tokenhub = chatLlmFromEnv({ LLM_PROVIDER: "tokenhub", LLM_API_KEY: "key", LLM_MODEL: "hy3" });
+    expect(tokenhub?.provider).toBe("tokenhub");
+    expect(tokenhub?.endpoint).toBe("https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions");
+    expect(() => chatLlmFromEnv({ LLM_PROVIDER: "other", LLM_API_KEY: "key", LLM_MODEL: "model" }))
+      .toThrow("LLM_PROVIDER must be hunyuan, tokenhub or groq");
     expect(() => chatLlmFromEnv({ LLM_API_KEY: "key", LLM_MODEL: "model" })).toThrow("LLM_PROVIDER");
   });
 

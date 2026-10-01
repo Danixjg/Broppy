@@ -162,6 +162,14 @@ describe("modelsFromEnv", () => {
       .embedding).toBeInstanceOf(BudgetedEmbedding);
   });
 
+  it("refuses to start TokenHub without a usage file and budget, since Tencent bills if post-paid is turned on", () => {
+    const tokenhub = { LLM_PROVIDER: "tokenhub", LLM_API_KEY: "key", LLM_MODEL: "hy3" };
+    expect(() => modelsFromEnv(tokenhub)).toThrow(/^TokenHub needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET/);
+    expect(() => modelsFromEnv({ ...tokenhub, LLM_TOKEN_BUDGET: "100000" })).toThrow(/LLM_USAGE_FILE/);
+    expect(modelsFromEnv({ ...tokenhub, LLM_USAGE_FILE: usageFile(), LLM_TOKEN_BUDGET: "100000" }).llm)
+      .toBeInstanceOf(BudgetedLlm);
+  });
+
   it("lets Groq run without a budget, and checks the numbers it is given", () => {
     const groq = { LLM_PROVIDER: "groq", LLM_API_KEY: "key", LLM_MODEL: "llama-3.3-70b-versatile" };
     expect(modelsFromEnv(groq).llm).toBeInstanceOf(BudgetedLlm);
