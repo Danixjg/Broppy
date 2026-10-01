@@ -9,6 +9,10 @@ const fmtDate = value => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
+const fmtDay = value => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date);
+};
 const node = (tag, className, text) => {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -386,10 +390,20 @@ function renderCitations(parent, citations) {
   }
   parent.append(list);
 }
+// Where the answer looked first and the dates it kept to, when the question named them.
+function scopeText(scope) {
+  const names = Array.isArray(scope?.sources) ? scope.sources.map(sourceName).join(" and ") : "";
+  const dates = scope?.from && scope?.to ? `${fmtDay(scope.from)} – ${fmtDay(scope.to)}` : "";
+  if (names && dates) return `Searched ${names} (${dates}) first, then the other sources at any date.`;
+  if (names) return `Searched ${names} first, then the other sources.`;
+  return dates ? `Searched everything from ${dates}.` : "";
+}
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
   appendText(target, "div", "", safeText(result.text) || "No answer returned.");
+  const scope = scopeText(result.scope);
+  if (scope) appendText(target, "p", "muted", scope);
   renderCitations(target, result.citations);
   if (result.traceId) {
     const button = node("button", "text-button", "Why this result? View trace ↗"); button.type = "button";
