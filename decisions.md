@@ -298,9 +298,69 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-01 — A language model that costs nothing
+
+- **Input:** D17 left the model choice open. Tencent's free packages, as found on 1 Oct and to be confirmed in the
+  console:
+  - hunyuan-T1 (chat) and hunyuan-embedding each get 1M tokens at first activation, valid for a year;
+  - the translation models get 100M, but they can't write answers.
+
+  After the free tokens, Tencent bills pay-as-you-go automatically.
+- **Measured:** a model call here costs about 510 tokens without "thinking": 200–520 in and 60–170 out. Questions with
+  nothing the asker may see never call the model. About 350 answers are expected across development, worked examples,
+  the video, the team and the judges.
+- **How decided:** chosen explicitly in a planning session.
+
+### D27 — Which model, without ever paying (resolves D17)
+- **Options:** Hunyuan with a hard budget / Groq's free plan / no model.
+- **Chosen:** Hunyuan, if `pnpm llm:usage` shows the plan fits its free 1M tokens: under 70%, which is about 2,000
+  tokens per answer. Otherwise, Groq's free plan.
+- **How "never paying" is kept:**
+  - Hunyuan only starts with a usage file and budgets set below the free tokens.
+  - Groq has no card on file, so it can't bill.
+  - At any limit, the built-in writer answers instead.
+- **Trade-off:** T1 is a reasoning model whose thinking tokens aren't known until measured, so the choice waits for
+  that run. The same code serves either outcome.
+
+### D28 — The model in the public demo
+- **Options:** none / a small daily allowance.
+- **Chosen:** with Groq, a small daily allowance shared by every visitor (`LLM_DAILY_ANSWERS`, 100 to start). With
+  Hunyuan, decided after measuring; until then the demo uses the built-in writer.
+- **Trade-off:** visitors share one allowance, so a busy day ends in built-in answers until midnight UTC.
+
+### Implementation details (language model)
+- **Client:** `apps/api/src/llm.ts` serves both providers through their OpenAI-style chat API, with fixed presets.
+  - `LLM_BASE_URL` may point at another HTTPS address, or plain HTTP on the same machine for a local stub.
+  - Thinking in `<think>` tags or a separate field is dropped.
+  - Each call's reported token usage is read; when a provider doesn't report it, it is estimated on the high side.
+  - Each answer is capped by `LLM_MAX_TOKENS`, default 1500.
+  - A call gives up after 60 seconds.
+- **Meter** (`apps/api/src/llm-budget.ts`):
+  - Counts chat tokens, embedding tokens and model answers per UTC day, in `LLM_USAGE_FILE` when set.
+  - It fails closed: a file it can't read or write stops the model.
+  - Calls still running count against the limits. Each holds its prompt estimate plus `LLM_MAX_TOKENS` until it
+    ends, so questions asked at the same moment can't all get past the budget or the daily allowance.
+  - Calls without a usable answer still count what the provider may bill:
+    - an answer cut off at `LLM_MAX_TOKENS`, or one that fails the checks, counts its tokens;
+    - a server error or a call that times out counts the whole amount it held;
+    - a refused request (HTTP 4xx, rate limits included) counts nothing.
+  - In the hosted setup, each API has its own file on the `model-usage` volume.
+  - Each place that uses one Tencent Cloud account counts only its own calls. Their budgets together must stay below
+    the free tokens, e.g. 100000 on a laptop and 700000 on the server.
+- **Fallbacks:**
+  - Answers: over a limit, rate limited or failing, the built-in writer answers from the same authorized context,
+    and the audit records `llm_fallback` with the reason.
+  - Embeddings: over budget, embeddings pause, so sync and questions use keyword search.
+- **Scripts:**
+  - `pnpm llm:usage` measures ten typical questions and gives the verdict.
+  - `pnpm llm:calibrate` suggests `SEMANTIC_MIN` from labelled questions, including three with no shared keywords.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
+- **The model's route and the public demo on Hunyuan:** waits for the team's `pnpm llm:usage` run (D27, D28).
 - **Hosted SSO next to local SSO work:** the audit chain allows one writer per organization. Either stop the hosted
   SSO API during local `pnpm dev:sso` work, or give it its own Supabase project.
 - **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or

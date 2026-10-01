@@ -69,6 +69,23 @@ In the default demo, changes made through admin routes alter only the running mo
 
 With `HUNYUAN_EMBEDDING_API_KEY`, sync embeds changed document chunks and a query embeds its question. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Embedding or Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
 
+## Language model (optional, free only)
+
+Without a model, the built-in writer answers: it quotes the most relevant source in full and the best sentence of the next three. A model can only choose and order sentences better. Every answer, from either, keeps only lines copied word for word from the sources the asker may see, each with its citation.
+
+The project pays for no model use (`decisions.md`, D27 and D28):
+
+- **Providers:** `LLM_PROVIDER` is `hunyuan` or `groq`. Groq's free plan has no card on file, so it can never bill. Hunyuan bills automatically once its free tokens run out, so it only starts with a usage file and budgets set below the free tokens.
+- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
+  - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
+  - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
+- **One account, one budget:** each machine counts only its own calls. When a laptop and the server share a Tencent Cloud account, their `LLM_TOKEN_BUDGET` values together must stay below the free tokens, for example 100000 and 700000. The same goes for `EMBEDDING_TOKEN_BUDGET`.
+- **Semantic search:** at `EMBEDDING_TOKEN_BUDGET`, semantic search pauses and keyword search carries on.
+- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used, and why any call gave no usable answer. It then projects 350 answers against the free tokens. "Fits" means the plan stays under 70% of the free tokens; otherwise it says to use Groq. Its calls count against the budget.
+- **`pnpm llm:calibrate`** (Hunyuan route) embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN` from the scores.
+
+Both scripts read `.env.local`. The hosted APIs take their model settings as described in [infra/tencent/README.md](infra/tencent/README.md).
+
 ## API routes
 
 All `/v1` routes require either a valid bearer token configured as below or, in demo mode (`pnpm dev` locally, or `PUBLIC_DEMO=true`), `x-demo-user`. The website uses the official Auth0 Next.js SDK with server-managed sessions. Set the Regular Web Application credentials in `.env.local`; Supabase holds the server-only user directory. Browser API requests go through `/api/brain/*`, which attaches the SDK access token server-side. Demo visitors' requests carry only the chosen persona and go only to `DEMO_API_URL`. `GET /health` does not require identity. See [Auth0 sign-in and live sources](docs/live-sources-and-sign-in.md) for setup.
@@ -105,8 +122,9 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | `PUBLIC_DEMO=true` | Runs the public demo API: it accepts `x-demo-user` even with `NODE_ENV=production` and serves only the mock corpus. Startup fails if any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present. See [hosting](infra/tencent/README.md). |
 | `DEMO_API_URL` (web host) | The demo API's origin. When set, the start page offers **Try the demo**, and demo visitors' workspace requests go there with only the chosen persona. |
 | `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID` | Auth0 SSO with cached JWKS, active directory lookup and organization validation. Requires Supabase directory/persistence and an audit signing key. See [setup](docs/live-sources-and-sign-in.md). |
-| `HUNYUAN_API_KEY`, `HUNYUAN_MODEL` | Together select the Hunyuan chat client instead of deterministic local excerpts. Setting either one alone causes startup configuration failure. |
-| `HUNYUAN_EMBEDDING_API_KEY` | Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions. With no Supabase variables, semantic ranking runs in the local index. It is separate from the Hunyuan chat key. |
+| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model, `hunyuan` or `groq`; without them, the built-in writer answers. The older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL` still select Hunyuan. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500). See [Language model](#language-model-optional-free-only). |
+| `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. Hunyuan needs the file and the budget to start. |
+| `HUNYUAN_EMBEDDING_API_KEY`, `EMBEDDING_TOKEN_BUDGET` | Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions; needs `LLM_USAGE_FILE` and the budget. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
 | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations 001–005. |
 | `LIVE_SOURCES_JSON` | Selects real HTTP readers for configured Slack channels, Jira issues, Confluence pages, and Google Drive files. All four source entries, provider credentials, and Auth0 sign-in are required. See [setup and limits](docs/live-sources-and-sign-in.md). |
 | `AUDIT_LOG_PATH`, `AUDIT_SIGNING_KEY_FILE` | Together select a flushed JSONL audit file and load a PEM private signing key for Merkle batches. With neither, audit data and roots are in memory. Setting a log path without a key fails startup. |
