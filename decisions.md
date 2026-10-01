@@ -348,8 +348,24 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Trade-off:** when the chosen model can't answer, the built-in writer quotes sources instead of picking sentences.
   The measurement's 30% margin is meant to keep that rare during the showcase.
 
+### D31 — Tencent's international model service, TokenHub
+- **Context:** search results found on 1 Oct, while writing the team's measurement steps, show that international
+  Tencent Cloud accounts get models through TokenHub:
+  - OpenAI-compatible, at `https://tokenhub-intl.tencentcloudmaas.com/v1`, with keys from TokenHub's API Key page;
+  - Hunyuan's model there is `hy3-preview`, a reasoning model;
+  - each language model gets 1M free tokens for 90 days;
+  - calls stop when those run out unless post-paid billing is enabled.
+
+  The `hunyuan` setting points at the China site and sends a Hunyuan-only request field.
+- **Options:** a `tokenhub` setting / an existing setting pointed at TokenHub with `LLM_BASE_URL`.
+- **Chosen:** `LLM_PROVIDER=tokenhub`, with TokenHub's address built in, no Hunyuan-only fields, and the same required
+  usage file and budget. D27's rule is unchanged; the team measures `hy3-preview` on TokenHub.
+- **Trade-off:** one more setting. Semantic search keeps the China-site embedding client, unconfirmed on TokenHub.
+
 ### Implementation details (language model)
-- **Client:** `apps/api/src/llm.ts` serves both providers through their OpenAI-style chat API, with fixed presets.
+- **Client:** `apps/api/src/llm.ts` serves every provider through its OpenAI-style chat API, with fixed presets.
+  - `tokenhub` (D31) uses TokenHub's international address. Every provider but Groq needs the usage file and a
+    budget.
   - `LLM_BASE_URL` may point at another HTTPS address, or plain HTTP on the same machine for a local stub.
   - Thinking in `<think>` tags or a separate field is dropped.
   - Each call's reported token usage is read; when a provider doesn't report it, it is estimated on the high side.

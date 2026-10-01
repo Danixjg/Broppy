@@ -176,13 +176,13 @@ sudo docker compose up -d demo-api
 Paste the Groq API key into `demo.env`. All visitors share `LLM_DAILY_ANSWERS` (100 to start). After that, the
 built-in writer answers until midnight UTC.
 
-**The SSO API on Hunyuan, within its free tokens.** Do this only after `pnpm llm:usage` reports that the plan fits.
-First, in the Tencent HY console, check that **Settings > Postpaid Settings** is off, as it is by default. Calls past
-the free tokens then fail instead of billing, and the budgets below are a second stop.
-Uncomment the Hunyuan lines in `sso.env`. Every machine using the same Tencent Cloud account draws on the same free
+**The SSO API on Tencent's model, within its free tokens.** Do this only after `pnpm llm:usage` reports that the plan
+fits. First, in TokenHub, check that post-paid billing is not enabled, as it isn't by default. Calls past the free
+tokens then stop instead of billing, and the budgets below are a second stop.
+Uncomment the TokenHub lines in `sso.env`. Every machine using the same Tencent Cloud account draws on the same free
 tokens, and each counts only its own calls. So the server's budgets plus the laptops' must stay below 800000 each: the
 example's 700000 leaves 100000 for local runs. Then run `sudo docker compose --profile sso up -d`. The API refuses to
-start with Hunyuan if a budget is missing.
+start with TokenHub or Hunyuan if a budget is missing.
 
 **Checking usage.** Each API keeps its counts on the `model-usage` volume, and they survive restarts and rebuilds:
 
@@ -226,7 +226,7 @@ Start with `sudo docker compose ps` and `sudo docker compose logs --tail 50 <ser
 | The workspace says "The demo API did not accept this persona" | `DEMO_API_URL` points at the SSO API | Use the `demo-api.…` address |
 | The workspace says "The demo API is not reachable; check DEMO_API_URL" | Wrong address, or the demo API is down | Run the step 4 checks |
 | Answers no longer come from the model | The daily allowance or the budget is used up, the model is rate limited, or its replies weren't copied word for word (`ungrounded`). Ask the audit log for `llm_fallback` to see which. | Wait for midnight UTC, or check the counts (step 7). Raise a Hunyuan budget only within its free tokens. |
-| An API stops at startup with `Hunyuan needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET…` | The Hunyuan settings have no budget | Set the budgets in `sso.env` (step 7) |
+| An API stops at startup with `TokenHub needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET…` (or `Hunyuan needs…`) | The model settings have no budget | Set the budgets in `sso.env` (step 7) |
 | The build stops with `exit code: 137` | The server ran out of memory while building | Add swap (below), then build again |
 
 To add 2 GB of swap:

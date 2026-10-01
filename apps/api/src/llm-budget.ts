@@ -219,10 +219,11 @@ export function modelsFromEnv(env: NodeJS.ProcessEnv = process.env): { llm?: Bud
     dailyAnswers: positiveInteger(env.LLM_DAILY_ANSWERS, "LLM_DAILY_ANSWERS")
   };
   if (!chat && !embedder) return {};
-  // Past its free tokens, Tencent bills only if postpaid is turned on in its console. The budget is a second stop that
-  // survives restarts, whatever that setting says.
-  if (chat?.provider === "hunyuan" && (!file || limits.chatTokens === undefined)) {
-    throw new Error("Hunyuan needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET, so it stops before its free tokens run out");
+  // Only Groq's free plan can never bill. Past their free tokens, Tencent's services bill only if post-paid is turned
+  // on in the console; the budget is a second stop that survives restarts, whatever that setting says.
+  if (chat && chat.provider !== "groq" && (!file || limits.chatTokens === undefined)) {
+    const name = chat.provider === "tokenhub" ? "TokenHub" : "Hunyuan";
+    throw new Error(`${name} needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET, so it stops before its free tokens run out`);
   }
   if (embedder && (!file || limits.embeddingTokens === undefined)) {
     throw new Error("Hunyuan embeddings need LLM_USAGE_FILE and EMBEDDING_TOKEN_BUDGET, so they stop before their " +
