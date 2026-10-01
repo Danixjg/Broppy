@@ -251,6 +251,53 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-01 — Scenarios 1, 2 and 4
+
+- **Input:** the brief's scenarios 1, 2 and 4 each need a worked example. A run of the code on 1 Oct showed three
+  gaps:
+  - A question that named Slack and "last week" was answered without any Slack message.
+  - There was no runbook to find.
+  - By 16 Oct, the fixed late-September mock dates would fall outside "last week".
+- **How decided:** both options below were chosen explicitly in a planning session.
+
+### D25 — The project behind scenario 1
+- **Options:**
+  - the brief's exact example, through a new database migration project;
+  - reuse of the payment migration story.
+- **Chosen:** the brief's exact example. The question works word for word, and the existing payment documents and
+  their tests are unchanged. The new mock data:
+  - Jira issues DB-12 and DB-15, with statuses;
+  - private #db-migration, with a blocker raised last week;
+  - private #db-oncall, which David isn't in;
+  - public #db-planning, which is older;
+  - a Confluence plan page.
+- **Trade-off:** eight more fixture documents to keep consistent, counting scenario 2's runbook and its old copy.
+
+### D26 — Cross-links between platforms
+- **Options:** later, with R9 / in this round.
+- **Chosen:** later, with R9, next to the Slack-to-Jira card and the per-project master page. Search already finds
+  items on every platform when they share words or keys such as PAY-101.
+
+### Implementation details (scenarios 1, 2 and 4)
+- **Query plan** (`apps/api/src/query-plan.ts`):
+  - Platforms a question names come first, up to three items each.
+  - A relative time ("last week", "past 3 days", "yesterday") limits the named platforms, or every platform when none
+    is named. The parsing is shared with audit search (`time-window.ts`), which now also accepts "past".
+  - Platforms whose best match scores at least half the top score then take turns, and the rest follow by score.
+  - The plan is audited as `query_planned` and shown in the asker's own trace. Answers carry it as `scope`, which the
+    workspace shows under the answer.
+- **Jira status:** a Jira chunk enters the answer context with its status after the key, as in "DB-12 (in progress)
+  tracks…". The index is unchanged, and the integrity check after generation still compares the raw chunk text.
+- **Local answer writer:** quotes the most relevant source in full, up to six sentences. It then adds the best
+  sentence from up to three more sources. Every line is still one checked claim.
+- **Search:** "blockers" also matches "blocker".
+- **Mock dates:** `loadMockCorpus(now)` moves the fixture dates forward by the whole days since 30 Sep 2026. State
+  saved to Supabase keeps the dates it was first saved with.
+- **Tests:** `scenarios.test.ts` now covers scenarios 1 to 5. Scenario 2 uses a fake clock for the 1:00 PM edit and
+  the 2:05 PM question.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
