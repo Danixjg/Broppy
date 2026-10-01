@@ -1,88 +1,191 @@
-# Internal Brain architecture
+# Architecture
 
-This describes the integrated code in this repository. The default runnable path is a local mock. Auth0, remote FGA, Hunyuan chat and embeddings, Supabase retrieval, and signed file audit are optional paths. None of the external services is provisioned by this repository, and no real credentials or browser interaction were exercised. The [Better T Stack site](https://www.better-t-stack.dev/) informed only the TypeScript monorepo outline, not the runtime framework choices.
+Internal Brain answers questions across Slack, Jira, Confluence and Drive, using only what the person asking may see
+in each platform, and records every decision in an audit trail that can't be quietly changed. This page explains how
+the challenge brief's requirements are met, then walks through the pipeline. [Trust boundaries](trust-boundary.md)
+covers hosting and sign-in, and [worked examples](worked-examples.md) shows each scenario running.
 
-## Project outline
+## What runs where
 
-| Path | Current responsibility |
-| --- | --- |
-| `apps/web` | Static HTML, CSS, and JavaScript served by Python on port 3001; blank auth config uses the demo identity header, while a complete config enables Auth0 PKCE login. |
-| `apps/api` | Node HTTP API on loopback port 3000; owns sync, queries, admin actions, and audit routes. |
-| `packages/connectors` | Mutable Slack, Jira, Confluence, and Drive mock connectors, including source permission checks. |
-| `packages/retrieval` | In memory sparse and optional semantic chunk index, optional Supabase document/chunk writer and hybrid search client, deterministic local answer client, and citation checker. |
-| `packages/fga-adapter` | In process document permission and tier checks, plus an optional HTTP `RemoteFgaAdapter` selected by the FGA environment variables listed in the README. |
-| `packages/audit`, `packages/types` | Hash chained events, Merkle batches, optional signed file store, and shared types. |
-| `data/mock`, `data/seed.ts` | Source and user fixtures; the seed script reports fixture counts. |
-| `infra/fga/model.fga`, `infra/supabase/migrations` | Model for optional remote FGA and SQL migration for the optional Supabase pgvector/full text path. Startup does not install the FGA model or apply the SQL migration. |
+| Part | Code | Role |
+| --- | --- | --- |
+| Web host | [`apps/web`](../apps/web/AUTH0.md): Next.js 16 on Vercel | Sign-in through the Auth0 SDK, the public demo, the `/api/brain` proxy and the workspace pages. |
+| API | `apps/api`: Node; `sso-api` and `demo-api` on Tencent Cloud Lighthouse, or `pnpm dev` and `pnpm dev:sso` locally | Sync, questions, admin actions and the audit routes. |
+| Connectors | `packages/connectors` | Mock fixtures and live Slack, Jira, Confluence and Drive clients, with each platform's own permission rules. |
+| Retrieval | `packages/retrieval` | The hybrid index, the built-in writer, the grounding check and the Supabase search client. |
+| Access | `packages/fga-adapter` | Grants and tiers per document ID, and the optional remote OpenFGA check. |
+| Audit | `packages/audit` | The hash chain, Merkle batches, signatures and proofs. |
+| Data | Supabase ([migrations](../infra/supabase/migrations/004_durable_state.sql)) | The directory, state, audit rows, chunks and Vault tokens. |
 
-## Running architecture
+## How the brief is met
 
-Solid paths below run with `pnpm dev`. Dotted paths show optional code paths or blueprints. The standalone [Mermaid source](diagram-source.mmd) contains this diagram.
+| Requirement | How | Proof |
+| --- | --- | --- |
+| **Heterogeneous sources, without flattening permissions** | Each document keeps its platform's own permission shape: Slack channel members, Jira project and issue viewers, Confluence space and page viewers, Drive owner and shared users. [`nativeAllows`](../packages/connectors/src/index.ts) applies that shape on top of brain grants and the tier. Contractors see only what is shared with them by name. | [Connector tests](../packages/connectors/src/index.test.ts): "applies native permission changes without changing content and reports changes". [FGA tests](../packages/fga-adapter/src/remote.test.ts): "denies when native source or local tier denies, even if remote allows". [Scenario 4](worked-examples.md#scenario-4-access-changes-apply-to-the-next-question). |
+| **Permission-aware retrieval** | Search returns IDs only, and access is decided on document IDs before any text is read (① ②). Each document is checked again at its source before its text enters the context (④). When nothing is allowed, every asker gets the same fixed reply. | [Brain tests](../apps/api/src/brain.test.ts): "never sends denied titles or private channel names to the LLM", "applies a live permission revocation on the next query". [Scenario 3](worked-examples.md#scenario-3-no-hint-that-restricted-content-exists). |
+| **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts), scenario 1. [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
+| **Audit trail: tamper-evident, complete, queryable** | Every step of sync and of each question appends an event to a hash chain (⑤). Merkle batches are sealed on every sync and signed in SSO mode, and Supabase rejects updates and deletes. Compliance search reads plain-English questions and answers "who retrieved this document". | Brain tests: "produces a verifiable Merkle inclusion proof". [Audit tests](../packages/audit/src/index.test.ts). [Scenario 5](worked-examples.md#scenario-5-the-audit-trail-answers-compliance-questions), including the tamper checks. |
+| **LLM safety** | A writer sees only the question and passages the asker may see, freshly checked. Every answer line must be copied word for word from a passage it cites. A model runs behind a usage meter, and the built-in writer takes over when it can't answer. | Brain tests: "removes uncited output" and the "When the language model can't answer" suite. [Usage meter tests](../apps/api/src/llm-budget.test.ts). |
 
+Freshness, the brief's scenario 2, comes from the same live check: a document whose version changed at the source is
+refreshed before it is used ([scenario 2](worked-examples.md#scenario-2-fresh-content)).
+
+## The pipeline
+
+The five points the [five-stage plan](internal-brain-five-stage-plan.md) asked to make "visually unavoidable" are
+numbered ① to ⑤. The rendered image is [docs/images/diagram-pipeline.png](images/diagram-pipeline.png).
+
+<!-- diagram: docs/diagrams/pipeline.mmd -->
 ```mermaid
-flowchart LR
-  Browser[Browser] --> Web[Static web :3001]
-  Web -->|demo x-demo-user| API[Node API :3000]
-  Web -.->|optional PKCE and bearer token| Auth0[Auth0 authorization and JWKS]
-  Web -.->|optional bearer API calls| API
-  Auth0 -.->|API validates JWT| API
-  subgraph Local[API process: local mock]
-    API --> Sync[Startup and 30 s sync]
-    Sources[Four mock source connectors] -->|changed IDs and ID pass| Sync
-    Sync -->|missing ID| Tombstone[Tombstone; clear chunks and grant]
-    Sync -->|content/title change| Index[In memory chunks and sparse vectors]
-    Sync -->|permission change| Grants[In process FGA style grants and tier]
-    Sync -->|metadata change| Index
-    Tombstone --> Index
-    API --> Search[Local vector + keyword + freshness search]
-    Index --> Search
-    Search -->|candidate document and chunk IDs| Check[Batch document ID check]
-    Grants --> Check
-    Check -->|allowed IDs| Live[Live mock source access and document refresh]
-    Sources --> Live
-    Live -->|current authorized chunks| Context[Context assembly]
-    Live -->|new version / permission| Index
-    Live -->|new permission| Grants
-    Check -->|none allowed| Fixed[Fixed no-result response]
-    Live -->|none usable| Fixed
-    Context --> LLM[LLMClient: deterministic local answer]
-    LLM --> Checker[Extractive citation output checker]
-    Checker --> API
-    API --> Audit[Hash chain and Merkle batches]
-    Audit --> Console[Compliance API and web console]
-    Admin[Mock admin web view] -->|content / native permission edit, membership removal, tier narrowing| API
+flowchart TB
+  classDef point fill:#fff4d6,stroke:#b7791f,stroke-width:3px,color:#1a202c
+  classDef store fill:#edf2f7,stroke:#4a5568,color:#1a202c
+  classDef stop fill:#fde8e8,stroke:#c53030,color:#1a202c
+
+  subgraph SyncLane["Sync: every 30 s with mock sources, every 5 min with live ones"]
+    Sources["Sources: Slack, Jira,<br/>Confluence, Drive<br/>(mock or live)"] --> Sync["Sync: changed IDs (mock)<br/>or every ID (live)"]
+    Sync -->|"content changed"| Rechunk["Re-chunk<br/>and re-embed"]
+    Sync -->|"permissions only"| Grants["③ Update grants only:<br/>no re-chunk, no re-embed"]
+    Sync -->|"gone at the source"| Tomb["Tombstone: drop<br/>chunks and grants"]
   end
-  Context -.->|optional question + authorized chunk text and IDs| Hunyuan[Hunyuan chat API]
-  Hunyuan -.-> Checker
-  Sync -.->|optional changed chunk text| Embed[Hunyuan embeddings API]
-  API -.->|optional question| Embed
-  Embed -.->|1024-d vectors| Index
-  Sync -.->|optional documents and changed chunks| DB[Supabase pgvector and FTS]
-  API -.->|optional hybrid_search query| DB
-  DB -.->|candidate IDs and scores| Check
-  API -.-> File[Optional local JSONL audit file + signing key]
-  Sync -.->|optional tuple reconciliation| Model[Remote FGA API and model]
-  Check -.->|optional batch ID check intersected with local decision| Model
-  Live -.->|optional recheck after refresh| Model
-  Migration[SQL migration applied separately] -.-> DB
+
+  Rechunk --> Index[("Search index:<br/>local, or Supabase")]
+  Tomb --> Index
+  Grants --> Permissions[("Grants per<br/>document ID")]
+  Tomb --> Permissions
+
+  subgraph QueryLane["Query"]
+    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms named,<br/>time window"]
+    Plan --> Search["① Hybrid search over the<br/>whole index: keywords,<br/>vectors and freshness;<br/>returns IDs only"]
+    Search --> Check["② Access check on<br/>document IDs only"]
+    Check --> Live["④ Live check at the source:<br/>permission and version"]
+    Live --> Context["Context: up to 8 passages,<br/>platforms take turns"]
+    Context --> Writer["Writer: built-in,<br/>or a metered model"]
+    Writer --> Ground["Grounding: only lines<br/>copied word for word"]
+    Ground --> Recheck["④ Recheck the person<br/>and every cited source"]
+    Recheck --> Answer["Answer with citations"]
+    Check -->|"nothing allowed"| Fixed["Fixed reply: no<br/>accessible information"]
+    Live -->|"nothing usable"| Fixed
+    Recheck -->|"access changed"| Fixed
+  end
+
+  Index --> Search
+  Permissions --> Check
+  Sources --> Live
+
+  subgraph AuditLane["⑤ Audit: every sync and query step appends an event"]
+    Events["Events"] --> Chain["Hash chain"]
+    Chain --> Merkle["Merkle batches,<br/>signed in SSO mode"]
+    Merkle --> Rows[("Supabase: no updates,<br/>deletes or truncates")]
+    Rows --> Compliance["Compliance search,<br/>proofs, verify"]
+    Events --> Own["The asker's own trace:<br/>only what they could see"]
+  end
+
+  Permissions ~~~ Events
+  SyncLane -.-> Events
+  QueryLane -.-> Events
+
+  class Search,Check,Grants,Live,Recheck point
+  class Index,Permissions,Rows store
+  class Fixed stop
+  style AuditLane fill:#fffaf0,stroke:#b7791f,stroke-width:3px
 ```
 
-## Data and permission paths
+| | Point | In the code | Test |
+| --- | --- | --- | --- |
+| ① | **Hybrid search happens before authorization.** Search ranks the whole index by keywords, vectors and freshness, and returns document and chunk IDs. The Supabase `hybrid_search` RPC returns IDs and scores only. | `HybridIndex.search` in [`retrieval`](../packages/retrieval/src/index.ts); `Brain.query` in [`brain.ts`](../apps/api/src/brain.ts) | "finds an authorized result beyond thirty higher ranked denied hits"; "persists semantic chunks, searches IDs through Supabase, and leaves embeddings alone on permission edits" |
+| ② | **Authorization sees document IDs only, not content.** `FgaAdapter.batchCheck(user, docIds)` decides each candidate. With remote FGA set, both must allow. | [`fga-adapter`](../packages/fga-adapter/src/index.ts) | "never sends denied titles or private channel names to the LLM"; "chunks unique document checks at 50 and maps out of order results by correlation ID" |
+| ③ | **Permission updates don't trigger re-embedding.** The index hashes content, permissions and metadata separately, so a permission change updates grants only. | `HybridIndex.upsert`; `Brain.persistSearch` | "does not re-embed permission-only changes"; "keeps cached vectors on permission updates and invalidates them on content, title, and deletion" |
+| ④ | **A live check at the source protects against stale access.** Before its text is used, each document's permission and version are checked at the source and refreshed if they changed. After writing, the person and every cited source are checked again. | `Brain.liveAuthorizedDocument`, `Brain.refreshLive` | "applies a live permission revocation on the next query"; "refreshes a newer source version before context assembly"; "rechecks the signed-in user's groups before returning generated text" |
+| ⑤ | **Audit and Merkle are a pipeline of their own.** Sync and every query step append events; batches are sealed, signed and stored where they can't be changed. | [`audit`](../packages/audit/src/index.ts); [migration 004](../infra/supabase/migrations/004_durable_state.sql) | "produces a verifiable Merkle inclusion proof"; scenario 5 |
 
-At startup the API syncs all four mock sources. Every 30 seconds the orchestrator repeats sync and seals any unsealed audit events. Each source keeps an in memory cursor and pending ID checkpoint; a failed run resumes from its pending IDs while the process remains alive. Sync compares the connector's current ID list with indexed IDs, tombstones missing documents, removes their chunks and grants, and records a deletion event. This ID pass does not persist checkpoints across restarts.
+## Sync and freshness
 
-`HybridIndex.upsert` hashes content, permissions, and metadata separately. A content or title change rebuilds chunks and sparse term vectors. With `HUNYUAN_EMBEDDING_API_KEY`, sync also refreshes 1024-dimensional semantic vectors for those chunks. A permission only change updates indexed permission facts and in process grants without rebuilding or re-embedding chunks. Metadata is updated in the indexed document; version and timestamp changes alone do not rebuild chunks. Local search combines vector cosine similarity, keyword matches, and freshness at weights 0.65, 0.25, and 0.10. It uses semantic vectors when available for a chunk and a valid embedded question, otherwise sparse term vectors.
+- **Schedule:** the API syncs all four platforms at startup, then every 30 seconds with mock sources and every 5
+  minutes with live ones. Each run also seals new audit events into a Merkle batch and saves the state.
+- **Changes:** a run reads the IDs a mock source reports as changed, or every ID of a live source, plus any indexed
+  ID the source no longer lists.
+  - A content or title change re-chunks the document, and re-embeds it when embeddings are on.
+  - A permission-only change updates grants.
+  - An ID that is gone at the source becomes a tombstone: its chunks, grants and remote tuples are removed.
+- **Imports:** they checkpoint after each item and resume after a failure. Connections, import jobs and cursors are
+  saved with the state.
+- **Freshness between runs:** the live check in each question refreshes a document whose version changed, so an edit
+  made at the source shows up in the next answer, before the next sync.
 
-With `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and the embedding key, sync upserts document metadata and permissions, and rewrites chunks only for content/title changes or first persistence in this API process. The SQL migration defines `vector(1024)` chunk embeddings, generated `tsvector` fields, and an active-document `hybrid_search` RPC using the same score weights. Deleted documents are tombstoned and excluded by the RPC. The RPC returns only document IDs, chunk IDs, and scores; the API retains the local index for context and authorization. Its `connector_state`, `sync_runs`, and audit tables are schema only: the running API does not persist cursors, checkpoints, or audit there. Query embedding or Supabase search failure falls back to local search. Embedding refresh or Supabase writes that fail during sync fail the run for retry; startup sync failure prevents the server from starting. The migration must be applied separately and has not been exercised against a real Supabase service.
+## The query path
 
-For a query, the API hashes the question for its audit entry, embeds it when configured, and searches the local index. With Supabase configured and a valid question vector, the Supabase RPC supplies candidates; RPC failure falls back to local results. The API then checks unique candidate **document IDs** through the in process FGA style adapter. Its decision combines copied source permission facts, native source rules, and a tier policy; contractors are denied by default. If configured, the remote FGA adapter also reconciles document grants during sync and batch checks candidate IDs. An allowed query document must pass both local and remote decisions. Remote errors deny; an unreachable remote service can fail startup sync. The tier can only be narrowed by admin action. A selected allowed candidate gets a live mock source access and version/permission check before context assembly. If those facts changed, the local index and grants refresh; local and optional remote access are checked again. A newly changed chunk ID with no matching selected candidate is skipped, so that query can return fewer chunks. Denied candidate content, title, and metadata are not passed to the LLM client. If no usable context remains, the API returns the same fixed no-result message and skips generation.
+1. **Plan:** the question's platform names and time window shape the search ("Slack last week").
+2. **Search:** the local index ranks every chunk. With Supabase and embeddings set, the `hybrid_search` RPC can
+   reorder chunks that also pass the local relevance check.
+3. **Access check on IDs:** local grants, native rules and the tier decide each candidate document. Contractors are
+   denied unless a document is shared with them by name, and remote FGA must agree when it is set. With nothing
+   allowed, the API returns the fixed reply.
+4. **Choose passages:** superseded documents are set aside unless the question asks for history ("old",
+   "previous"). Platforms with a clearly relevant match take turns.
+5. **Live check:** each passage's document is checked at the source before its text is used, up to 8 passages.
+6. **Write and ground:** the writer answers from those passages, and only lines copied word for word, each with its
+   citation, are kept.
+7. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
+8. **Answer:** citations carry the title, link, version, edit time and index time. Answers also say which platforms
+   and dates were searched.
 
-The default `LlmClient` emits deterministic cited excerpts. When both `HUNYUAN_API_KEY` and `HUNYUAN_MODEL` are configured, the API instead sends the question and selected authorized chunk text with citation IDs to Hunyuan. Its response passes through `groundedOutput`: a line is kept only if it has recognized citation markers, at most one sentence under the checker's splitting rule, and claim text appearing in a cited authorized chunk. This extractive check rejects paraphrases and fabricated cited sentences; it does **not** establish that the source itself is true. Citations returned to the browser include title, URL, source version, edit time, and index time.
+The fixed reply, "No accessible information was found for this query.", is the same for a denied document and for
+one that doesn't exist. The asker's own trace of such a question is a single event.
 
-The mock admin can edit source content, narrow source permission fixtures or a tier, remove a fixture user from a group or Slack channel, trigger sync, and preview another fixture user's access. The web admin view loads a selected accessible document's full native permissions through `GET /v1/admin/permissions`, offers a JSON editor with source-specific narrowing checks, and submits through `POST /v1/admin/permissions`. It calls the group and channel actions at `POST /v1/admin/group` and `POST /v1/admin/channel-member`. Content and permission edits trigger sync immediately; group removal updates an in memory user, and connector change events are local callbacks rather than real platform webhooks. The workspace API checks indexed permission and live mock access before returning full visible document content. The web app also offers a source overview, task suggestions, latest file scoring, a duplicate suggestion, and an intern catch-up query. Alex can cite the open steering deck without gaining access to security material. These are local UI behaviors based on accessible fixture documents. `GET /health` exposes cursors, pending runs, and audit counts; `GET /v1/trace` exposes per-query events to their actor and to the compliance role. An actor's no-result trace is reduced to a generic answer event; compliance can inspect the full internal trace.
+## Writers
 
-With blank `apps/web/auth-config.json`, the static UI uses the demo user switcher and `x-demo-user`. A complete issuer, client ID, and audience enables Auth0 Authorization Code + PKCE: the browser validates login state and signed ID token, stores the access token in `sessionStorage`, sends Bearer calls, and uses `/v1/me` for the fixture role. The API validates access-token signature, issuer, audience, and expiry and maps `sub` to a fixture user. The API's CORS origin is configurable, while the static UI's API URL remains fixed at `127.0.0.1:3000`. A partial or invalid web configuration shows an error. No Auth0 tenant or browser flow was exercised; see [web sign-in setup](../apps/web/AUTH0.md).
+- **The built-in writer** ([`LocalGroundedLlm`](../packages/retrieval/src/index.ts)) is code, not a model.
+  - It quotes the most relevant source in full (up to six sentences), then the best sentence of the next three.
+  - It needs no key or network, and it is the default.
+- **A language model** is optional: TokenHub, Hunyuan on Tencent's China site, or Groq.
+  - [`llm.ts`](../apps/api/src/llm.ts) is one client for all three.
+  - [`llm-budget.ts`](../apps/api/src/llm-budget.ts) puts it behind a usage meter: a token budget, a daily
+    allowance, room held for calls still running, and a 60-second timeout.
+  - A model receives the question and the authorized passages with their citation IDs, and nothing else.
+- **Fallbacks:** the built-in writer answers when the model is over a limit, rate limited or failing, or when none of
+  its lines are copied word for word. The audit records `llm_fallback` with the reason. See decisions D27 to D31.
 
-Audit entries form a hash chain. The orchestrator or compliance route seals Merkle batches, and `GET /v1/audit/search` and `POST /v1/audit/verify` expose token matching and proof verification alongside listing and proof routes; the browser exports loaded events as CSV. The default store is process memory. With `AUDIT_LOG_PATH` and `AUDIT_SIGNING_KEY_FILE`, entries and signed batches are flushed to a local JSONL file and verified on load. There is no external append-only root store; a writer with access to both the file and signing key can rewrite history. See [trust boundaries](trust-boundary.md).
+## Audit
 
-Audit batch 0.1 adds the Auth0 directory, Supabase audit/state RPCs, background imports, and a plain Connectors page. See [implementation notes](audit-batch0.1-implementation.md) and [deployment setup](live-sources-and-sign-in.md).
+- **Events:** every step appends one, from the question, plan and candidates through each access decision, the
+  passages sent, any fallback and the answer.
+- **Hash chain:** each entry includes the hash of the one before it, computed over a canonical form of its data.
+- **Merkle batches:** sealed on every sync, and on demand from the Compliance view. Each batch links to the previous
+  root.
+- **Signatures:** a stored audit, in Supabase or in an `AUDIT_LOG_PATH` file, signs every batch with Ed25519, and the
+  API won't start without `AUDIT_SIGNING_KEY_FILE`. The public demo keeps its audit in memory, unsigned.
+- **Storage:** Supabase receives entries and batches in order, and triggers reject updates, deletes and truncates.
+  At startup the API verifies the chain, every batch root and every signature.
+- **Compliance:** `/v1/audit/search` reads plain-English questions (person, platform, space, dates, document), and
+  `/v1/audit/proof` and `/v1/audit/verify` check a Merkle proof. The Compliance view exports CSV.
+- **The asker's view:** `/v1/trace` shows the asker only the documents they were allowed.
+
+## Persistence and organizations
+
+- **One organization per API:** each process serves one Auth0 organization (`AUTH0_ORG_ID`) and refuses tokens from
+  any other. Directory reads, saved state, audit rows and remote tuples are all scoped to it.
+- **One writer per organization:** two APIs writing one organization's audit chain break each other.
+- **Saved state:** the index, grants, mock edits, connections, jobs and cursors are saved to Supabase after every sync
+  and every successful request. Semantic vectors are restored with the index.
+- **Without Supabase:** as in the public demo, everything lives in memory and resets on restart.
+
+## Limits
+
+- **No webhooks:** freshness comes from polling plus the live check in each question.
+- **No anchoring:** Merkle roots aren't anchored in an external write-once store. Someone holding both the database
+  and the signing key could rewrite history undetected.
+- **Remote FGA:** it uses a generic per-document schema. Each platform's own permission shape is enforced in the
+  connector layer.
+- **Embeddings:** semantic search uses Hunyuan's China-site embedding API. Embeddings through TokenHub are
+  unconfirmed.
+- **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
+- **Live imports:** they read current text only: no revision history, Jira comments or text from images.
+
+## More
+
+- [Trust boundaries](trust-boundary.md): hosting, sign-in and what crosses each boundary.
+- [Worked examples](worked-examples.md): the five scenarios, with real output.
+- [Decisions](../decisions.md): every choice and its trade-offs.
+- Setup: [Auth0 sign-in](../apps/web/AUTH0.md), [live sources and persistence](live-sources-and-sign-in.md) and
+  [hosting](../infra/tencent/README.md).

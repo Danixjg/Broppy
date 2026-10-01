@@ -1,88 +1,126 @@
 # Trust boundaries
 
-This diagram separates the default local mock from optional external services. Solid arrows run in the default demo; dotted arrows need configuration and existing services. Real Slack, Jira, Confluence, Drive, and an external append-only root store are **not** connected. Supabase, Auth0, Hunyuan, and remote FGA have optional code paths, but no real credentials or browser interaction were exercised.
+Where each part runs, what crosses between them, and what never does. The hosted setup follows
+[infra/tencent/README.md](../infra/tencent/README.md). Locally, the same processes run on `127.0.0.1`:
+`pnpm dev` (the demo, with personas chosen by a header) and `pnpm dev:sso` (Auth0 and Supabase). The query pipeline
+itself is in [Architecture](architecture.md).
 
+## Hosting
+
+Rendered image: [docs/images/diagram-deployment.png](images/diagram-deployment.png).
+
+<!-- diagram: docs/diagrams/deployment.mmd -->
 ```mermaid
-flowchart LR
-  subgraph Device[Browser / user device]
-    User[Demo switcher or Auth0 login]
+flowchart TB
+  classDef store fill:#edf2f7,stroke:#4a5568,color:#1a202c
+  classDef guard fill:#fff4d6,stroke:#b7791f,stroke-width:2px,color:#1a202c
+  classDef missing fill:#ffffff,stroke:#a0aec0,stroke-dasharray:5 5,color:#4a5568
+
+  Visitor["Browser: a person,<br/>or a demo visitor"]
+
+  subgraph Vercel["Vercel: Next.js web host"]
+    Session["Auth0 SDK session:<br/>encrypted HttpOnly<br/>cookie; only the host<br/>reads the tokens"]
+    Proxy["/api/brain proxy:<br/>same-origin check,<br/>API paths only"]
   end
-  subgraph Web[Static web app :3001]
-    UI[Workspace, mock admin, compliance views]
+
+  Auth0["Auth0: organization<br/>login, signing keys"]
+
+  subgraph Lighthouse["Tencent Cloud Lighthouse"]
+    Caddy["Caddy: HTTPS"]
+    Usage[("Usage volume: token<br/>and answer counts")]
+    SsoAPI["sso-api: checks the<br/>token, organization<br/>and directory; holds<br/>the audit signing key"]
+    DemoAPI["demo-api: PUBLIC_DEMO,<br/>fictional data only"]
   end
-  subgraph API[Node API process :3000]
-    Auth[Identity gate]
-    Query[Search, ID check, live source check, context]
-    Sync[Sync and ID tombstone pass]
-    Audit[Hash chain and Merkle sealer]
-    LocalFGA[In process grants and tier policy]
-    Index[In memory sparse and optional semantic index]
-    Key[Optional server signing key file]
-    File[Optional local JSONL events and signed roots]
-  end
-  subgraph Sources[Source data boundary: in-process mocks]
-    Mocks[Slack / Jira / Confluence / Drive mock connectors]
-  end
-  subgraph Auth0[Auth0 boundary]
-    Login[Authorization, token, and JWKS endpoints]
-  end
-  subgraph FGA[FGA service boundary]
-    Remote[Optional FGA API and installed model]
-  end
-  subgraph Supabase[Supabase boundary]
-    DB[Optional pgvector, full text, and hybrid_search RPC]
-  end
-  subgraph Hunyuan[Hunyuan boundary]
-    LLM[Optional chat API]
-    Embed[Optional embeddings API]
-  end
-  subgraph Roots[External append-only root store boundary]
-    External[Not implemented]
-  end
-  User --> UI
-  UI -->|demo HTTP x-demo-user| Auth
-  UI -.->|optional PKCE login| Login
-  UI -.->|optional bearer API calls| Auth
-  Login -.->|API checks access token signature and claims| Auth
-  Auth --> Query
-  Auth --> Sync
-  Query --> Index
-  Query -->|document IDs only| LocalFGA
-  Query -->|selected allowed IDs: live access and document| Mocks
-  Mocks -->|changed IDs, permissions, content, ID list| Sync
-  Sync --> Index
-  Sync --> LocalFGA
-  Sync -.->|changed mock chunk titles and text| Embed
-  Query -.->|question| Embed
-  Embed -.->|1024-d vectors| Index
-  Sync -.->|documents and changed chunks; server secret key| DB
-  Query -.->|question vector and text; server secret key| DB
-  DB -.->|candidate IDs and scores only| Query
-  Query -.->|optional: question and authorized fresh chunk text with IDs| LLM
-  Query --> Audit
-  Audit -.->|events and local roots| File
-  Key -.->|sign batches| Audit
-  Audit -->|role checked search, proof, verify| UI
-  Sync -.->|optional grant reconciliation| Remote
-  Query -.->|optional batch ID check and live recheck| Remote
-  File -.->|no external append or anchoring| External
+
+  TokenHub["TokenHub: question and<br/>authorized passages<br/>only; free tokens,<br/>post-paid off"]
+  Supabase[("Supabase: directory,<br/>state, chunks, Vault<br/>tokens, audit rows with<br/>no updates or deletes")]
+  Sources["Sources: mock in both<br/>APIs; live Slack, Jira,<br/>Confluence and Drive<br/>for SSO only"]
+  Groq["Groq free plan: no<br/>card on file; the<br/>demo's 100 model<br/>answers a day"]
+  Anchor["External write-once<br/>root anchor"]
+
+  Visitor -->|"HTTPS and a cookie"| Session
+  Session --> Proxy
+  Session -.->|"sign-in"| Auth0
+  Proxy -->|"Bearer token,<br/>or a demo persona"| Caddy
+  Caddy --> SsoAPI
+  Caddy --> DemoAPI
+  Usage --- SsoAPI
+  Usage --- DemoAPI
+  SsoAPI -.-> TokenHub
+  SsoAPI --> Supabase
+  SsoAPI --> Sources
+  DemoAPI --> Sources
+  DemoAPI -.-> Groq
+  Supabase -.->|"not implemented"| Anchor
+
+  class Session,Proxy,SsoAPI,DemoAPI guard
+  class Supabase,Usage store
+  class Anchor missing
 ```
 
-## Boundary rules and limits
+## Sign-in and the demo
 
-| Boundary | Implemented behavior | Limit |
-| --- | --- | --- |
-| Browser → web → API | Blank `apps/web/auth-config.json` uses the switcher and `x-demo-user`. API accepts that header only with `ALLOW_DEMO_AUTH=true` outside `NODE_ENV=production`. A complete public config uses browser Authorization Code + PKCE, validates login state and the signed ID token, stores the access token in `sessionStorage`, sends Bearer calls, and gets the UI role from `/v1/me`. CORS allows the demo and Authorization headers. | The switcher is a caller-controlled fixture identity, not login. Partial or invalid web config shows an error. Browser login was not exercised with a real tenant; the web API URL is fixed to `127.0.0.1:3000`. |
-| Bearer client → API → Auth0 | With issuer and audience configured, API validates an RS256 access JWT against Auth0 JWKS, issuer, audience, expiry, optional not-before, and a fixture `auth0Sub`. | The API still maps subjects to local fixture users. An external Auth0 tenant and real token were not exercised. |
-| API → source platforms | Four mock connectors hold documents and native permission fixtures in process. Selected query documents get live mock access and document refresh before context; workspace documents get the same access path. | No source OAuth, real webhooks, or network platform checks. Admin changes mutate mock fixtures. Group removal changes an in memory user; Slack channel removal narrows a mock native member list. |
-| API → FGA | Local `FgaAdapter.batchCheck` checks candidate document IDs against copied permissions and tier. If any of `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, or `FGA_CLIENT_ID` is set, the API constructs `RemoteFgaAdapter`; sync reconciles document grants and query decisions intersect local and remote checks. Selected items are checked again after live source refresh. | URL, store ID, model ID, client ID/secret, token issuer and audience are required in remote mode. Partial configuration fails startup. The remote service and model must already exist; local startup does not provision them. Remote failures deny checks or fail sync. |
-| API → local index / Supabase | Local sparse vectors, keyword matching, and freshness rank candidates by default. With `HUNYUAN_EMBEDDING_API_KEY`, local search can use semantic vectors. With both Supabase variables and that embedding key, sync writes document metadata and changed 1024-dimensional chunks; the `hybrid_search` RPC ranks pgvector, full text, and freshness and returns candidate IDs and scores. Query embedding or RPC failure falls back to the local index. Missing source IDs become tombstones; permission only sync avoids chunk regeneration and re-embedding. | Local index, grants, cursors, and retry checkpoints remain in memory. The SQL migration must be applied separately; its connector and audit tables are unused. Sync embedding or Supabase write failures fail a sync run, including startup sync. No real Supabase service was exercised. The secret key remains on the API server. |
-| API → Hunyuan embeddings | With the embedding key, sync sends changed chunk text and titles, and queries send question text, to the Hunyuan embedding API. The returned 1024-dimensional vectors stay in the local index and optionally go to Supabase. | This sends mock source text to an external service when configured. No real Hunyuan credentials were exercised. |
-| API → Hunyuan chat | Optional `LlmClient` sends the question and selected authorized chunk text with citation IDs after local FGA and live checks. Default client is deterministic and local. | The checker requires a cited sentence to appear in an authorized chunk. It rejects paraphrases and cannot establish that the source itself is true. A configured Hunyuan call sends document text to that external service. |
-| Admin UI → native permission fixtures | Admin loads the full permissions of a selected accessible document and edits JSON with source-specific narrowing checks; the API independently enforces narrowing and syncs the mock connector. | This changes fixture permissions in the running process, not real source ACLs. |
-| API → signing key / audit store | Default audit is an in memory hash chain with Merkle batches. Optional `AUDIT_LOG_PATH` plus `AUDIT_SIGNING_KEY_FILE` flushes entries and signed batches to local JSONL; startup checks chain, roots, and signatures. | The key is read from a server file. The local file is not an independently controlled append-only root store. Verification against a root in the same writable file does not detect a full rewrite by an actor holding the signing key. |
-| Compliance UI → audit | Nur's role can list and filter events, seal, inspect proof paths, verify, and export loaded rows to CSV. A query actor can read its own trace; compliance can read traced events. | Search is token matching over audit event fields, not general natural-language reasoning. Audit entries use question hashes and often document hashes, but some event types record raw document IDs, so the audit feed itself is sensitive. |
+Rendered image: [docs/images/diagram-sign-in.png](images/diagram-sign-in.png).
 
-An absent, denied, or deleted query with no usable context returns `No accessible information was found for this query.` and skips generation. The API does not send denied candidate titles, metadata, or content to Hunyuan chat. Query text is sent to Hunyuan embeddings when that path is configured; sync sends changed mock source text for indexing. Internal audit records counts and access decisions. A query actor's no-result trace is reduced to a generic answer event, while compliance can inspect the full trace. The API's audit and health surfaces are local demo facilities, not evidence of a production trust boundary.
+<!-- diagram: docs/diagrams/sign-in.mmd -->
+```mermaid
+sequenceDiagram
+  autonumber
+  actor P as Person
+  participant W as Next.js web host
+  participant A as Auth0
+  participant S as SSO API
+  participant D as Demo API
 
-Audit batch 0.1 adds Auth0 directory/org validation, durable Supabase state and audit, and source OAuth with Vault. See [current setup and trust limits](live-sources-and-sign-in.md); earlier diagrams describe the core query flow.
+  rect rgb(235, 244, 255)
+    note over P,S: Sign in with SSO
+    P->>W: /auth/login
+    W-->>P: Redirect to Auth0 with the organization and API audience
+    P->>A: Log in
+    A-->>P: Redirect to /auth/callback with a code
+    P->>W: /auth/callback
+    W->>A: Exchange the code, with the client secret
+    A-->>W: ID, access and refresh tokens
+    W-->>P: Encrypted HttpOnly session cookie: the page can't read the tokens
+    P->>W: /api/brain/v1/query with the cookie
+    note right of W: Same-origin check, then the<br/>access token is read on the server
+    W->>S: POST /v1/query with the Bearer token
+    S->>A: Signing keys (cached)
+    note right of S: RS256, issuer, audience, expiry,<br/>org_id, active directory entry.<br/>Checked again before replying.
+    S-->>W: Answer with citations
+    W-->>P: Answer
+  end
+
+  rect rgb(255, 248, 230)
+    note over P,D: Try the demo
+    P->>W: /demo
+    W-->>P: brain_demo cookie: the mode only, never an identity
+    P->>W: /api/brain/v1/query with x-demo-user: david
+    note right of W: Same-origin check, and the<br/>persona must be a short ID
+    W->>D: POST /v1/query with x-demo-user only: no cookies, no tokens
+    D-->>W: Answer from fictional data
+    W-->>P: Answer
+  end
+```
+
+## What crosses each boundary
+
+| Boundary | What crosses | What never crosses | Limits |
+| --- | --- | --- | --- |
+| **Browser ↔ web host** | HTTPS requests. The Auth0 SDK's session cookie (encrypted, HttpOnly, SameSite=Lax). In demo mode, the `brain_demo` cookie, which selects the mode only, and the chosen persona's ID. | Tokens the page can read: the SDK's access-token endpoint is off, and only the host can decrypt the session. API addresses and keys. | A demo visitor picks any fictional persona; that is the point of the demo. |
+| **Web host ↔ Auth0** | The sign-in redirect, with the organization and API audience. The code exchange, made by the server with the client secret. | The client secret, outside the host's server environment. | Tenant settings are checked by `pnpm doctor:sso`, not by the sandbox. |
+| **Web host ↔ SSO API** | `/v1` requests carrying the Bearer access token, after a same-origin check. Bodies are capped at 100 kB, and calls time out after 60 seconds. | The session cookie. Paths outside `/v1` and `/health`. A rejected token's details: every API 401 becomes one generic "did not accept your account" message. | The host trusts `BRAIN_API_URL`; HTTPS comes from Caddy. |
+| **Web host ↔ demo API** | `/v1` requests with `x-demo-user` only: a short lowercase ID, sent only to `DEMO_API_URL`. | Cookies and tokens. Demo traffic never reaches the SSO API, and a signed-in session always wins over the demo cookie. | The demo API trusts the header by design. It serves fictional data only. |
+| **SSO API ↔ Auth0** | Signing keys (JWKS), cached. Tokens must be RS256 and match the issuer, audience and expiry, carry `sub`, `exp` and the expected `org_id`, and map to an active directory entry in that organization. | Anything about the question or answer. | The person is checked again before an answer is returned, so a deactivated account stops at once. |
+| **API ↔ Supabase** | The server-only secret key. Directory reads, the state snapshot, ordered audit appends, the `hybrid_search` RPC (which returns IDs and scores), and Vault calls for source tokens. | The secret key, outside the API host. Source tokens in API responses or snapshots. | Triggers reject audit updates and deletes, but not a database owner replacing the database. One audit writer per organization. |
+| **API ↔ sources** | Mock connectors run inside the API. Live connectors use OAuth tokens kept in Vault (or `LIVE_SOURCES_JSON`); each person needs their own delegated credential, and no credential means no access. | Content from one organization to another: each API serves one organization. | Polling only, no webhooks. Live imports read current text only. |
+| **API ↔ model provider** | The question, and the authorized, freshly checked passages with their citation IDs. TokenHub or Hunyuan for SSO, within a token budget; Groq for the demo, within a daily allowance. | Denied documents' titles, metadata or text. Identities, tokens or keys. | The provider sees the passages it is sent. Tencent bills only if post-paid is turned on, which stays off; Groq's free plan can't bill. |
+| **API ↔ embeddings** (optional) | Changed chunk text at sync, and question text at query, to Hunyuan's embedding API. | Permission data. | It sends source text to Tencent when configured. Unconfirmed on TokenHub. |
+| **API ↔ remote FGA** (optional) | Organization-scoped tuples at sync; batch checks of document IDs at query. | Document content. | Remote failures deny. Platform permission shapes stay in the connector layer. |
+| **Lighthouse host** | Caddy terminates HTTPS for two host names. `sso-api` reads `sso.env` and the audit signing key (mounted read-only). Both APIs share the usage-count volume. | Real settings in `demo-api`: it refuses to start with any Auth0, Supabase, live-source, source OAuth or remote FGA setting. | `docker compose down -v` deletes the usage counts. |
+| **Audit store and keys** | Ed25519-signed Merkle batches that link each root to the previous one. At startup, the chain, roots and signatures are checked. | The signing key, outside the API host. | No external write-once anchor: someone holding both the database and the key could rewrite history. |
+| **Compliance view ↔ audit** | For the compliance role: listing, plain-English search, proofs, verification and CSV export. Anyone else sees only their own trace, which never names what they couldn't see. | Audit data, to other roles. | The audit holds questions, answers and document IDs, so access to it must stay narrow. |
+
+A question with nothing the asker may see gets the fixed reply, "No accessible information was found for this
+query.", and no writer is called. Denied documents' titles, metadata and text never reach a writer, a model or the
+asker's own trace.

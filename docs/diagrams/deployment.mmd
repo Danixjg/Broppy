@@ -1,0 +1,45 @@
+flowchart TB
+  classDef store fill:#edf2f7,stroke:#4a5568,color:#1a202c
+  classDef guard fill:#fff4d6,stroke:#b7791f,stroke-width:2px,color:#1a202c
+  classDef missing fill:#ffffff,stroke:#a0aec0,stroke-dasharray:5 5,color:#4a5568
+
+  Visitor["Browser: a person,<br/>or a demo visitor"]
+
+  subgraph Vercel["Vercel: Next.js web host"]
+    Session["Auth0 SDK session:<br/>encrypted HttpOnly<br/>cookie; only the host<br/>reads the tokens"]
+    Proxy["/api/brain proxy:<br/>same-origin check,<br/>API paths only"]
+  end
+
+  Auth0["Auth0: organization<br/>login, signing keys"]
+
+  subgraph Lighthouse["Tencent Cloud Lighthouse"]
+    Caddy["Caddy: HTTPS"]
+    Usage[("Usage volume: token<br/>and answer counts")]
+    SsoAPI["sso-api: checks the<br/>token, organization<br/>and directory; holds<br/>the audit signing key"]
+    DemoAPI["demo-api: PUBLIC_DEMO,<br/>fictional data only"]
+  end
+
+  TokenHub["TokenHub: question and<br/>authorized passages<br/>only; free tokens,<br/>post-paid off"]
+  Supabase[("Supabase: directory,<br/>state, chunks, Vault<br/>tokens, audit rows with<br/>no updates or deletes")]
+  Sources["Sources: mock in both<br/>APIs; live Slack, Jira,<br/>Confluence and Drive<br/>for SSO only"]
+  Groq["Groq free plan: no<br/>card on file; the<br/>demo's 100 model<br/>answers a day"]
+  Anchor["External write-once<br/>root anchor"]
+
+  Visitor -->|"HTTPS and a cookie"| Session
+  Session --> Proxy
+  Session -.->|"sign-in"| Auth0
+  Proxy -->|"Bearer token,<br/>or a demo persona"| Caddy
+  Caddy --> SsoAPI
+  Caddy --> DemoAPI
+  Usage --- SsoAPI
+  Usage --- DemoAPI
+  SsoAPI -.-> TokenHub
+  SsoAPI --> Supabase
+  SsoAPI --> Sources
+  DemoAPI --> Sources
+  DemoAPI -.-> Groq
+  Supabase -.->|"not implemented"| Anchor
+
+  class Session,Proxy,SsoAPI,DemoAPI guard
+  class Supabase,Usage store
+  class Anchor missing

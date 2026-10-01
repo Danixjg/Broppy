@@ -1,4 +1,4 @@
-> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. For SSO, run the API with `pnpm dev:sso`, which reads the root `.env.local`. `pnpm dev` is the demo API: it accepts `x-demo-user` persona headers, for curl and for the website's demo. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Project decisions are logged in [decisions.md](decisions.md).
+> **Start here.** [Architecture](docs/architecture.md) shows how the challenge brief's requirements are met, and the [worked examples](docs/worked-examples.md) run its five scenarios. Sign-in uses the Auth0 Next.js SDK: see [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. `pnpm dev` runs the demo API, which accepts `x-demo-user` persona headers for curl and the website's demo; `pnpm dev:sso` runs the SSO API from the root `.env.local`. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Every project decision is in [decisions.md](decisions.md).
 
 # Internal Brain
 
@@ -141,8 +141,20 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 
 ## Deployment status and remaining audit items
 
-Local demo mode remains ephemeral without Supabase configuration. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
+Without Supabase, the demo keeps everything in memory and resets on restart. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
 
-The compliance audit contains question/answer text and source identifiers. Keep audit access and signing keys restricted. Merkle signatures link consecutive batch roots; an independent write-once root anchor remains an open infrastructure decision. Source-specific remote FGA types, expiring restricted grants and webhooks remain follow-ups identified in the audit. Week 3 differentiators and CodeBuddy/WorkBuddy evidence were not fabricated or implemented as part of this repair batch.
+The compliance audit contains question and answer text and source identifiers, so keep audit access and signing keys restricted. The remaining limits, such as the missing write-once anchor for Merkle roots, webhooks and source-specific remote FGA types, are listed under [Architecture: Limits](docs/architecture.md#limits). CodeBuddy/WorkBuddy evidence must be captured by someone using those products; none is fabricated.
 
-See [audit implementation notes](docs/audit-batch0.1-implementation.md), [architecture](docs/architecture.md), [trust boundary](docs/trust-boundary.md) and [project plan](internal-brain-five-stage-plan.md).
+## Documentation
+
+- [Architecture](docs/architecture.md): how the brief's requirements are met, and the pipeline with the five points that matter most.
+- [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
+- [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
+- [Decisions](decisions.md): every choice, the options considered and the trade-offs.
+- Setup: [Auth0 sign-in](apps/web/AUTH0.md), [live sources and persistence](docs/live-sources-and-sign-in.md), and [hosting on Tencent Cloud](infra/tencent/README.md).
+- Diagrams: the sources are in [docs/diagrams](docs/diagrams), with rendered images in [docs/images](docs/images). `pnpm test` checks that each diagram in the docs matches its source and that every link in the docs resolves.
+
+History, kept as a record:
+
+- [Five-stage plan](docs/internal-brain-five-stage-plan.md) (26 Sep 2026): the original design.
+- [Repository audit](docs/broppy-audit-batch0.1.md) (30 Sep 2026) and its [implementation notes](docs/audit-batch0.1-implementation.md).
