@@ -22,6 +22,8 @@ COPY data/mock data/mock
 COPY packages packages
 COPY apps/api apps/api
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
+# The model usage counts live here, on a volume; a new volume takes this folder's owner.
+RUN mkdir -p /data && chown node:node /data
 EXPOSE 3000
 USER node
 CMD ["node_modules/.bin/tsx", "apps/api/src/server.ts"]

@@ -4,6 +4,7 @@ import type { RemoteFgaAdapter } from "@brain/fga-adapter";
 import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
 import { Brain } from "./brain.js";
+import { ModelUnavailable } from "./llm.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
 
 describe("Internal Brain security and sync", () => {
@@ -340,5 +341,62 @@ describe("Internal Brain security and sync", () => {
     expect(AuditLog.verifyProof(proof, batch.root)).toBe(true);
     expect(AuditLog.verifyProof(proof, "0".repeat(64))).toBe(false);
     expect(brain.audit.verifyChain()).toBe(true);
+  });
+});
+
+describe("When the language model can't answer", () => {
+  const question = "What does PAY-101 need before cutover?";
+
+  it("answers with the built-in writer from the same context, and audits why", async () => {
+    const reference = new Brain();
+    await reference.syncAll();
+    const expected = await reference.query(reference.user("ravi")!, question);
+    for (const [failure, reason] of [[new ModelUnavailable("budget"), "budget"],
+      [new ModelUnavailable("rate_limited"), "rate_limited"], [new Error("provider down"), "error"]] as const) {
+      const brain = new Brain({ generate: vi.fn(async () => { throw failure; }) });
+      await brain.syncAll();
+      const answer = await brain.query(brain.user("ravi")!, question);
+      expect(answer.text).toBe(expected.text);
+      expect(answer.citations.map(citation => citation.chunkId)).toEqual(expected.citations.map(citation => citation.chunkId));
+      expect(brain.audit.entries.filter(entry => entry.type === "llm_fallback").map(entry => entry.data.reason))
+        .toEqual([reason]);
+    }
+  });
+
+  it("answers with the built-in writer when nothing in the model's reply is copied word for word", async () => {
+    const reference = new Brain();
+    await reference.syncAll();
+    const expected = await reference.query(reference.user("ravi")!, question);
+    const brain = new Brain({ generate: async () => "PAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]" });
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("ravi")!, question);
+    // The paraphrase is still dropped; the asker gets the built-in writer's answer from the same sources.
+    expect(answer.text).not.toContain("just needs");
+    expect(answer.text).toBe(expected.text);
+    expect(answer.citations.map(citation => citation.chunkId)).toEqual(expected.citations.map(citation => citation.chunkId));
+    expect(brain.audit.entries.filter(entry => entry.type === "llm_fallback").map(entry => entry.data.reason))
+      .toEqual(["ungrounded"]);
+  });
+
+  it("keeps a model's lines that are copied word for word and drops the rest, without falling back", async () => {
+    const brain = new Brain({ generate: async context => `${context[0].text.split(/(?<=[.!?])\s+/)[0]} ` +
+      `[${context[0].citation}]\nPAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]` });
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("ravi")!, question);
+    expect(answer.text.split("\n")).toHaveLength(1);
+    expect(answer.text).not.toContain("just needs");
+    expect(answer.citations).toHaveLength(1);
+    expect(brain.audit.entries.some(entry => entry.type === "llm_fallback")).toBe(false);
+  });
+
+  it("keeps syncing and answering by keywords once embeddings are over budget", async () => {
+    const embed = vi.fn(async () => [1]);
+    const brain = new Brain(undefined, { embedding: { embed, available: () => false } });
+    await brain.syncAll();
+    expect(brain.runs.get("jira")?.status).toBe("complete");
+    expect(brain.index.semanticVectorsFor("jira:PAY-101").size).toBe(0);
+    const answer = await brain.query(brain.user("ravi")!, question);
+    expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
+    expect(embed).not.toHaveBeenCalled();
   });
 });

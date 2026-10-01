@@ -1,4 +1,5 @@
 import type { Persistence } from "./persistence.js";
+import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery } from "./query-plan.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
@@ -37,6 +38,8 @@ export class Brain {
   readonly states = new Map<Source, ConnectorState>();
   readonly runs = new Map<Source, SyncRun>();
   readonly llm: LlmClient;
+  // Answers from the same authorized context when the model can't: over budget, rate limited or failing.
+  private readonly fallbackLlm = new LocalGroundedLlm();
   readonly lastTraceIds = new Map<string, string>();
   private readonly syncQueues = new Map<Source, Promise<void>>();
   private readonly remoteSynced = new Set<string>();
@@ -337,7 +340,7 @@ export class Brain {
     audit("query_planned", { sources: plan.sources, ...plan.window });
 
     let queryVector: number[] | undefined;
-    if (this.embedding) {
+    if (this.embedding && (this.embedding.available?.() ?? true)) {
       try { queryVector = await this.embedding.embed(trimmed); }
       catch { audit("embedding_fallback", {}); }
     }
@@ -432,9 +435,22 @@ export class Brain {
     if (!context.length) return this.noResult(user, traceId, scope);
     audit("context_sent", { chunkIds: [...citationMap.keys()] });
     await this.audit.flush();
-    const generated = await this.llm.generate(context, trimmed);
-    const answer = groundedOutput(generated, citationMap,
-      new Map(context.map(item => [item.citation, item.text])));
+    const evidence = new Map(context.map(item => [item.citation, item.text]));
+    let generated: string;
+    let fromModel = !(this.llm instanceof LocalGroundedLlm);
+    try {
+      generated = await this.llm.generate(context, trimmed);
+    } catch (error) {
+      audit("llm_fallback", { reason: error instanceof ModelUnavailable ? error.reason : "error" });
+      generated = await this.fallbackLlm.generate(context, trimmed);
+      fromModel = false;
+    }
+    let answer = groundedOutput(generated, citationMap, evidence);
+    // Nothing the model wrote was copied word for word from the sources: answer as if no model were set.
+    if (fromModel && answer.text === NO_RESULT) {
+      audit("llm_fallback", { reason: "ungrounded" });
+      answer = groundedOutput(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+    }
     let outputUser = user;
     if (revalidateUser) {
       try {
@@ -642,7 +658,9 @@ export class Brain {
     const indexed = this.index.documents.get(docId);
     if (!indexed || indexed.deletedAt) return;
     const existing = this.index.semanticVectorsFor(docId);
-    if (this.embedding && (contentChanged || existing.size !== indexed.chunks.length)) {
+    // Over its budget, the embedding client is skipped: the document keeps keyword search until it is available.
+    if (this.embedding && (this.embedding.available?.() ?? true) &&
+      (contentChanged || existing.size !== indexed.chunks.length)) {
       if (!await this.index.refreshSemantic(docId, this.embedding)) {
         throw new Error("Semantic embedding refresh failed");
       }

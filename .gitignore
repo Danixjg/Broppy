@@ -18,3 +18,7 @@ apps/web/next-env.d.ts
 # Local working notes (never committed)
 handoff.md
 plans.md
+
+# Local model usage counts (LLM_USAGE_FILE) and the meter's temporary file
+llm-usage.json
+llm-usage.json.tmp
