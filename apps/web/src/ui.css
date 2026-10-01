@@ -39,6 +39,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   max-width: 12rem;
   cursor: pointer;
 }
+.project-switch select { max-width: 16rem; }
 .search-box {
   max-width: 32rem;
   flex: 1;
