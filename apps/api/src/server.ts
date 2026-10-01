@@ -92,7 +92,7 @@ function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "sequence" | 
         (entry.type !== "access_decision" || entry.data.allowed === true);
     }
     if (entry.type === "live_access_decision") return entry.data.allowed === true;
-    return entry.type === "context_sent" || entry.type === "answer_returned";
+    return entry.type === "query_planned" || entry.type === "context_sent" || entry.type === "answer_returned";
   });
   return visible.map((entry, index) => {
     const data = { ...entry.data };

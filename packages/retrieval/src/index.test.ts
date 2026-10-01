@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SourceDocument } from "@brain/types";
-import { HybridIndex, type SemanticEmbeddingClient } from "./index.js";
+import type { Citation, SourceDocument } from "@brain/types";
+import { groundedOutput, HybridIndex, LocalGroundedLlm, type SemanticEmbeddingClient } from "./index.js";
 
 const vector = (dimension: number): number[] => Array.from({ length: 1024 }, (_, index) => index === dimension ? 1 : 0);
 
@@ -137,5 +137,46 @@ describe("HybridIndex relevance", () => {
     const results = index.search("payment constructor toString");
     expect(results.map(result => result.docId)).toEqual(["builder"]);
     expect(Number.isFinite(results[0].score)).toBe(true);
+  });
+
+  it("treats blockers and blocker as the same topic", () => {
+    const index = new HybridIndex();
+    index.upsert(document("thread", "Blocker raised: the backfill keeps timing out."));
+    expect(index.search("any blockers?").map(result => result.docId)).toEqual(["thread"]);
+  });
+});
+
+describe("LocalGroundedLlm", () => {
+  const citation = (chunkId: string): Citation => ({ docId: chunkId.split(":")[0], chunkId, title: chunkId,
+    url: `https://example.test/${chunkId}`, version: 1, updatedAt: "2026-10-01T00:00:00.000Z",
+    lastIndexedAt: "2026-10-01T00:00:00.000Z" });
+
+  it("quotes the most relevant source in full, then the best sentence of the next three", async () => {
+    const context = [
+      { citation: "runbook:0", text: "Step 1: page on-call. Step 2: freeze deploys. Step 3: fail over traffic." },
+      { citation: "thread:0", text: "Standup notes. Migration blocker raised by the team." },
+      { citation: "issue:0", text: "Only one sentence here." },
+      { citation: "plan:0", text: "Plan sentence." },
+      { citation: "extra:0", text: "Never used." }
+    ];
+    const output = await new LocalGroundedLlm().generate(context, "migration blocker");
+    expect(output.split("\n")).toEqual([
+      "Step 1: page on-call. [runbook:0]",
+      "Step 2: freeze deploys. [runbook:0]",
+      "Step 3: fail over traffic. [runbook:0]",
+      "Migration blocker raised by the team. [thread:0]",
+      "Only one sentence here. [issue:0]",
+      "Plan sentence. [plan:0]"
+    ]);
+    const answer = groundedOutput(output, new Map(context.map(item => [item.citation, citation(item.citation)])),
+      new Map(context.map(item => [item.citation, item.text])));
+    expect(answer.text).toBe(output);
+    expect(answer.citations.map(item => item.chunkId)).toEqual(["runbook:0", "thread:0", "issue:0", "plan:0"]);
+  });
+
+  it("quotes at most six sentences of the first source", async () => {
+    const text = Array.from({ length: 9 }, (_, index) => `Sentence ${index + 1}.`).join(" ");
+    const output = await new LocalGroundedLlm().generate([{ citation: "long:0", text }], "sentence");
+    expect(output.split("\n")).toHaveLength(6);
   });
 });

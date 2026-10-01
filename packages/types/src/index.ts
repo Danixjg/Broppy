@@ -124,7 +124,15 @@ export interface Citation {
   lastIndexedAt: string;
 }
 
+/** Where an answer looked first and the time range it kept to, when the question named them. */
+export interface QueryScope {
+  sources: Source[];
+  from?: string;
+  to?: string;
+}
+
 export interface QueryAnswer {
   text: string;
   citations: Citation[];
+  scope?: QueryScope;
 }

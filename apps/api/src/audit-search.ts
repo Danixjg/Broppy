@@ -1,4 +1,5 @@
 import type { AuditEntry, User } from "@brain/types";
+import { relativeWindow } from "./time-window.js";
 
 interface AuditDocument { docId: string; title: string }
 
@@ -38,12 +39,8 @@ export function searchAudit(entries: AuditEntry[], params: URLSearchParams, user
   let from = date(params.get("from") ?? (q.includes("before ") ? undefined : dates[0]));
   let to = date(params.get("to") ?? dates[1] ?? (!q.includes("since ") && !q.includes("after ") ? dates[0] : undefined), true);
   if (!dates.length && !params.has("from") && !params.has("to")) {
-    const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const days = /\blast (\d+) days?\b/.exec(q);
-    if (/\byesterday\b/.test(q)) { from = midnight - 86400000; to = midnight - 1; }
-    else if (/\btoday\b/.test(q)) { from = midnight; to = midnight + 86400000 - 1; }
-    else if (/\blast week\b/.test(q)) { from = midnight - 7 * 86400000; to = now.getTime(); }
-    else if (days) { from = midnight - Number(days[1]) * 86400000; to = now.getTime(); }
+    const window = relativeWindow(q, now);
+    if (window) ({ from, to } = window);
   }
   if (from !== undefined && to !== undefined && from > to) throw new Error("Invalid date range");
   const user = params.get("user") ?? users.find(user => [user.id, user.email, user.name.toLowerCase()].some(value =>
