@@ -138,5 +138,45 @@
     "user": "group:payments#member",
     "relation": "group_reader",
     "object": "document:confluence:gateway-operations"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:jira:DB-12"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:jira:DB-15"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:slack:db-migration"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:slack:db-oncall"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:slack:db-planning"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:confluence:db-migration-plan"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:confluence:payment-service-runbook"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:runbook-2025"
   }
 ]

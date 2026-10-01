@@ -208,11 +208,20 @@ export class MockConnector implements Connector {
   }
 }
 
-export function loadMockCorpus(): {
+// The fixture dates are written as of this moment. Loading moves them forward by the whole days since, keeping their
+// spacing and times of day, so questions such as "last week" keep finding the demo data.
+const FIXTURE_NOW = Date.parse("2026-09-30T00:00:00.000Z");
+const DAY = 86_400_000;
+
+export function loadMockCorpus(now = new Date()): {
   users: User[];
   connectors: Record<Source, MockConnector>;
 } {
-  const sourceDocs = documents as unknown as SourceDocument[];
+  const shift = Math.floor((now.getTime() - FIXTURE_NOW) / DAY) * DAY;
+  const sourceDocs = (documents as unknown as SourceDocument[]).map(doc => ({
+    ...doc,
+    updatedAt: new Date(Date.parse(doc.updatedAt) + shift).toISOString()
+  }));
   return {
     users: copy(users as User[]),
     connectors: {

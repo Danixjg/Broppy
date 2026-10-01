@@ -21,9 +21,11 @@ describe("Stage 1 mock corpus", () => {
       "slack:payments-cutover", "slack:fraud-private", "jira:PAY-101", "jira:SETL-27",
       "jira:SEC-44", "confluence:payment-master", "confluence:q3-incident",
       "drive:cutover-plan", "drive:cutover-duplicate", "drive:recon-sheet",
-      "drive:steering-deck", "drive:api-spec"
+      "drive:steering-deck", "drive:api-spec",
+      "jira:DB-12", "jira:DB-15", "slack:db-migration", "slack:db-oncall", "slack:db-planning",
+      "confluence:db-migration-plan", "confluence:payment-service-runbook", "drive:runbook-2025"
     ]));
-    expect(ids).toHaveLength(16);
+    expect(ids).toHaveLength(24);
     for (const connector of Object.values(connectors)) {
       for (const doc of await connector.listItems()) {
         expect(doc.content).toBeTruthy();
@@ -46,6 +48,19 @@ describe("Stage 1 mock corpus", () => {
         }
       }
     }
+  });
+
+  it("dates the fixtures relative to now, keeping their spacing", async () => {
+    const at = async (now: string) => {
+      const { connectors } = loadMockCorpus(new Date(now));
+      return new Map((await Promise.all(Object.values(connectors).map(connector => connector.listItems()))).flat()
+        .map(doc => [doc.docId, Date.parse(doc.updatedAt)]));
+    };
+    const written = await at("2026-09-30T00:00:00.000Z");
+    const later = await at("2026-10-16T00:30:00.000Z");
+    expect(written.get("slack:db-migration")).toBe(Date.parse("2026-09-27T02:00:00.000Z"));
+    for (const [docId, time] of later) expect(time - written.get(docId)!).toBe(16 * 86_400_000);
+    expect(Math.max(...later.values())).toBeLessThan(Date.parse("2026-10-16T00:00:00.000Z"));
   });
 
   it("intersects brain grants with each platform's native restriction", async () => {
