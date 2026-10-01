@@ -436,6 +436,51 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Screenshots:** taken in the public demo, with the API's and the browser's clocks set to 15 October 2026, 14:05
   UTC.
 
+## 2026-10-01 — Docs and diagrams catch up with the code (R8)
+
+- **Input:** `docs/architecture.md`, `docs/trust-boundary.md` and the diagram source still described the September
+  design. That meant a Python static site, browser PKCE with the token in `sessionStorage`, and Hunyuan as the only
+  model. There was no demo, hosting, usage meter or query plan. The five-stage plan asks for a final diagram that
+  makes five points "visually unavoidable". The README's link to that plan was broken.
+- **How decided:** chosen explicitly in a planning session.
+
+### D36 — A brief-first architecture doc
+- **Options:** brief-first / today's layout with every stale fact corrected.
+- **Chosen:** brief-first. `docs/architecture.md` opens with the brief's five requirements, each tied to the code,
+  the test that proves it and the worked example. The pipeline diagram follows, with the plan's five points numbered
+  ①–⑤.
+- **Trade-off:** it's written for judges first. The engineering detail sits in shorter sections below.
+
+### D37 — The September docs stay, marked as history
+- **Options:** keep them, marked as history / move them to `docs/history/` / delete them.
+- **Chosen:** keep them where they are. The five-stage plan, the 30 Sep audit and its implementation notes are
+  unchanged apart from a dated note at the top pointing to the current design. The README lists them under History.
+- **Trade-off:** they still describe the old design, so readers rely on that note.
+
+### D38 — Mermaid plus rendered images
+- **Options:** Mermaid plus PNGs / Mermaid only.
+- **Chosen:** both. GitHub draws the Mermaid, and `docs/images/diagram-*.png` serve the video and slides. The images
+  are made in the development sandbox from a downloaded copy of Mermaid, with no new dependency.
+- **Trade-off:** the images need re-rendering whenever a diagram changes. The script is kept with the team's notes.
+
+### D39 — The tests check the docs
+- **Options:** `pnpm test` checks the diagrams and links / review by hand only.
+- **Chosen:** the tests check them, in `apps/api/src/docs.test.ts`.
+- **Trade-off:** moving a file or editing a diagram means updating the docs in the same change.
+
+### Implementation details (docs and diagrams)
+- **Sources:** each diagram lives in `docs/diagrams/NAME.mmd`; the old `docs/diagram-source.mmd` is now
+  `pipeline.mmd`. A doc embeds a diagram, copied exactly, after a `<!-- diagram: docs/diagrams/NAME.mmd -->` line.
+- **Check:** `docs.test.ts` reads the README, this file, `apps/web/AUTH0.md`, `infra/tencent/README.md` and
+  `docs/*.md`.
+  - Every relative link and image outside code blocks must point to a file that exists.
+  - Every embedded diagram must equal its source.
+  - Every source must be embedded somewhere and have its `docs/images/diagram-NAME.png`.
+- **Diagrams:** flowcharts and one sequence diagram, using only syntax that parses in Mermaid 11 and 12. Node text
+  keeps each line to 24 characters or fewer, because Mermaid wraps longer lines on its own.
+- **Images:** rendered at twice the size in Chromium with Mermaid 11.17.2. The script, `r8-diagrams.mjs`, also checks
+  that each diagram parses in Mermaid 12.
+
 ---
 
 ## Deferred (not decided yet)
