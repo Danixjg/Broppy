@@ -627,6 +627,11 @@ Each entry records the options that were considered, what was chosen, and the tr
   `ratelimited` inside a 200. Both retry with 1, 2 and 4 second waits, then fail the sync so it resumes later. A
   Slack channel lookup that fails for any reason other than `channel_not_found` or `not_in_channel` now fails the
   sync; before, any `ok: false` read as a missing channel and was tombstoned.
+- **Reconnecting keeps the scope.** The OAuth callback used to reset a source to `none`, so reconnecting after a
+  rejected credential would have emptied it. A new connection still starts at `none`; reconnecting a source that was
+  already set up keeps the admin's choice (`Brain.markConnected`).
+- **A source in error says why.** The Connectors page shows the reason ("slack credential was rejected; reconnect the
+  source") until the next successful sync clears it. Documents stay indexed while a source is in error.
 - **Trashed items are not indexed.** A trashed Drive file and a Confluence page that isn't `current` can still be
   fetched by ID, so both now read as gone. A Confluence page moved to another space keeps its ID and is picked up or
   dropped by the container it now sits in.
