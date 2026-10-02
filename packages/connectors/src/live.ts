@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { MockConnector, type Change, type ImportScope } from "./index.js";
+import { MockConnector, selectsNothing, type Change, type Container, type ImportScope } from "./index.js";
 import type { Source, SourceDocument, SourcePermission, User } from "@brain/types";
 
 /** The provider refused our own credential. That says nothing about the item, so it must never read as "deleted". */
@@ -136,6 +136,7 @@ export class LiveConnector extends MockConnector {
 
   override async discover(scope: ImportScope = {}): Promise<string[]> {
     this.scope = scope;
+    if (selectsNothing(scope)) { this.settings.ids = []; return []; }
     if (!this.settings.discover) return (await this.listIds()).filter(id => !scope.ids?.length || scope.ids.includes(id.split(":").slice(1).join(":")));
     if ((scope.containers?.length ?? 0) > 1) {
       const found: string[] = [];
@@ -176,6 +177,37 @@ export class LiveConnector extends MockConnector {
     const selected = [...new Set(ids)].filter(id => (!scope.ids?.length || scope.ids.includes(id)) && (this.source !== "slack" || !container || id === container));
     this.settings.ids = selected;
     return selected.map(id => `${this.source}:${id}`);
+  }
+
+  override async listContainers(): Promise<Container[]> {
+    const authorization = await this.serviceAuthorization();
+    const found: Container[] = [];
+    let cursor = "";
+    const seen = new Set<string>();
+    do {
+      let path: string;
+      if (this.source === "slack") path = `/api/conversations.list?limit=200&types=public_channel,private_channel&exclude_archived=true&cursor=${encodeURIComponent(cursor)}`;
+      else if (this.source === "jira") path = `/rest/api/3/project/search?maxResults=100&startAt=${cursor || 0}`;
+      else if (this.source === "confluence") path = cursor || "/wiki/api/v2/spaces?limit=100";
+      else path = `/drive/v3/drives?pageSize=100&fields=nextPageToken,drives(id,name)&pageToken=${encodeURIComponent(cursor)}`;
+      const result = object(await this.get(path, authorization));
+      if (this.source === "slack" && result.ok !== true) throw new Error("Slack channel list failed");
+      const items = result.channels ?? result.values ?? result.results ?? result.drives;
+      if (!Array.isArray(items)) throw new Error("Invalid container list");
+      for (const raw of items) {
+        const item = object(raw);
+        const id = text(this.source === "jira" ? item.key : item.id);
+        if (id) found.push({ id, name: text(item.name) || id });
+      }
+      if (this.source === "jira") cursor = result.isLast === false ? String(found.length) : "";
+      else if (this.source === "confluence") {
+        const next = text(object(result._links ?? {}).next);
+        cursor = next ? new URL(next, this.origin).pathname.replace(/^\/ex\/confluence\/[^/]+/, "") + new URL(next, this.origin).search : "";
+      } else cursor = this.source === "slack" ? text(object(result.response_metadata ?? {}).next_cursor) : text(result.nextPageToken);
+      if (cursor && seen.has(cursor)) throw new Error("Repeated container page");
+      seen.add(cursor);
+    } while (cursor);
+    return found;
   }
 
   private async serviceAuthorization(): Promise<string> {

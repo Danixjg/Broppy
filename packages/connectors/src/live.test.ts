@@ -123,3 +123,35 @@ describe("live connector failure handling", () => {
     expect((await connector.listUpdatedSince(first.cursor + 1)).ids).toEqual(["jira:PAY-101"]);
   });
 });
+
+describe("live connector scope", () => {
+  const base = { ids: [], discover: true, baseUrl: "https://atlassian.example.test/",
+    serviceAuthorization: "Bearer service", userAuthorizations: {} };
+
+  it("asks the provider nothing when no source is selected", async () => {
+    const transport = vi.fn();
+    for (const scope of [{ mode: "none" as const }, { mode: "selected" as const }]) {
+      const connector = new LiveConnector("jira", base, [user], transport as unknown as typeof fetch);
+      expect(await connector.discover(scope)).toEqual([]);
+    }
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("lists what an admin can pick from, page by page, for each source", async () => {
+    const slack = new LiveConnector("slack", base, [user], vi.fn(async (input: RequestInfo | URL) => {
+      const next = new URL(String(input)).searchParams.get("cursor");
+      return Response.json({ ok: true, channels: [{ id: next ? "C2" : "C1", name: next ? "ops" : "payments" }],
+        response_metadata: { next_cursor: next ? "" : "p2" } });
+    }) as typeof fetch);
+    expect(await slack.listContainers()).toEqual([{ id: "C1", name: "payments" }, { id: "C2", name: "ops" }]);
+    const jira = new LiveConnector("jira", base, [user], vi.fn(async () =>
+      Response.json({ values: [{ key: "PAY", name: "Payments" }], isLast: true })) as typeof fetch);
+    expect(await jira.listContainers()).toEqual([{ id: "PAY", name: "Payments" }]);
+    const drive = new LiveConnector("drive", base, [user], vi.fn(async () =>
+      Response.json({ drives: [{ id: "D1", name: "Finance" }] })) as typeof fetch);
+    expect(await drive.listContainers()).toEqual([{ id: "D1", name: "Finance" }]);
+    const confluence = new LiveConnector("confluence", base, [user], vi.fn(async () =>
+      Response.json({ results: [{ id: "9", name: "Security" }], _links: {} })) as typeof fetch);
+    expect(await confluence.listContainers()).toEqual([{ id: "9", name: "Security" }]);
+  });
+});

@@ -14,6 +14,49 @@ async function action(source, verb, method = "POST", data) {
   try { const result = await request(`/v1/admin/connections/${source}${verb ? `/${verb}` : ""}`, method, data); if (result.url) { location.assign(result.url); return; } await load(); }
   catch (error) { status.textContent = error.message; }
 }
+function scopeControls(connection) {
+  const form = document.createElement("div");
+  const scope = connection.scope || {};
+  const mode = scope.mode || (scope.containers?.length || scope.ids?.length ? "selected" : "all");
+  const choices = [["all", "Include everything"], ["selected", "Include only what I select"], ["none", "Include nothing"]];
+  const radios = choices.map(([value, text]) => {
+    const label = document.createElement("label"); const input = document.createElement("input");
+    input.type = "radio"; input.name = `mode-${connection.source}`; input.value = value; input.checked = value === mode;
+    label.append(input, ` ${text}`); form.append(label, document.createElement("br")); return input;
+  });
+  const picker = document.createElement("div"); picker.hidden = mode !== "selected";
+  const boxes = [];
+  const loadPicker = async () => {
+    try {
+      const { containers } = await request(`/v1/admin/connections/${connection.source}/containers`);
+      picker.replaceChildren();
+      for (const item of containers) {
+        const label = document.createElement("label"); const box = document.createElement("input");
+        box.type = "checkbox"; box.value = item.id; box.checked = (scope.containers || []).includes(item.id);
+        label.append(box, ` ${item.name}`); picker.append(label, document.createElement("br")); boxes.push(box);
+      }
+      if (!containers.length) picker.append(element("p", "Nothing to select yet."));
+    } catch (error) { picker.append(element("p", error.message)); }
+  };
+  const futureLabel = document.createElement("label"); const future = document.createElement("input");
+  future.type = "checkbox"; future.checked = Boolean(scope.futureOnly);
+  futureLabel.append(future, " Only content that is new or changed from now on");
+  const sinceLabel = element("label", "Or history since "); const since = document.createElement("input");
+  since.type = "date"; since.value = scope.futureOnly ? "" : (scope.since || "").slice(0, 10); sinceLabel.append(since);
+  const selected = () => radios.find(radio => radio.checked)?.value;
+  const refresh = () => { picker.hidden = selected() !== "selected"; futureLabel.hidden = sinceLabel.hidden = selected() === "none"; };
+  for (const radio of radios) radio.onchange = () => { refresh(); if (selected() === "selected" && !boxes.length) void loadPicker(); };
+  future.onchange = () => { since.disabled = future.checked; };
+  since.disabled = future.checked;
+  if (mode === "selected") void loadPicker();
+  refresh();
+  const save = element("button", "Save and import");
+  save.onclick = () => action(connection.source, "scope", "PUT", { mode: selected(),
+    ...(selected() === "selected" ? { containers: boxes.filter(box => box.checked).map(box => box.value) } : {}),
+    ...(selected() !== "none" && future.checked ? { futureOnly: true } : selected() !== "none" && since.value ? { since: new Date(since.value).toISOString() } : {}) });
+  form.append(picker, futureLabel, document.createElement("br"), sinceLabel, document.createElement("br"), save);
+  return form;
+}
 async function load() {
   const [result, progress] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs")]);
   const container = document.getElementById("connections");
@@ -26,13 +69,8 @@ async function load() {
       const percent = job?.found ? Math.floor(100 * (job.indexed + job.skipped) / job.found) : 0;
       section.append(element("h2", connection.source), element("p", `${connection.status}${job?.status === "running" ? ` ${percent}%` : ""} · ${connection.count} items · Last sync: ${connection.lastSync || "Never"}`));
       if (job) section.append(element("p", `Found ${job.found}, indexed ${job.indexed}, skipped ${job.skipped}, failed ${job.failed}${job.error ? `: ${job.error}` : ""}`));
-      const label = element("label", "Scope: native item IDs, separated by commas (empty means all available)");
-      const ids = document.createElement("input"); ids.value = (connection.scope.ids || []).join(","); label.append(ids);
-      const sinceLabel = element("label", "History since"); const since = document.createElement("input"); since.type = "date"; since.value = (connection.scope.since || "").slice(0,10); sinceLabel.append(since);
-      const containerLabel = element("label", "Channels / project keys / space IDs / shared drive IDs"); const containers = document.createElement("input"); containers.value = (connection.scope.containers || []).join(","); containerLabel.append(containers);
-      section.append(containerLabel, label, sinceLabel);
+      section.append(scopeControls(connection));
       for (const [name, handler] of [["Connect", () => action(connection.source, "authorize")],
-        ["Save scope", () => action(connection.source, "scope", "PUT", { containers: containers.value.split(",").map(s => s.trim()).filter(Boolean), ids: ids.value.split(",").map(s => s.trim()).filter(Boolean), ...(since.value ? { since: new Date(since.value).toISOString() } : {}) })],
         ["Re-sync", () => action(connection.source, "import")], ["Disconnect", () => action(connection.source, "", "DELETE")]]) {
         const button = element("button", name); button.onclick = handler; section.append(button);
       }

@@ -459,6 +459,28 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Trade-off:** it stays outside the pnpm workspace, and it reads the JSONL log, not Supabase-only batches. The
   repository still needs creating, and someone must run `publish` and push. See `tools/anchor/README.md`.
 
+### D39 — What a company includes from each source
+- **Context:** a trace of connecting a source found that every source started as connected with an empty scope, which
+  meant "everything". The five-minute sync would import all a credential could see before an admin chose anything. The
+  only controls were free-text ID fields and a date.
+- **Chosen:** an explicit mode, `all`, `selected` or `none`, with `none` as the default after the OAuth callback. A
+  "new or changed from now on" option fixes its starting moment when saved. A checklist is loaded from the provider.
+  Saving starts the import, and narrowing removes what is no longer included.
+- **Trade-off:** "from now on" uses the source's modified time, so an older item edited later counts. A scope with no
+  mode keeps its old meaning, so demo onboarding, which imports everything, is unchanged.
+
+### D40 — New companies are not onboarded automatically
+- **Context:** `docs/live-sources-and-sign-in.md` states one API process serves one `AUTH0_ORG_ID`, and a new
+  organization is not provisioned or routed. A new company can't register itself today.
+- **Chosen:** not changed. Self-registration needs multi-tenant provisioning (an Auth0 organization and directory
+  rows per company, and routing), which is new infrastructure and waits for approval.
+
+### D41 — The Brain is one pipeline, not agents reading agents
+- **Chosen:** four connectors behind one interface feed one index, one authorization check and one answer path. The
+  language model only picks and orders sentences. The sync orchestrator is a timer, not an agent. The Notion notes
+  proposed an orchestrator with a sub-agent per platform; the build replaced that with the single gateway in
+  `docs/internal-brain-five-stage-plan.md`.
+
 ### Implementation details (connector hardening)
 - **A rejected credential is not a deleted item.** A 401 from a provider, or Slack's `invalid_auth`, `token_revoked`
   and similar, now throws `CredentialRejected`. Before, `LiveConnector` returned "not found", which sync turns into

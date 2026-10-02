@@ -3,7 +3,7 @@ import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery } from "./query-plan.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
-import { loadMockCorpus, MockConnector, type ImportScope } from "@brain/connectors";
+import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { groundedOutput, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
 import type {
@@ -238,11 +238,19 @@ export class Brain {
     }
   }
 
-  async connect(actor: User, source: Source): Promise<void> {
+  /** Admin picker: the channels, projects, spaces or shared drives the connected credential can see. */
+  async listContainers(actor: User, source: Source): Promise<Container[]> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (this.connections.get(source)?.status === "Not connected") throw new Error("Connect source first");
+    return this.connectors[source].listContainers();
+  }
+
+  async connect(actor: User, source: Source, scope: ImportScope = {}): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live OAuth setup is required");
-    this.connections.set(source, { source, status: "Connected", scope: {}, connectedBy: actor.id, connectedAt: new Date().toISOString() });
+    this.connections.set(source, { source, status: "Connected", scope, connectedBy: actor.id, connectedAt: new Date().toISOString() });
     this.audit.append("connection_created", actor.id, { source });
     await this.persist();
   }
@@ -251,7 +259,13 @@ export class Brain {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.syncQueues.has(source)) throw new Error("Sync running; retry scope change");
+    // "Only what is new" starts at the moment it was chosen, and keeps that moment when the scope is saved again.
+    const previous = this.connections.get(source)!.scope;
+    if (scope.futureOnly && !scope.since) scope = { ...scope, since: previous.futureOnly && previous.since ? previous.since : new Date().toISOString() };
+    if (!scope.futureOnly && previous.futureOnly && scope.since === previous.since) scope = { ...scope, since: undefined };
     this.connections.get(source)!.scope = scope;
+    this.audit.append("scope_changed", actor.id, { source, mode: scope.mode ?? "all", containers: scope.containers?.length ?? 0,
+      ids: scope.ids?.length ?? 0, futureOnly: Boolean(scope.futureOnly), since: scope.since });
     // Scope narrowing is applied immediately to local access. Background sync purges remote data.
     const keep = new Set(await this.connectors[source].discover(scope));
     for (const doc of this.index.documents.values()) if (doc.source === source && !keep.has(doc.docId)) {
