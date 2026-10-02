@@ -174,13 +174,15 @@ person may also open.
 - **The built-in writer** ([`LocalGroundedLlm`](../packages/retrieval/src/index.ts)) is code, not a model.
   - It quotes the most relevant source in full (up to six sentences), then the best sentence of the next three.
   - It needs no key or network, and it is the default.
-- **A language model** is optional: TokenHub, Hunyuan on Tencent's China site, or Groq.
-  - [`llm.ts`](../apps/api/src/llm.ts) is one client for all three.
+- **A language model** is optional: Groq's `openai/gpt-oss-120b` (D54, D55).
+  - [`llm.ts`](../apps/api/src/llm.ts) is one client for OpenAI-style APIs. Its `tokenhub` and `hunyuan` presets, for
+    Tencent's services, aren't used.
   - [`llm-budget.ts`](../apps/api/src/llm-budget.ts) puts it behind a usage meter: a token budget, a daily
     allowance, room held for calls still running, and a 60-second timeout.
   - A model receives the question and the authorized passages with their citation IDs, and nothing else.
 - **Fallbacks:** the built-in writer answers when the model is over a limit, rate limited or failing, or when none of
-  its lines are copied word for word. The audit records `llm_fallback` with the reason. See decisions D27 to D31.
+  its lines are copied word for word. The audit records `llm_fallback` with the reason. See decisions D27 to D31, D54
+  and D55.
 
 ## Audit
 
@@ -214,8 +216,8 @@ person may also open.
   yet. Until then, someone holding both the database and the signing key could rewrite history undetected.
 - **Remote FGA:** it uses a generic per-document schema. Each platform's own permission shape is enforced in the
   connector layer.
-- **Embeddings:** semantic search uses Hunyuan's China-site embedding API. Embeddings through TokenHub are
-  unconfirmed.
+- **Embeddings:** none are configured. Tencent's were dropped (D55), so search uses keywords, synonyms and freshness
+  only.
 - **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
 - **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.

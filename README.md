@@ -2,7 +2,7 @@
 
 # Internal Brain
 
-A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. It runs as a pnpm TypeScript workspace with a Node API and a Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional Hunyuan embeddings add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
+A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. It runs as a pnpm TypeScript workspace with a Node API and a Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings add semantic vectors (none are configured: Tencent's were dropped, D55), and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
 
 ## Run
 
@@ -69,7 +69,7 @@ A question that names a platform (Slack, Jira, Confluence, Drive) gets that plat
 
 In the default demo, changes made through admin routes or workspace actions alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
 
-With `HUNYUAN_EMBEDDING_API_KEY`, sync embeds changed document chunks and a query embeds its question. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Embedding or Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
+With an embedding provider, sync embeds changed document chunks and a query embeds its question. None is configured at the moment: the only one in the code is Tencent's Hunyuan (`HUNYUAN_EMBEDDING_API_KEY`), which isn't used (D55). With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Embedding or Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
 
 ## Choosing what a company includes
 
@@ -107,25 +107,28 @@ suggestions.
 
 Without a model, the built-in writer answers: it quotes the most relevant source in full and the best sentence of the next three. A model can only choose and order sentences better. Every answer, from either, keeps only lines copied word for word from the sources the asker may see, each with its citation.
 
-The project pays for no model use (`decisions.md`, D27 and D28):
+The project pays for no model use (`decisions.md`, D27, D28 and D55):
 
-- **Providers:** `LLM_PROVIDER` is `tokenhub`, `hunyuan` or `groq`.
-  - `tokenhub` is Tencent's international model service, TokenHub. Hunyuan's models there are `hy4-preview` and `hy3`. Each language model gets 1M free tokens for 90 days, claimed under **New User Free Trial** in the Model Gallery or automatically on the first call, and calls stop when they run out unless post-paid billing is enabled. It is off by default; keep it off.
-  - `hunyuan` is Tencent's China-site Hunyuan API (for example `hunyuan-t1-latest`), where the same rule applies under **Postpaid Settings** in the Tencent HY console.
-  - Groq's free plan has no card on file, so it can never bill. Use `openai/gpt-oss-120b` with `LLM_MAX_TOKENS=4000`:
-    on 2 Oct, 8 of 9 measured answers were grounded at about 870 tokens each. Groq has retired
-    `llama-3.3-70b-versatile`; its console lists the current models.
-  - Claiming TokenHub's free trial creates a default inference service per model. Tencent stops that service while
-    the account balance is insufficient, even on the free trial, and calls then fail with code `401006`. The
-    console's Online Inference page shows the service's status.
-  - Every provider but Groq only starts with a usage file and budgets set below the free tokens, a second stop that keeps tokens for the showcase.
+- **Provider:** Groq, on both APIs (D54, D55): `LLM_PROVIDER=groq`, `LLM_MODEL=openai/gpt-oss-120b` and
+  `LLM_MAX_TOKENS=4000`. Groq's free plan has no card on file, so it can never bill. On 2 Oct, 8 of 9 measured answers
+  were grounded at about 870 tokens each. Groq has retired `llama-3.3-70b-versatile`; its console lists the current
+  models.
+  - **Tencent's models aren't used** (D55). TokenHub stopped the free trial's inference services while the account
+    balance was insufficient, and calls failed with code `401006`. The client keeps its `tokenhub` and `hunyuan`
+    presets as tested options. They only start with a usage file and token budgets below the free tokens, and Tencent
+    bills only if post-paid billing is turned on.
 - **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or no line of its reply is copied word for word, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
   - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
   - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
-- **One account, one budget:** each machine counts only its own calls. When a laptop and the server share a Tencent Cloud account, their `LLM_TOKEN_BUDGET` values together must stay below the free tokens, for example 100000 and 700000. The same goes for `EMBEDDING_TOKEN_BUDGET`.
+- **One Groq account:** its free plan limits requests and tokens per minute and per day, and every key in the account
+  shares those limits: both APIs, and any laptop. Each API's `LLM_DAILY_ANSWERS` caps its share.
 - **Semantic search:** at `EMBEDDING_TOKEN_BUDGET`, semantic search pauses and keyword search carries on.
-- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used, and why any call gave no usable answer. It then projects 350 answers against the free tokens. "Fits" means the plan stays under 70% of the free tokens; otherwise it says to use Groq. For Groq, whose free plan can't bill, it reports the tokens and points to Groq's daily limits instead. Its calls count against the budget.
-- **`pnpm llm:calibrate`** (Hunyuan route) embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN` from the scores.
+- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used,
+  and why any call gave no usable answer. For Groq, whose free plan can't bill, it reports the tokens and points to
+  Groq's daily limits. For the unused Tencent presets, it projects 350 answers against their free tokens instead. Its
+  calls count against the meter.
+- **`pnpm llm:calibrate`** embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN`
+  from the scores. It needs an embedding provider, and none is configured since D55.
 
 Both scripts read `.env.local`. The hosted APIs take their model settings as described in [infra/tencent/README.md](infra/tencent/README.md).
 
@@ -165,9 +168,9 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | `PUBLIC_DEMO=true` | Runs the public demo API: it accepts `x-demo-user` even with `NODE_ENV=production` and serves only the mock corpus. Startup fails if any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present. See [hosting](infra/tencent/README.md). |
 | `DEMO_API_URL` (web host) | The demo API's origin. When set, the start page offers **Try the demo**, and demo visitors' workspace requests go there with only the chosen persona. |
 | `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID` | Auth0 SSO with cached JWKS, active directory lookup and organization validation. Requires Supabase directory/persistence and an audit signing key. See [setup](docs/live-sources-and-sign-in.md). |
-| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model, `tokenhub`, `hunyuan` or `groq`; without them, the built-in writer answers. The older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL` still select Hunyuan. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500; reasoning models such as hy4-preview and gpt-oss need about 4000). See [Language model](#language-model-optional-free-only). |
-| `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. TokenHub and Hunyuan need the file and the budget to start. |
-| `HUNYUAN_EMBEDDING_API_KEY`, `EMBEDDING_TOKEN_BUDGET` | Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions; needs `LLM_USAGE_FILE` and the budget. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
+| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model: `groq` (D55); without them, the built-in writer answers. The `tokenhub` and `hunyuan` presets, and the older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL`, still work but aren't used. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500; reasoning models such as gpt-oss need about 4000). See [Language model](#language-model-optional-free-only). |
+| `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. Optional for Groq; the unused Tencent presets need the file and the budget to start. |
+| `HUNYUAN_EMBEDDING_API_KEY`, `EMBEDDING_TOKEN_BUDGET` | Not used (D55). Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions; needs `LLM_USAGE_FILE` and the budget. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
 | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations 001–005. |
 | `LIVE_SOURCES_JSON` | Selects real HTTP readers for configured Slack channels, Jira issues, Confluence pages, and Google Drive files. All four source entries, provider credentials, and Auth0 sign-in are required. See [setup and limits](docs/live-sources-and-sign-in.md). |
 | `AUDIT_LOG_PATH`, `AUDIT_SIGNING_KEY_FILE` | Together select a flushed JSONL audit file and load a PEM private signing key for Merkle batches. With neither, audit data and roots are in memory. Setting a log path without a key fails startup. |
