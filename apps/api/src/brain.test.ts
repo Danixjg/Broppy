@@ -92,19 +92,93 @@ describe("Internal Brain security and sync", () => {
     expect(generated.mock.calls.flatMap(call => call[0]).some(item => item.citation === "jira:SEC-44:0")).toBe(false);
   });
 
-  it("retries a failed semantic refresh from the sync checkpoint", async () => {
-    const vector = [1, ...Array(1023).fill(0)] as number[];
-    let first = true;
-    const embedding = { embed: vi.fn(async () => {
-      if (first) { first = false; throw new Error("embedding unavailable"); }
-      return vector;
-    }) };
-    const brain = new Brain(undefined, { embedding });
-    await expect(brain.sync("slack")).rejects.toThrow("Semantic embedding refresh failed");
-    expect(brain.runs.get("slack")?.status).toBe("failed");
-    await brain.sync("slack");
-    expect(brain.runs.get("slack")?.status).toBe("complete");
-    expect(brain.index.semanticVectorsFor("slack:fraud-private").size).toBeGreaterThan(0);
+  it("keeps syncing when an embedding fails, and asks the provider again after a five-minute pause", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = true;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const brain = new Brain(undefined, { embedding: { embed } });
+      await brain.sync("slack");
+      // A free plan's refusal must not stop the import: every item is indexed for keyword search.
+      expect(brain.runs.get("slack")?.status).toBe("complete");
+      expect(brain.connections.get("slack")?.status).toBe("Live");
+      const slack = [...brain.index.documents.values()].filter(doc => doc.source === "slack" && !doc.deletedAt);
+      expect(slack.length).toBeGreaterThan(1);
+      expect(slack.every(doc => brain.index.semanticVectorsFor(doc.docId).size === 0)).toBe(true);
+
+      // During the pause, neither sync nor questions call the provider, and answers still come from keywords.
+      expect(embed).toHaveBeenCalledTimes(1);
+      await brain.sync("slack");
+      const answer = await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      expect(embed).toHaveBeenCalledTimes(1);
+      expect(answer.citations.map(citation => citation.docId)).toContain("slack:payments-cutover");
+      expect(brain.audit.entries.some(entry => entry.type === "embedding_fallback" && entry.data.reason === "paused"))
+        .toBe(true);
+
+      // After the pause, the next sync embeds what was missed, without any change at the source.
+      failing = false;
+      vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+      await brain.sync("slack");
+      expect(slack.every(doc => brain.index.semanticVectorsFor(doc.docId).size === doc.chunks.length)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses the provider after a question's embedding fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = false;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const brain = new Brain(undefined, { embedding: { embed } });
+      await brain.syncAll();
+      failing = true;
+      const calls = embed.mock.calls.length;
+      await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      expect(embed.mock.calls.length).toBe(calls + 1);
+      expect(brain.audit.entries.filter(entry => entry.type === "embedding_fallback").map(entry => entry.data.reason))
+        .toEqual(["failed", "paused"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rewrites a document's chunks in Supabase once its late embedding succeeds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = true;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const syncDocument = vi.fn(async (_doc: IndexedDocument, _vectors: Map<string, number[]>, _rewrite: boolean) =>
+        undefined);
+      const supabase = { syncDocument, search: vi.fn(async () => []), tombstone: vi.fn(async () => undefined) } as
+        unknown as SupabaseIndex;
+      const brain = new Brain(undefined, { embedding: { embed }, supabase });
+      await brain.sync("slack");
+      const writes = () => syncDocument.mock.calls.filter(call => call[0].docId === "slack:payments-cutover");
+      expect(writes()[0][1].size).toBe(0);
+
+      failing = false;
+      vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+      await brain.sync("slack");
+      const last = writes().at(-1)!;
+      expect(last[1].size).toBe(last[0].chunks.length);
+      expect(last[2]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("tombstones deleted items and removes them from retrieval", async () => {

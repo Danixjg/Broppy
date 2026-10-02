@@ -190,6 +190,12 @@ sudo docker compose --profile sso exec sso-api cat /data/usage-sso.json
 `docker compose down -v` deletes the volume, and the day's counts start from zero again. As Nur, asking the audit log
 for `llm_fallback` shows when, and why, the built-in writer stepped in.
 
+**Semantic search with Cloudflare (optional, D56).** In the Cloudflare dashboard, open **Workers AI**, choose **Use
+REST API**, create a Workers AI API token, and copy the account ID. On a laptop, put the Cloudflare lines from
+`.env.example` in `.env.local` and run `pnpm llm:calibrate`, then set the `SEMANTIC_MIN` it suggests. Only then
+uncomment the Cloudflare lines in `sso.env` (and in `demo.env`, if the demo should use it too) and restart. If
+Cloudflare refuses a call, answers use keywords for five minutes and the next sync tries again.
+
 ## Updating
 
 ```sh
@@ -221,6 +227,7 @@ Start with `sudo docker compose ps` and `sudo docker compose logs --tail 50 <ser
 | The start page has no **Try the demo** | `DEMO_API_URL` isn't set for that environment, or the deployment predates it | Step 5, then redeploy |
 | The workspace says "The demo API did not accept this persona" | `DEMO_API_URL` points at the SSO API | Use the `demo-api.…` address |
 | The workspace says "The demo API is not reachable; check DEMO_API_URL" | Wrong address, or the demo API is down | Run the step 4 checks |
+| The audit shows `embedding_fallback` (`failed`, then `paused`) | Cloudflare refused or failed an embedding: often its free plan's daily allocation (error 4006), sometimes wrongly right after the daily reset | Nothing, if it passes: answers use keywords meanwhile, and the next sync after five minutes tries again. If it persists, check the token and account ID. |
 | Answers no longer come from the model | The daily allowance or the budget is used up, the model is rate limited, or its replies weren't copied word for word (`ungrounded`). Ask the audit log for `llm_fallback` to see which. | Wait for midnight UTC, or check the counts (step 7). |
 | The build stops with `exit code: 137` | The server ran out of memory while building | Add swap (below), then build again |
 

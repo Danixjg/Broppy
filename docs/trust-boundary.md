@@ -35,6 +35,7 @@ flowchart TB
   Supabase[("Supabase: directory,<br/>state, chunks, Vault<br/>tokens, audit rows with<br/>no updates or deletes")]
   Sources["Sources: mock in both<br/>APIs; live Slack, Jira,<br/>Confluence and Drive<br/>for SSO only"]
   Groq["Groq free plan: no<br/>card on file; question<br/>and authorized passages<br/>only; a daily allowance<br/>per API"]
+  Embed["Cloudflare Workers AI,<br/>optional: embeds every<br/>chunk and question;<br/>free plan, no training"]
   Anchor["External write-once<br/>root anchor"]
 
   Visitor -->|"HTTPS and a cookie"| Session
@@ -50,6 +51,8 @@ flowchart TB
   SsoAPI --> Sources
   DemoAPI --> Sources
   DemoAPI -.-> Groq
+  SsoAPI -.-> Embed
+  DemoAPI -.-> Embed
   Supabase -.->|"not implemented"| Anchor
 
   class Session,Proxy,SsoAPI,DemoAPI guard
@@ -114,7 +117,7 @@ sequenceDiagram
 | **API ↔ Supabase** | The server-only secret key. Directory reads, the state snapshot, ordered audit appends, the `hybrid_search` RPC (which returns IDs and scores), and Vault calls for source tokens. | The secret key, outside the API host. Source tokens in API responses or snapshots. | Triggers reject audit updates and deletes, but not a database owner replacing the database. One audit writer per organization. |
 | **API ↔ sources** | Mock connectors run inside the API. Live connectors use OAuth tokens kept in Vault (or `LIVE_SOURCES_JSON`); each person needs their own delegated credential, and no credential means no access. | Content from one organization to another: each API serves one organization. | Polling only, no webhooks. Live imports read current text only. Workspace actions (creating a task, Mark done) change mock sources only; live connectors keep read-only scopes, so the app links to Jira instead. |
 | **API ↔ model provider** | The question, and the authorized, freshly checked passages with their citation IDs, to Groq, from both APIs, each within its own daily allowance (D55). | Denied documents' titles, metadata or text. Identities, tokens or keys. | The provider sees the passages it is sent. Groq's free plan has no card on file, so it can't bill; both APIs share its limits. |
-| **API ↔ embeddings** (optional) | None since Tencent's were dropped (D55). With a provider: changed chunk text at sync, restricted documents included, and question text at query. | Permission data. | The provider sees the text of every chunk, not only what one person may read. |
+| **API ↔ embeddings** (optional) | Changed chunk text at sync, restricted documents included, and question text at query, to Cloudflare Workers AI's `bge-m3` (D56). | Permission data, identities, and keys other than its own token. | Cloudflare sees the text of every chunk, not only what one person may read; it says it doesn't use customer content to train models. Its free plan refuses calls past the daily allocation; search then uses keywords. |
 | **API ↔ remote FGA** (optional) | Organization-scoped tuples at sync; batch checks of document IDs at query. | Document content. | Remote failures deny. Platform permission shapes stay in the connector layer. |
 | **Lighthouse host** | Caddy terminates HTTPS for two host names. `sso-api` reads `sso.env` and the audit signing key (mounted read-only). Both APIs share the usage-count volume. | Real settings in `demo-api`: it refuses to start with any Auth0, Supabase, live-source, source OAuth or remote FGA setting. | `docker compose down -v` deletes the usage counts. |
 | **Audit store and keys** | Ed25519-signed Merkle batches that link each root to the previous one. At startup, the chain, roots and signatures are checked. | The signing key, outside the API host. | No external write-once anchor is running yet (`tools/anchor` covers file-based logs, not Supabase): someone holding both the database and the key could rewrite history. |

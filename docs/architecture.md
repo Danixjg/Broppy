@@ -106,7 +106,9 @@ flowchart TB
   minutes with live ones. Each run also seals new audit events into a Merkle batch and saves the state.
 - **Changes:** a run reads the IDs a mock source reports as changed, or every ID of a live source, plus any indexed
   ID the source no longer lists.
-  - A content or title change re-chunks the document, and re-embeds it when embeddings are on.
+  - A content or title change re-chunks the document, and re-embeds it when embeddings are on. A refused or failed
+    embedding never stops the run: the document keeps keyword search, the provider rests for five minutes, and a
+    later run embeds whatever still lacks vectors.
   - A permission-only change updates grants.
   - An ID that is gone at the source becomes a tombstone: its chunks, grants and remote tuples are removed.
 - **Imports:** they checkpoint after each item and resume after a failure. Connections, import jobs and cursors are
@@ -216,8 +218,8 @@ person may also open.
   yet. Until then, someone holding both the database and the signing key could rewrite history undetected.
 - **Remote FGA:** it uses a generic per-document schema. Each platform's own permission shape is enforced in the
   connector layer.
-- **Embeddings:** none are configured. Tencent's were dropped (D55), so search uses keywords, synonyms and freshness
-  only.
+- **Embeddings:** optional, from Cloudflare Workers AI's `bge-m3` (D56). The provider sees the text of every chunk,
+  and `SEMANTIC_MIN` hasn't been tuned against it yet (`pnpm llm:calibrate`).
 - **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
 - **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.

@@ -80,8 +80,8 @@ export function formatCalibration(result: Calibration): string {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { embedding } = modelsFromEnv(process.env);
   if (!embedding) {
-    console.error("Semantic search isn't configured. Set HUNYUAN_EMBEDDING_API_KEY, LLM_USAGE_FILE and " +
-      "EMBEDDING_TOKEN_BUDGET in .env.local. The Groq route keeps semantic search off.");
+    console.error("Semantic search isn't configured. Set EMBEDDING_PROVIDER=cloudflare, EMBEDDING_API_KEY and " +
+      "CLOUDFLARE_ACCOUNT_ID in .env.local.");
     process.exit(1);
   }
   console.log(formatCalibration(await calibrate(embedding)));

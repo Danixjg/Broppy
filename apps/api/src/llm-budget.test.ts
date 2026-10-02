@@ -162,6 +162,14 @@ describe("modelsFromEnv", () => {
       .embedding).toBeInstanceOf(BudgetedEmbedding);
   });
 
+  it("lets Cloudflare embeddings run without a budget, since its free plan can't bill", () => {
+    const cloudflare = { EMBEDDING_PROVIDER: "cloudflare", EMBEDDING_API_KEY: "token",
+      CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef" };
+    expect(modelsFromEnv(cloudflare).embedding).toBeInstanceOf(BudgetedEmbedding);
+    expect(modelsFromEnv({ ...cloudflare, LLM_USAGE_FILE: usageFile(), EMBEDDING_TOKEN_BUDGET: "100000" }).embedding)
+      .toBeInstanceOf(BudgetedEmbedding);
+  });
+
   it("refuses to start TokenHub without a usage file and budget, since Tencent bills if post-paid is turned on", () => {
     const tokenhub = { LLM_PROVIDER: "tokenhub", LLM_API_KEY: "key", LLM_MODEL: "hy3" };
     expect(() => modelsFromEnv(tokenhub)).toThrow(/^TokenHub needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET/);
