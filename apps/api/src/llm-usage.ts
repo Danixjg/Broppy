@@ -73,7 +73,8 @@ export async function measureUsage(model: Pick<UsageReportingLlm, "generateWithU
   return { calls, average, plannedCalls, projected, freeTokens, fits: answered && projected <= 0.7 * freeTokens };
 }
 
-export function formatUsageReport(report: UsageReport): string {
+/** The report as text. Groq's free plan can't bill, so it isn't judged against Tencent's free tokens. */
+export function formatUsageReport(report: UsageReport, provider?: string): string {
   const number = (value: number) => value.toLocaleString("en-US");
   const lines = report.calls.map(call => {
     const tokens = call.usage
@@ -94,6 +95,13 @@ export function formatUsageReport(report: UsageReport): string {
   if (answered < modelCalls) {
     lines.push("", `${modelCalls - answered} of ${modelCalls} model calls gave no usable answer, so the built-in ` +
       `writer answered those. ${reasons}`);
+  }
+  if (provider === "groq") {
+    lines.push("", `Average: ${number(report.average)} tokens per model call.`,
+      `Plan: ${number(report.plannedCalls)} answers ≈ ${number(report.projected)} tokens.`,
+      "Groq's free plan can't bill. It limits requests per minute and tokens per day for each model, so check this " +
+      "model's daily limit in Groq's console against the answers you expect in a day.");
+    return lines.join("\n");
   }
   const share = Math.round(100 * report.projected / report.freeTokens);
   lines.push("", `Average: ${number(report.average)} tokens per model call.`,
@@ -122,9 +130,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   const report = await measureUsage(llm, { plannedCalls: option("calls"), freeTokens: option("free") });
-  console.log(formatUsageReport(report));
+  const provider = process.env.LLM_PROVIDER?.trim();
+  console.log(formatUsageReport(report, provider));
   const usage = llm.meter.usage();
   console.log(`\nCounted so far: ${usage.chatTokens.toLocaleString("en-US")} chat tokens, ` +
     `${usage.embeddingTokens.toLocaleString("en-US")} embedding tokens.`);
-  process.exit(report.fits ? 0 : 1);
+  const answered = report.calls.some(call => call.usage && !call.fallback);
+  process.exit((provider === "groq" ? answered : report.fits) ? 0 : 1);
 }

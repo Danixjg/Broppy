@@ -1,10 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // Keeps the project docs honest: relative links point at files that exist, and each diagram embedded in a doc is the
 // same as its source in docs/diagrams, which also has a rendered image in docs/images.
-const root = new URL("../../../", import.meta.url).pathname;
+// fileURLToPath, not .pathname: on Windows the URL path starts "/C:/", which join() turns into "C:\C:\…".
+const root = fileURLToPath(new URL("../../../", import.meta.url));
 const docs = ["README.md", "decisions.md", "apps/web/AUTH0.md", "infra/tencent/README.md",
   ...readdirSync(join(root, "docs")).filter(name => name.endsWith(".md")).map(name => `docs/${name}`)];
 const read = (path: string) => readFileSync(join(root, path), "utf8");

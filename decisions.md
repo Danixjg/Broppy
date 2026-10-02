@@ -646,6 +646,36 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-02 — The language model, for now
+
+- **Input:** the model measurement with `pnpm llm:usage` on 2 Oct.
+- **How decided:** chosen explicitly in a planning session.
+
+### D54 — gpt-oss-120b on Groq until TokenHub runs
+- **What the measurement found:**
+  - **TokenHub:** the free trial for `hy4-preview` and `hy3` was claimed, which created a default inference service for
+    each. Both show "Stopped" for insufficient account balance, so calls return 402 with code `401006`. Running them
+    needs money in the account, which D27 rules out. The team asked Tencent whether hackathon teams can get credits.
+  - **Groq:** `llama-3.3-70b-versatile` has been retired. `openai/gpt-oss-120b` grounded 8 of 9 answers at about 870
+    tokens each, with `LLM_MAX_TOKENS=4000`. The ninth, a yes/no question, came back reworded, so the built-in writer
+    answered it.
+- **Options:** a small top-up of the Tencent account / a teammate's Tencent account / Groq now, while asking
+  Tencent.
+- **Chosen:** Groq's `openai/gpt-oss-120b` for now, and `hy4-preview` on TokenHub once Tencent resolves the balance
+  block. D27 and D30 stand: one model at a time, then the built-in writer.
+- **Trade-off:** until then the model isn't Tencent's own. Switching back is two settings.
+
+### Implementation details (Windows and the model)
+- **Windows:** the docs check built its folder path from a file URL's `pathname`, which on Windows becomes
+  `C:\C:\…`; it now uses `fileURLToPath`. `data/seed.ts` compared `import.meta.url` with `file://` plus the script
+  path, which never matches on Windows; it now uses `pathToFileURL`, as the API does. `.npmrc` sets
+  `shell-emulator=true`, so scripts such as `pnpm dev` (`ALLOW_DEMO_AUTH=true tsx …`) run on Windows too.
+- **`pnpm llm:usage` with Groq** no longer judges the plan against Tencent's free tokens. Groq's free plan can't bill,
+  so the report gives the tokens and points to Groq's per-day limits, and it exits 0 when any answer was measured.
+- **Examples** name `openai/gpt-oss-120b` for Groq and `LLM_MAX_TOKENS=4000` for reasoning models.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
