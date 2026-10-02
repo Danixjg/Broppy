@@ -622,7 +622,11 @@ Each entry records the options that were considered, what was chosen, and the tr
   means "no access". 403 and 404 still mean gone.
 - **Dropped connections** (reset, refused, timeout) are retried three times with 250, 500 and 1000 ms backoff.
 - **`listUpdatedSince`** reports only items whose version moved since the last poll, not every configured item.
-- **Per-user permission checks** run together, not one by one.
+  *Amended 2 Oct:* the first poll and every twelfth report every item. Sharing or restricting an item changes no
+  version, so without that pass a newly shared item never reached the index for its new reader (revocations stayed
+  safe, because every answer rechecks access at the source). At five-minute polls, a share arrives within an hour.
+- **Per-user permission checks** run together, not one by one. *Amended 2 Oct:* five at a time, so a large directory
+  can't fire every check at once and hit the provider's rate limit.
 - **Rate limits are pauses, never "gone".** Drive reports one as a 403 (`userRateLimitExceeded`), and Slack can report
   `ratelimited` inside a 200. Both retry with 1, 2 and 4 second waits, then fail the sync so it resumes later. A
   Slack channel lookup that fails for any reason other than `channel_not_found` or `not_in_channel` now fails the
