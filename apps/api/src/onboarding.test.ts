@@ -107,3 +107,10 @@ it("shows why a source is in error, keeps its documents, and clears the reason o
   await brain.sync("drive");
   expect(brain.connections.get("drive")).toMatchObject({ status: "Live", error: undefined });
 });
+
+it("pressing Connect again in the demo keeps the scope already chosen", async () => {
+  const brain = new Brain(); const admin = brain.user("maya")!;
+  await brain.setScope(admin, "slack", { mode: "selected", containers: ["DB"] });
+  await brain.connect(admin, "slack");
+  expect(brain.connections.get("slack")!.scope).toEqual({ mode: "selected", containers: ["DB"] });
+});

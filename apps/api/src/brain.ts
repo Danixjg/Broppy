@@ -263,10 +263,13 @@ export class Brain {
     return this.connectors[source].listContainers();
   }
 
-  async connect(actor: User, source: Source, scope: ImportScope = {}): Promise<void> {
+  async connect(actor: User, source: Source, scope?: ImportScope): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live OAuth setup is required");
+    // Connecting again keeps the scope already chosen, unless a new one is given.
+    const existing = this.connections.get(source);
+    scope ??= existing && existing.status !== "Not connected" ? existing.scope : {};
     this.connections.set(source, { source, status: "Connected", scope, connectedBy: actor.id, connectedAt: new Date().toISOString() });
     this.audit.append("connection_created", actor.id, { source });
     await this.persist();
