@@ -175,6 +175,11 @@ export class HybridIndex {
     return true;
   }
 
+  /** How many of a document's chunks have semantic vectors, without copying them. */
+  semanticCount(docId: string): number {
+    return this.semanticVectors.get(docId)?.size ?? 0;
+  }
+
   semanticVectorsFor(docId: string): Map<string, number[]> {
     const copy = new Map<string, number[]>();
     for (const [chunkId, vector] of this.semanticVectors.get(docId) ?? []) {

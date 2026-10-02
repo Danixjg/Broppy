@@ -129,7 +129,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const models = modelsFromEnv(process.env);
   const embedding = models.embedding;
   const supabase = embedding ? SupabaseIndex.fromEnv() : null;
-  if (supabase && !embedding) throw new Error("Supabase hybrid search requires HUNYUAN_EMBEDDING_API_KEY");
+  if (supabase && !embedding) throw new Error("Supabase hybrid search requires an embedding provider (EMBEDDING_PROVIDER)");
   const users = hasAuth0 ? await directory!.list() : undefined;
   const persistence = options.brain ? undefined : Persistence.fromEnv();
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;

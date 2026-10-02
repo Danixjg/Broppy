@@ -23,6 +23,9 @@ import type {
 } from "@brain/types";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+// After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
+// questions don't wait on it meanwhile.
+const EMBEDDING_PAUSE_MS = 5 * 60_000;
 export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
@@ -47,6 +50,7 @@ export class Brain {
   private readonly syncQueues = new Map<Source, Promise<void>>();
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
+  private embeddingPausedUntil = 0;
 
   constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
@@ -218,6 +222,7 @@ export class Brain {
         this.runs.set(source, run);
         await this.persist();
       }
+      await this.retryMissingEmbeddings(source);
       this.states.set(source, {
         ...state, orgId: this.orgId,
         cursor: run.cursorTo,
@@ -383,8 +388,11 @@ export class Brain {
 
     let queryVector: number[] | undefined;
     if (this.embedding && (this.embedding.available?.() ?? true)) {
-      try { queryVector = await this.embedding.embed(trimmed); }
-      catch { audit("embedding_fallback", {}); }
+      if (Date.now() < this.embeddingPausedUntil) audit("embedding_fallback", { reason: "paused" });
+      else {
+        try { queryVector = await this.embedding.embed(trimmed); }
+        catch { this.pauseEmbedding(); audit("embedding_fallback", { reason: "failed" }); }
+      }
     }
     // Keep the full local candidate set so denied hits cannot crowd an
     // accessible document out of the authorization pass.
@@ -857,19 +865,36 @@ export class Brain {
     return doc;
   }
 
+  private embeddingReady(): boolean {
+    return Boolean(this.embedding) && (this.embedding?.available?.() ?? true) && Date.now() >= this.embeddingPausedUntil;
+  }
+
+  private pauseEmbedding(): void {
+    this.embeddingPausedUntil = Date.now() + EMBEDDING_PAUSE_MS;
+  }
+
+  /** Embeds this source's documents that still lack vectors: after a failure, a pause or a restart. */
+  private async retryMissingEmbeddings(source: Source): Promise<void> {
+    for (const doc of [...this.index.documents.values()]) {
+      if (!this.embeddingReady()) return;
+      if (doc.source !== source || doc.deletedAt || this.index.semanticCount(doc.docId) === doc.chunks.length) continue;
+      await this.persistSearch(doc.docId, false);
+    }
+  }
+
   private async persistSearch(docId: string, contentChanged: boolean): Promise<void> {
     const indexed = this.index.documents.get(docId);
     if (!indexed || indexed.deletedAt) return;
-    const existing = this.index.semanticVectorsFor(docId);
-    // Over its budget, the embedding client is skipped: the document keeps keyword search until it is available.
-    if (this.embedding && (this.embedding.available?.() ?? true) &&
-      (contentChanged || existing.size !== indexed.chunks.length)) {
-      if (!await this.index.refreshSemantic(docId, this.embedding)) {
-        throw new Error("Semantic embedding refresh failed");
-      }
+    // An embedding that fails, or waits out a pause or the budget, never stops sync: the document keeps keyword
+    // search, and a later sync embeds it (retryMissingEmbeddings).
+    let embedded = false;
+    if (this.embeddingReady() && (contentChanged || this.index.semanticCount(docId) !== indexed.chunks.length)) {
+      embedded = await this.index.refreshSemantic(docId, this.embedding!);
+      if (!embedded) this.pauseEmbedding();
     }
     if (this.supabase) {
-      const rewriteChunks = contentChanged || !this.supabaseSynced.has(docId);
+      // Vectors that arrive late rewrite the chunks, so Supabase's search gets them too.
+      const rewriteChunks = contentChanged || embedded || !this.supabaseSynced.has(docId);
       try {
         await this.supabase.syncDocument(indexed, this.index.semanticVectorsFor(docId), rewriteChunks);
         this.supabaseSynced.add(docId);
