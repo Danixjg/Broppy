@@ -438,6 +438,38 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-02 — Connectors first, and the root anchor
+
+- **Input:** an audit of the repo against the Notion plan, then the Coucou review and its "active Brain" proposal.
+- **How decided:** chosen explicitly in a planning session.
+
+### D36 — Proposal storage
+- **Options:** the existing in-memory and snapshot state / a new Supabase migration for `proposals` and
+  `agent_settings`.
+- **Chosen:** the existing state. No schema change.
+
+### D37 — Scope: connectors before features
+- **Chosen:** no new features and no Active/Paused toggle for now. Connector reliability comes first. The only feature
+  allowed after that is the Slack-to-Jira proposal agent.
+- **Trade-off:** the Coucou ideas (status bar, queue, watchers) wait until the connectors are solid.
+
+### D38 — Root anchor: a separate GitHub repository, written by a Rust tool
+- **Options:** Tencent COS retention lock / a separate GitHub repository.
+- **Chosen:** a separate GitHub repository, written by `tools/anchor` (Rust, no network code, public key only).
+- **Trade-off:** it stays outside the pnpm workspace, and it reads the JSONL log, not Supabase-only batches. The
+  repository still needs creating, and someone must run `publish` and push. See `tools/anchor/README.md`.
+
+### Implementation details (connector hardening)
+- **A rejected credential is not a deleted item.** A 401 from a provider, or Slack's `invalid_auth`, `token_revoked`
+  and similar, now throws `CredentialRejected`. Before, `LiveConnector` returned "not found", which sync turns into
+  a tombstone and a purge of the item. Now the sync fails and keeps the index. A user's rejected credential still
+  means "no access". 403 and 404 still mean gone.
+- **Dropped connections** (reset, refused, timeout) are retried three times with 250, 500 and 1000 ms backoff.
+- **`listUpdatedSince`** reports only items whose version moved since the last poll, not every configured item.
+- **Per-user permission checks** run together, not one by one.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
@@ -448,7 +480,9 @@ These are open. Pick them up in a later round and record the decision here.
   per-visitor state aren't decided.
 - **Additional features:** Slack "ok" → Jira suggestion card; task → doc "Mark done"; latest-doc badge scoring;
   duplicate merge; intern catch-up; master page hard-coded to `PAY`.
-- **Brain as an MCP server:** not started.
+- **Brain as an MCP server:** not started; to be written in Rust after submission.
+- **Slack-to-Jira proposal agent:** the one allowed feature (D37), after the connectors.
+- **Anchor repository:** not created yet; the tool is built (D38).
 - **CodeBuddy/WorkBuddy evidence:** must be captured by someone using those products. The project isn't scored
   without it.
 - **Directory caching:** `UserDirectory.bySub` re-reads the whole directory on every request, and every proxied
