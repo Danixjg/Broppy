@@ -419,6 +419,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   return { brain, orchestrator, server };
 }
 
+// Serverless hosts such as Vercel import this module and call its default export once per request. The server is
+// built on first use and reused while the instance stays warm; there is no background sync loop between requests.
+let serverless: Promise<ApiServer> | undefined;
+
+export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  serverless ??= createApiServer({ startOrchestrator: false }).catch(error => {
+    serverless = undefined;
+    throw error;
+  });
+  const { server } = await serverless;
+  server.emit("request", request, response);
+}
+
 function isMainModule(): boolean {
   return Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
 }
