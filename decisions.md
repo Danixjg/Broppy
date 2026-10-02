@@ -703,6 +703,57 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-02 — Embeddings from Cloudflare
+
+- **Input:** a search for free embedding providers on 2 Oct, after D55 dropped Tencent's.
+- **How decided:** chosen explicitly in a planning session.
+
+### D56 — Cloudflare Workers AI's bge-m3 for semantic search
+- **What mattered:** the embedding provider sees more than the chat model. Sync sends it every chunk, restricted
+  documents included, while the model only sees what one asker may read. So besides cost, the question was whether a
+  provider trains on what it's sent.
+- **Options:**
+  - **Cloudflare Workers AI, `@cf/baai/bge-m3`.** 10,000 free neurons a day, about 9 million tokens for this model.
+    The free plan refuses calls past that instead of billing, and Cloudflare doesn't use customer content to train
+    models. 1024 dimensions, with an OpenAI-style endpoint.
+  - **Jina AI, `jina-embeddings-v3`.** A one-off grant of free tokens per key, no training on API data, 1024
+    dimensions. The grant doesn't renew.
+  - **A model inside the API.** Nothing leaves the server, but it needs a native library, a model download, and the
+    2 GB server's CPU and memory.
+  - **Ruled out:**
+    - Gemini's free tier: Google may use the input to improve its products, and people may read it.
+    - Mistral's free plan: it reportedly requires opting into training.
+    - Voyage AI without a card: 3 requests a minute.
+    - Cohere's trial: 1,000 calls a month.
+    - GitHub Models: 150 embedding requests a day.
+    - Groq: it has no embedding models.
+- **Chosen:** Cloudflare's `bge-m3`. Its vectors are the same size as before, so the index and Supabase need no
+  change.
+- **Trade-offs:**
+  - Cloudflare sees every chunk's text, restricted documents included.
+  - Cloudflare's forum has many recent reports of free accounts refused as "allocation used up" right after the
+    daily reset. So a refusal must never break sync or slow answers (below).
+  - `SEMANTIC_MIN` (0.35) was never tuned against a real model. `pnpm llm:calibrate` tunes it before semantic search
+    goes into a demo.
+  - The account must stay on the Workers Free plan; on Workers Paid, use past the allocation is billed.
+
+### Implementation details (Cloudflare embeddings)
+- **Client:** `EmbeddingClient` has `cloudflare` and `hunyuan` presets.
+  - **Settings:** `EMBEDDING_PROVIDER` and `EMBEDDING_API_KEY` choose the preset. Cloudflare also needs
+    `CLOUDFLARE_ACCOUNT_ID`, 32 hexadecimal characters. The older `HUNYUAN_EMBEDDING_API_KEY` still selects Hunyuan.
+  - **Calls:** they give up after 10 seconds.
+  - **Checks:** Cloudflare's vectors are checked by size, because its responses aren't documented to name the model.
+- **Budget:** optional for Cloudflare, whose free plan can't bill. It is still required for Hunyuan.
+- **Failures never stop sync.**
+  - **Before:** a failed embedding failed the sync run. The source showed an error, and the items after it weren't
+    indexed until the provider recovered.
+  - **Now:** the document keeps keyword search, and the provider rests for five minutes. After that, each sync
+    embeds whatever still lacks vectors and rewrites those chunks in Supabase.
+  - **Questions during the pause** skip the provider, and the audit records `embedding_fallback` with the reason
+    (`failed` or `paused`).
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
