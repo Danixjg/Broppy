@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { nativeAllows } from "./index.js";
-import { LiveConnector } from "./live.js";
+import { CredentialRejected, LiveConnector } from "./live.js";
 import type { Source, User } from "@brain/types";
 
 const user: User = { id: "ravi", name: "Ravi", email: "ravi@example.test", auth0Sub: "auth0|ravi",
@@ -67,4 +67,59 @@ it("discovers all Slack pages and imports every history page and thread reply", 
   expect(await connector.discover()).toEqual(["slack:C1", "slack:C2"]);
   const doc = await connector.fetchDocument("slack:C1");
   expect(doc?.content).toContain("Older history"); expect(doc?.content).toContain("Thread decision");
+});
+
+describe("live connector failure handling", () => {
+  const settings = { ids: ["PAY-101"], baseUrl: "https://atlassian.example.test/",
+    serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" } };
+  const issue = (updated: string) => Response.json({ fields: { summary: "PAY-101",
+    description: { content: [{ text: "Cutover requires approval." }] }, updated, status: { name: "Open" } } });
+  const instant = async () => undefined;
+
+  it("never reads a rejected service credential as a deleted item", async () => {
+    const transport = vi.fn(async () => new Response("", { status: 401 }));
+    const connector = new LiveConnector("jira", settings, [user], transport as typeof fetch, instant);
+    await expect(connector.fetchDocument("jira:PAY-101")).rejects.toBeInstanceOf(CredentialRejected);
+  });
+
+  it("treats Slack's invalid_auth the same way, but channel_not_found as gone", async () => {
+    const reply = (error: string) => vi.fn(async () => Response.json({ ok: false, error }));
+    const slack = (error: string) => new LiveConnector("slack", { ...settings, ids: ["C1"] }, [user],
+      reply(error) as typeof fetch, instant);
+    await expect(slack("invalid_auth").fetchDocument("slack:C1")).rejects.toBeInstanceOf(CredentialRejected);
+    expect(await slack("channel_not_found").fetchDocument("slack:C1")).toBeUndefined();
+  });
+
+  it("still reads 404 as gone, and a user's rejected credential as no access", async () => {
+    const gone = new LiveConnector("jira", settings, [user],
+      vi.fn(async () => new Response("", { status: 404 })) as typeof fetch, instant);
+    expect(await gone.fetchDocument("jira:PAY-101")).toBeUndefined();
+    const rejected = new LiveConnector("jira", settings, [user],
+      vi.fn(async () => new Response("", { status: 401 })) as typeof fetch, instant);
+    expect(await rejected.checkAccess(user, "jira:PAY-101")).toBe(false);
+  });
+
+  it("retries a dropped connection with backoff, then gives up", async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const flaky = vi.fn(async () => {
+      if (++calls < 3) throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+      return issue("2026-09-26T11:00:00.000Z");
+    });
+    const connector = new LiveConnector("jira", settings, [], flaky as typeof fetch, async ms => { waits.push(ms); });
+    expect(await connector.fetchVersion("jira:PAY-101")).toBeTypeOf("number");
+    expect(waits).toEqual([250, 500]);
+    const dead = new LiveConnector("jira", settings, [], vi.fn(async () => { throw new TypeError("fetch failed"); }) as typeof fetch, instant);
+    await expect(dead.fetchVersion("jira:PAY-101")).rejects.toThrow("fetch failed");
+  });
+
+  it("polls only the items whose version moved", async () => {
+    let updated = "2026-09-26T11:00:00.000Z";
+    const connector = new LiveConnector("jira", settings, [], vi.fn(async () => issue(updated)) as typeof fetch, instant);
+    const first = await connector.listUpdatedSince(0);
+    expect(first.ids).toEqual(["jira:PAY-101"]);
+    expect((await connector.listUpdatedSince(first.cursor)).ids).toEqual([]);
+    updated = "2026-09-27T09:00:00.000Z";
+    expect((await connector.listUpdatedSince(first.cursor + 1)).ids).toEqual(["jira:PAY-101"]);
+  });
 });

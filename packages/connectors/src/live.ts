@@ -2,6 +2,21 @@ import { createHash } from "node:crypto";
 import { MockConnector, type Change, type ImportScope } from "./index.js";
 import type { Source, SourceDocument, SourcePermission, User } from "@brain/types";
 
+/** The provider refused our own credential. That says nothing about the item, so it must never read as "deleted". */
+export class CredentialRejected extends Error {
+  constructor(source: Source) { super(`${source} credential was rejected; reconnect the source`); }
+}
+
+const slackAuthErrors = new Set(["invalid_auth", "not_authed", "token_revoked", "token_expired", "account_inactive"]);
+const transientCodes = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET"]);
+
+function transient(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "AbortError") return true;
+  const cause = (error as { cause?: { code?: string } }).cause;
+  return error instanceof TypeError && (!cause?.code || transientCodes.has(cause.code));
+}
+
 export type LiveSettings = {
   ids: string[];
   serviceAuthorization: string;
@@ -47,9 +62,11 @@ export class LiveConnector extends MockConnector {
   private pollCursor = 0;
   private scope: ImportScope = {};
   private readonly origin: string;
+  private seen = new Map<string, number>();
 
   constructor(source: Source, private readonly settings: LiveSettings,
-    private readonly users: readonly User[], private readonly transport: typeof fetch = fetch) {
+    private readonly users: readonly User[], private readonly transport: typeof fetch = fetch,
+    private readonly sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms))) {
     super(source, []);
     if (!Array.isArray(settings.ids) || !settings.ids.every(id => typeof id === "string" && id.trim()) ||
       (!settings.serviceAuthorization && !settings.authorization) || !settings.userAuthorizations ||
@@ -74,17 +91,27 @@ export class LiveConnector extends MockConnector {
 
   private async get(path: string, authorization: string, attempt = 0): Promise<unknown | undefined> {
     const requestOrigin = this.settings.cloudId ? `https://api.atlassian.com/ex/${this.source}/${encodeURIComponent(this.settings.cloudId)}` : this.origin;
-    const response = await this.transport(`${requestOrigin}${path}`, {
-      headers: { authorization, accept: "application/json" },
-      redirect: "error", signal: AbortSignal.timeout(5000)
-    });
+    let response: Response;
+    try {
+      response = await this.transport(`${requestOrigin}${path}`, {
+        headers: { authorization, accept: "application/json" },
+        redirect: "error", signal: AbortSignal.timeout(5000)
+      });
+    } catch (error) {
+      if (transient(error) && attempt < 3) {
+        await this.sleep(250 * 2 ** attempt);
+        return this.get(path, authorization, attempt + 1);
+      }
+      throw error;
+    }
     if ((response.status === 429 || response.status >= 500) && attempt < 3) {
       const seconds = Number(response.headers.get("retry-after") ?? 2 ** attempt);
       if (!Number.isFinite(seconds) || seconds > 60) throw new Error("Source rate limited; import will resume on retry");
-      await new Promise(resolve => setTimeout(resolve, Math.max(1, seconds) * 1000));
+      await this.sleep(Math.max(1, seconds) * 1000);
       return this.get(path, authorization, attempt + 1);
     }
-    if (response.status === 401 || response.status === 403 || response.status === 404) return undefined;
+    if (response.status === 401) throw new CredentialRejected(this.source);
+    if (response.status === 403 || response.status === 404) return undefined;
     if (!response.ok) throw new Error(`${this.source} source request failed (${response.status})`);
     const contentType = response.headers.get("content-type") ?? "";
     return contentType.includes("json") ? response.json() : response.text();
@@ -161,7 +188,11 @@ export class LiveConnector extends MockConnector {
     const escaped = encodeURIComponent(id);
     if (this.source === "slack") {
       const info = await this.get(`/api/conversations.info?channel=${escaped}`, authorization);
-      if (!info || object(info).ok !== true) return undefined;
+      if (!info) return undefined;
+      if (object(info).ok !== true) {
+        if (slackAuthErrors.has(text(object(info).error))) throw new CredentialRejected("slack");
+        return undefined;
+      }
       const channel = object(object(info).channel);
       const messages = await this.slackMessages("conversations.history", id, authorization);
       const replies: Record<string, unknown>[] = [];
@@ -212,9 +243,24 @@ export class LiveConnector extends MockConnector {
   }
 
   override async listIds(): Promise<string[]> { return this.settings.ids.map(id => `${this.source}:${id}`); }
-  override async listUpdatedSince(_cursor: number): Promise<{ ids: string[]; cursor: number }> {
+  /** Only items whose version moved since the last poll (every item on the first). Removed items are found by sync's ID pass. */
+  override async listUpdatedSince(cursor: number): Promise<{ ids: string[]; cursor: number }> {
+    if (!Number.isInteger(cursor) || cursor < 0) throw new Error("Invalid cursor");
     this.pollCursor++;
-    return { ids: await this.listIds(), cursor: this.pollCursor };
+    const ids = await this.listIds();
+    const previous = cursor === 0 ? new Map<string, number>() : this.seen;
+    const next = new Map<string, number>();
+    const changed: string[] = [];
+    for (let i = 0; i < ids.length; i += 5) {
+      await Promise.all(ids.slice(i, i + 5).map(async id => {
+        const current = await this.fetchVersion(id);
+        if (current !== undefined) next.set(id, current);
+        // An unreadable item is reported too, so sync can tombstone it or fail loudly.
+        if (current === undefined || previous.get(id) !== current) changed.push(id);
+      }));
+    }
+    this.seen = next;
+    return { ids: ids.filter(id => changed.includes(id)), cursor: this.pollCursor };
   }
   override async listItems(): Promise<SourceDocument[]> {
     return (await Promise.all((await this.listIds()).map(id => this.fetchDocument(id))))
@@ -241,10 +287,8 @@ export class LiveConnector extends MockConnector {
   }
   override async fetchPermissions(docId: string): Promise<SourcePermission | undefined> {
     const id = this.nativeId(docId);
-    const allowed: string[] = [];
-    for (const user of this.users) {
-      if (await this.checkAccess(user, docId)) allowed.push(user.email);
-    }
+    const checks = await Promise.all(this.users.map(async user => await this.checkAccess(user, docId)));
+    const allowed = this.users.filter((_, index) => checks[index]).map(user => user.email);
     const native: SourcePermission["native"] = this.source === "slack"
       ? { source: "slack", channelId: id, visibility: "private", members: allowed }
       : this.source === "jira"
