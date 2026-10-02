@@ -9,7 +9,7 @@ fn setup() -> (tempfile::TempDir, PathBuf, ed25519_dalek::VerifyingKey) {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("audit.jsonl");
     fs::copy(fixture("audit.jsonl"), &log).unwrap();
-    (dir, log, brain_anchor::load_key(&fixture("test.pub.pem")).unwrap())
+    (dir, log, brain_anchor::load_key(&fixture("test.pub")).unwrap())
 }
 
 #[test]
