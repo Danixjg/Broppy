@@ -32,10 +32,9 @@ flowchart TB
     DemoAPI["demo-api: PUBLIC_DEMO,<br/>fictional data only"]
   end
 
-  TokenHub["TokenHub: question and<br/>authorized passages<br/>only; free tokens,<br/>post-paid off"]
   Supabase[("Supabase: directory,<br/>state, chunks, Vault<br/>tokens, audit rows with<br/>no updates or deletes")]
   Sources["Sources: mock in both<br/>APIs; live Slack, Jira,<br/>Confluence and Drive<br/>for SSO only"]
-  Groq["Groq free plan: no<br/>card on file; the<br/>demo's 100 model<br/>answers a day"]
+  Groq["Groq free plan: no<br/>card on file; question<br/>and authorized passages<br/>only; a daily allowance<br/>per API"]
   Anchor["External write-once<br/>root anchor"]
 
   Visitor -->|"HTTPS and a cookie"| Session
@@ -46,7 +45,7 @@ flowchart TB
   Caddy --> DemoAPI
   Usage --- SsoAPI
   Usage --- DemoAPI
-  SsoAPI -.-> TokenHub
+  SsoAPI -.-> Groq
   SsoAPI --> Supabase
   SsoAPI --> Sources
   DemoAPI --> Sources
@@ -114,8 +113,8 @@ sequenceDiagram
 | **SSO API ↔ Auth0** | Signing keys (JWKS), cached. Tokens must be RS256 and match the issuer, audience and expiry, carry `sub`, `exp` and the expected `org_id`, and map to an active directory entry in that organization. | Anything about the question or answer. | The person is checked again before an answer is returned, so a deactivated account stops at once. |
 | **API ↔ Supabase** | The server-only secret key. Directory reads, the state snapshot, ordered audit appends, the `hybrid_search` RPC (which returns IDs and scores), and Vault calls for source tokens. | The secret key, outside the API host. Source tokens in API responses or snapshots. | Triggers reject audit updates and deletes, but not a database owner replacing the database. One audit writer per organization. |
 | **API ↔ sources** | Mock connectors run inside the API. Live connectors use OAuth tokens kept in Vault (or `LIVE_SOURCES_JSON`); each person needs their own delegated credential, and no credential means no access. | Content from one organization to another: each API serves one organization. | Polling only, no webhooks. Live imports read current text only. Workspace actions (creating a task, Mark done) change mock sources only; live connectors keep read-only scopes, so the app links to Jira instead. |
-| **API ↔ model provider** | The question, and the authorized, freshly checked passages with their citation IDs. TokenHub or Hunyuan for SSO, within a token budget; Groq for the demo, within a daily allowance. | Denied documents' titles, metadata or text. Identities, tokens or keys. | The provider sees the passages it is sent. Tencent bills only if post-paid is turned on, which stays off; Groq's free plan can't bill. |
-| **API ↔ embeddings** (optional) | Changed chunk text at sync, and question text at query, to Hunyuan's embedding API. | Permission data. | It sends source text to Tencent when configured. Unconfirmed on TokenHub. |
+| **API ↔ model provider** | The question, and the authorized, freshly checked passages with their citation IDs, to Groq, from both APIs, each within its own daily allowance (D55). | Denied documents' titles, metadata or text. Identities, tokens or keys. | The provider sees the passages it is sent. Groq's free plan has no card on file, so it can't bill; both APIs share its limits. |
+| **API ↔ embeddings** (optional) | None since Tencent's were dropped (D55). With a provider: changed chunk text at sync, restricted documents included, and question text at query. | Permission data. | The provider sees the text of every chunk, not only what one person may read. |
 | **API ↔ remote FGA** (optional) | Organization-scoped tuples at sync; batch checks of document IDs at query. | Document content. | Remote failures deny. Platform permission shapes stay in the connector layer. |
 | **Lighthouse host** | Caddy terminates HTTPS for two host names. `sso-api` reads `sso.env` and the audit signing key (mounted read-only). Both APIs share the usage-count volume. | Real settings in `demo-api`: it refuses to start with any Auth0, Supabase, live-source, source OAuth or remote FGA setting. | `docker compose down -v` deletes the usage counts. |
 | **Audit store and keys** | Ed25519-signed Merkle batches that link each root to the previous one. At startup, the chain, roots and signatures are checked. | The signing key, outside the API host. | No external write-once anchor is running yet (`tools/anchor` covers file-based logs, not Supabase): someone holding both the database and the key could rewrite history. |

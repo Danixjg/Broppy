@@ -676,10 +676,37 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-02 — No Tencent model
+
+- **Input:** D54's TokenHub block.
+- **How decided:** chosen explicitly in a planning session.
+
+### D55 — No Tencent model; Groq answers on both APIs (supersedes D54's return to TokenHub)
+- **Options:** wait for Tencent's answer on credits, then move to `hy4-preview` as D54 planned / drop Tencent's models.
+- **Chosen:** drop them, for answers and for embeddings.
+  - Groq's `openai/gpt-oss-120b` answers on the public demo and on the sign-in API. Each API keeps its own daily
+    allowance (`LLM_DAILY_ANSWERS`).
+  - With Tencent's embedding model gone, semantic search is off until another provider is added.
+  - The `tokenhub` and `hunyuan` presets and the Hunyuan embedding client stay in the code as tested options, unused.
+    The docs and examples name Groq only.
+- **Trade-off:**
+  - The model isn't Tencent's own.
+  - Every key in one Groq account shares its per-minute and per-day limits, so the two APIs compete for them; the
+    daily allowances cap each one's share.
+  - Groq's free plan has no card on file, so nothing can be billed (D27).
+
+### Implementation details (no Tencent model)
+- **Docs and examples** name Groq only: the README, `.env.example`, `infra/tencent/sso.env.example`, the hosting
+  guide's model step, the architecture page, and the hosting diagram with the trust-boundary table.
+- **The sign-in API on Groq:** `sso.env.example` has the Groq lines and a daily allowance of 100. The API counts its
+  answers in `/data/usage-sso.json`, as before.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
-- **The model's route and the public demo on Hunyuan:** waits for the team's `pnpm llm:usage` run (D27, D28).
+- **The model's route:** settled: Groq on both APIs (D54, D55).
 - **Hosted SSO next to local SSO work:** the audit chain allows one writer per organization. Either stop the hosted
   SSO API during local `pnpm dev:sso` work, or give it its own Supabase project.
 - **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or
