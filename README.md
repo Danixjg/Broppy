@@ -110,16 +110,21 @@ Without a model, the built-in writer answers: it quotes the most relevant source
 The project pays for no model use (`decisions.md`, D27 and D28):
 
 - **Providers:** `LLM_PROVIDER` is `tokenhub`, `hunyuan` or `groq`.
-  - `tokenhub` is Tencent's international model service, TokenHub. Hunyuan's model there is `hy3`. Each language model gets 1M free tokens for 90 days, claimed under **New User Free Trial** in the Model Gallery or automatically on the first call, and calls stop when they run out unless post-paid billing is enabled. It is off by default; keep it off.
+  - `tokenhub` is Tencent's international model service, TokenHub. Hunyuan's models there are `hy4-preview` and `hy3`. Each language model gets 1M free tokens for 90 days, claimed under **New User Free Trial** in the Model Gallery or automatically on the first call, and calls stop when they run out unless post-paid billing is enabled. It is off by default; keep it off.
   - `hunyuan` is Tencent's China-site Hunyuan API (for example `hunyuan-t1-latest`), where the same rule applies under **Postpaid Settings** in the Tencent HY console.
-  - Groq's free plan has no card on file, so it can never bill.
+  - Groq's free plan has no card on file, so it can never bill. Use `openai/gpt-oss-120b` with `LLM_MAX_TOKENS=4000`:
+    on 2 Oct, 8 of 9 measured answers were grounded at about 870 tokens each. Groq has retired
+    `llama-3.3-70b-versatile`; its console lists the current models.
+  - Claiming TokenHub's free trial creates a default inference service per model. Tencent stops that service while
+    the account balance is insufficient, even on the free trial, and calls then fail with code `401006`. The
+    console's Online Inference page shows the service's status.
   - Every provider but Groq only starts with a usage file and budgets set below the free tokens, a second stop that keeps tokens for the showcase.
 - **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or no line of its reply is copied word for word, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
   - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
   - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
 - **One account, one budget:** each machine counts only its own calls. When a laptop and the server share a Tencent Cloud account, their `LLM_TOKEN_BUDGET` values together must stay below the free tokens, for example 100000 and 700000. The same goes for `EMBEDDING_TOKEN_BUDGET`.
 - **Semantic search:** at `EMBEDDING_TOKEN_BUDGET`, semantic search pauses and keyword search carries on.
-- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used, and why any call gave no usable answer. It then projects 350 answers against the free tokens. "Fits" means the plan stays under 70% of the free tokens; otherwise it says to use Groq. Its calls count against the budget.
+- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used, and why any call gave no usable answer. It then projects 350 answers against the free tokens. "Fits" means the plan stays under 70% of the free tokens; otherwise it says to use Groq. For Groq, whose free plan can't bill, it reports the tokens and points to Groq's daily limits instead. Its calls count against the budget.
 - **`pnpm llm:calibrate`** (Hunyuan route) embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN` from the scores.
 
 Both scripts read `.env.local`. The hosted APIs take their model settings as described in [infra/tencent/README.md](infra/tencent/README.md).
@@ -160,7 +165,7 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | `PUBLIC_DEMO=true` | Runs the public demo API: it accepts `x-demo-user` even with `NODE_ENV=production` and serves only the mock corpus. Startup fails if any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present. See [hosting](infra/tencent/README.md). |
 | `DEMO_API_URL` (web host) | The demo API's origin. When set, the start page offers **Try the demo**, and demo visitors' workspace requests go there with only the chosen persona. |
 | `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID` | Auth0 SSO with cached JWKS, active directory lookup and organization validation. Requires Supabase directory/persistence and an audit signing key. See [setup](docs/live-sources-and-sign-in.md). |
-| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model, `tokenhub`, `hunyuan` or `groq`; without them, the built-in writer answers. The older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL` still select Hunyuan. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500). See [Language model](#language-model-optional-free-only). |
+| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model, `tokenhub`, `hunyuan` or `groq`; without them, the built-in writer answers. The older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL` still select Hunyuan. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500; reasoning models such as hy4-preview and gpt-oss need about 4000). See [Language model](#language-model-optional-free-only). |
 | `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. TokenHub and Hunyuan need the file and the budget to start. |
 | `HUNYUAN_EMBEDDING_API_KEY`, `EMBEDDING_TOKEN_BUDGET` | Enables 1024-dimensional Hunyuan embeddings for changed chunks and questions; needs `LLM_USAGE_FILE` and the budget. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
 | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations 001–005. |
