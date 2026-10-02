@@ -8,6 +8,9 @@ export class CredentialRejected extends Error {
   constructor(source: Source) { super(`${source} credential was rejected; reconnect the source`); }
 }
 
+// A full pass every twelfth poll; and at most five requests at a time per item, to stay inside providers' rate limits.
+const FULL_POLL_EVERY = 12;
+const CHECKS_AT_ONCE = 5;
 const slackAuthErrors = new Set(["invalid_auth", "not_authed", "token_revoked", "token_expired", "account_inactive"]);
 /** Slack answers for a channel the credential can no longer see with one of these; anything else is not "gone". */
 const slackGone = new Set(["channel_not_found", "not_in_channel"]);
@@ -330,16 +333,19 @@ export class LiveConnector extends MockConnector {
   }
 
   override async listIds(): Promise<string[]> { return this.settings.ids.map(id => `${this.source}:${id}`); }
-  /** Only items whose version moved since the last poll (every item on the first). Removed items are found by sync's ID pass. */
+  /** Only items whose version moved since the last poll, except on the first poll and every twelfth, which report every
+   * item. A share or restriction changes no version, so that full pass is what brings permission changes into the index
+   * (within an hour at five-minute polls); every answer still rechecks access at the source. Removed items are found by
+   * sync's ID pass. */
   override async listUpdatedSince(cursor: number): Promise<{ ids: string[]; cursor: number }> {
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("Invalid cursor");
     this.pollCursor++;
     const ids = await this.listIds();
-    const previous = cursor === 0 ? new Map<string, number>() : this.seen;
+    const previous = cursor === 0 || this.pollCursor % FULL_POLL_EVERY === 0 ? new Map<string, number>() : this.seen;
     const next = new Map<string, number>();
     const changed: string[] = [];
-    for (let i = 0; i < ids.length; i += 5) {
-      await Promise.all(ids.slice(i, i + 5).map(async id => {
+    for (let i = 0; i < ids.length; i += CHECKS_AT_ONCE) {
+      await Promise.all(ids.slice(i, i + CHECKS_AT_ONCE).map(async id => {
         const current = await this.fetchVersion(id);
         if (current !== undefined) next.set(id, current);
         // An unreadable item is reported too, so sync can tombstone it or fail loudly.
@@ -374,8 +380,12 @@ export class LiveConnector extends MockConnector {
   }
   override async fetchPermissions(docId: string): Promise<SourcePermission | undefined> {
     const id = this.nativeId(docId);
-    const checks = await Promise.all(this.users.map(async user => await this.checkAccess(user, docId)));
-    const allowed = this.users.filter((_, index) => checks[index]).map(user => user.email);
+    const allowed: string[] = [];
+    for (let i = 0; i < this.users.length; i += CHECKS_AT_ONCE) {
+      const batch = this.users.slice(i, i + CHECKS_AT_ONCE);
+      const checks = await Promise.all(batch.map(user => this.checkAccess(user, docId)));
+      allowed.push(...batch.filter((_, index) => checks[index]).map(user => user.email));
+    }
     const native: SourcePermission["native"] = this.source === "slack"
       ? { source: "slack", channelId: id, visibility: "private", members: allowed }
       : this.source === "jira"

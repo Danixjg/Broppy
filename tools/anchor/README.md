@@ -20,10 +20,18 @@ git add anchors.jsonl && git commit -m "anchor batches" && git push
 brain-anchor verify  --log /path/to/audit.jsonl --pubkey audit.pub.pem --anchors anchors.jsonl
 ```
 
-- `publish` verifies every signature and the root chain first, then appends only batches the anchors don't have.
-  It refuses, writing nothing, if the log disagrees with an anchor already published.
-- `verify` reports a rewritten batch ("the log was rewritten") or a missing one ("batches were deleted").
+- Both commands first check the whole log:
+  - every entry's hash against its content, computed exactly as `packages/audit` computes it;
+  - the chain from each entry to the one before;
+  - each batch's signature and its link to the previous root;
+  - each batch's root against the entries it covers.
+
+  A changed, deleted or reordered entry fails, even when the batch records around it are untouched.
+- `publish` then appends only batches the anchors don't have. It refuses, writing nothing, if the log disagrees with an
+  anchor already published.
+- `verify` also reports a batch that differs from its anchor ("the log was rewritten") or a missing one ("batches
+  were deleted").
 - Public key from the private one: `openssl pkey -in audit.pem -pubout -out audit.pub.pem`.
 - Reads the JSONL log (`AUDIT_LOG_PATH`). Batches kept only in Supabase aren't read yet.
-- `cargo test` checks the Rust side against a log written by the TypeScript `AuditLog` (`tests/fixtures`, a throwaway
-  test key).
+- `cargo test` checks the Rust side against a real 130-entry log written by the TypeScript `AuditLog`
+  (`tests/fixtures`, a throwaway test key), including entries with nested data, decimals and quoted text.
