@@ -5,7 +5,7 @@ The challenge brief's five scenarios, run end to end on the demo data. `pnpm sce
 - **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so "last week" finds it.
 - **Writer:** the built-in writer, which quotes the most relevant source in full and the best sentence of the next three. `pnpm scenarios:model` runs the same steps with the chosen language model and writes `worked-examples-model.md`.
 - **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in compliance, Alex is an intern and Wei Ming is a contractor.
-- **Decision tables** are the compliance view of the audit trail. The person asking sees only their own trace, which never names what they couldn't see.
+- **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose link brought a document in. The person asking sees only their own trace, which never names what they couldn't see.
 
 ## Scenario 1: one question across platforms
 
@@ -17,6 +17,7 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 > Database migration project standup: waves one and two of the ledger move are complete. [slack:db-migration:0]
 > Blocker raised: the backfill job keeps timing out on the ledger database, so the final migration wave is on hold until DB-15 is fixed. [slack:db-migration:0]
+> Agreed: Maya raises the replica storage quota before the final wave. [slack:db-migration:0]
 > DB-12 (in progress) tracks the ledger database migration project. [jira:DB-12:0]
 > Move the ledger database to Postgres 16 in three waves. [confluence:db-migration-plan:0]
 > DB-15 (blocked): Replica lag stays above five minutes during the backfill, so the final wave of the database migration cannot start. [jira:DB-15:0]
@@ -32,7 +33,7 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 | Document | Match | Access check | Live check at the source | Sent to the writer | Rechecked after writing | Cited |
 | --- | --- | --- | --- | --- | --- | --- |
-| `slack:db-migration` | 0.49 | allowed | allowed, v1 | yes | allowed | yes |
+| `slack:db-migration` | 0.45 | allowed | allowed, v1 | yes | allowed | yes |
 | `jira:DB-12` | 0.41 | allowed | allowed, v4 | yes | allowed | yes |
 | `slack:db-oncall` | 0.40 | **denied** | – | no | – | no |
 | `confluence:db-migration-plan` | 0.28 | allowed | allowed, v3 | yes | allowed | yes |
@@ -40,8 +41,9 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 | `confluence:payment-master` | 0.17 | allowed | allowed, v4 | yes | allowed | no |
 | `jira:SETL-27` | 0.17 | allowed | allowed, v1 | yes | allowed | no |
 | `drive:steering-deck` | 0.17 | allowed | allowed, v1 | yes | allowed | no |
+| `drive:db-wave-checklist` | link from `jira:DB-12` | allowed | allowed, v2 | yes | allowed | no |
 
-- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 24 events and mentions it: no.
+- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 27 events and mentions it: no.
 - `slack:db-planning`, three weeks old, is outside "last week". Asked without "last week", it reaches the writer: yes.
 
 ### Ravi asks the same question
@@ -141,7 +143,7 @@ Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 
 
 | Entries | Time | Question | Documents checked | Refused | Sent to the writer | Answer |
 | --- | --- | --- | --- | --- | --- | --- |
-| 33–81 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 8 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
+| 35–83 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 8 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
 
 - From the `payment-gateway` space, `confluence:gateway-operations`. Access check: allowed; live check at the source: allowed, v1; sent to the writer: yes; rechecked after writing: allowed.
 
@@ -154,9 +156,9 @@ Read as: document `confluence:gateway-operations`. Retrieved for: Ravi.
 ### Tamper evidence
 
 - Every entry carries the hash of the one before it. The chain verifies: yes.
-- Nur seals the log into a Merkle batch of entries 1 to 149. The proof for Ravi's answer, entry 81, verifies against it: yes.
+- Nur seals the log into a Merkle batch of entries 1 to 153. The proof for Ravi's answer, entry 83, verifies against it: yes.
 - A copy of the log with that answer changed is refused ("Invalid stored audit log").
-- A copy with entry 75 deleted is refused ("Invalid stored audit log").
+- A copy with entry 77 deleted is refused ("Invalid stored audit log").
 
 ![Nur's audit search](images/s5-nur.png)
 

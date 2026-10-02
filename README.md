@@ -1,4 +1,4 @@
-> **Current sign-in setup:** The official Auth0 Next.js SDK now replaces browser PKCE and public auth configuration. Start at [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. For SSO, run the API with `pnpm dev:sso`, which reads the root `.env.local`. `pnpm dev` is the demo API: it accepts `x-demo-user` persona headers, for curl and for the website's demo. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Project decisions are logged in [decisions.md](decisions.md).
+> **Start here.** [Architecture](docs/architecture.md) shows how the challenge brief's requirements are met, and the [worked examples](docs/worked-examples.md) run its five scenarios. Sign-in uses the Auth0 Next.js SDK: see [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. `pnpm dev` runs the demo API, which accepts `x-demo-user` persona headers for curl and the website's demo; `pnpm dev:sso` runs the SSO API from the root `.env.local`. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Every project decision is in [decisions.md](decisions.md).
 
 # Internal Brain
 
@@ -49,7 +49,7 @@ curl -s http://127.0.0.1:3000/v1/query \
 | Ravi (`ravi`) | Head of payments (member), payments/security/fraud groups | Ask about PAY-101, SEC-44, and the cutover plan; Maya can remove his Slack channel membership to show a live access change on the next query. |
 | Maya (`maya`) | Admin | Edit mock source content, narrow a tier, revoke brain grants, remove a group or native Slack channel member, run sync, and preview access. |
 | Alex (`alex`) | Intern | Try a security or restricted incident query; the fixed no-result reply conceals inaccessible results. Catch up on the open steering deck and chargeback guide. |
-| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; he isn't in the private #db-oncall channel, so it never reaches his answers. Compare with Ravi's view. |
+| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; he isn't in the private #db-oncall channel, so it never reaches his answers. Compare with Ravi's view. Turn the #db-migration agreement into a Jira task, then mark it done. |
 | Nur (`nur`) | Compliance | Inspect and search audit events, seal a batch, inspect and verify a proof, view traces, and export CSV. |
 | Wei Ming (`wei`) | Contractor | Access explicitly shared vendor integration material; payment/security material remains denied. |
 
@@ -67,7 +67,7 @@ The challenge brief's scenarios run on the mock data as written:
 
 A question that names a platform (Slack, Jira, Confluence, Drive) gets that platform first. A time it names ("last week", "past 3 days", "yesterday") limits that platform, or every platform when none is named. Other platforms with a clearly relevant match take turns, so one answer can cite all four. The most relevant source is quoted in full, and the next three add their best sentence. Mock dates move forward with the clock, so "last week" keeps finding the demo data.
 
-In the default demo, changes made through admin routes alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
+In the default demo, changes made through admin routes or workspace actions alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
 
 With `HUNYUAN_EMBEDDING_API_KEY`, sync embeds changed document chunks and a query embeds its question. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Embedding or Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
 
@@ -79,6 +79,29 @@ Connecting a source imports **nothing** until an admin chooses. On the Connector
 - **Only content that is new or changed from now on**, which fixes a starting moment when it is saved and keeps it on later saves, or **history since** a chosen date.
 
 Saving starts the import. Narrowing, or choosing nothing, removes what is no longer included, with its grants and index entries. Each change is audited as `scope_changed`. "From now on" goes by the source's modified time, so an older item edited later is included. Selecting from My Drive uses file IDs; the checklist lists shared drives. The scope is part of the existing saved state and needs no migration.
+
+## Workspace
+
+What each person sees beside the chat is built only from what they may open: their projects, links, files and
+suggestions.
+
+- **Projects:** choose one in the header. Its Confluence master page, threads, tasks and files follow. A project is
+  listed only to people who can open its master page.
+- **Links:** a document lists the linked items the person may also open. Answers bring in a ticket's linked thread,
+  page and files, and say what linked them ("linked from DB-12").
+- **From conversation to task:** an agreement such as "Agreed: …" in a thread becomes a suggested Jira task.
+  - In the demo, David creates DB-16 from the #db-migration agreement, then marks it done from the task.
+  - With live sources, the card links to Jira instead, because the app only reads them.
+- **Latest and duplicates:** "Why latest?" lists the reason for every point, and a likely duplicate gets a merge
+  preview that changes nothing.
+- **Catch-up:** chosen by role and groups.
+  - Alex, an intern, gets an onboarding overview, and Wei what is shared with him.
+  - Team members get a project's status, blockers and decisions, from that project only.
+  - Nur gets the last 7 days of the audit trail.
+
+![David's Database migration page, with an agreement waiting to become a task](docs/images/workspace-project.png)
+
+![The Payment migration files: why the cutover plan is the latest, a merge preview, and an answer citing linked items](docs/images/workspace-duplicates.png)
 
 ## Language model (optional, free only)
 
@@ -150,8 +173,20 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 
 ## Deployment status and remaining audit items
 
-Local demo mode remains ephemeral without Supabase configuration. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
+Without Supabase, the demo keeps everything in memory and resets on restart. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
 
-The compliance audit contains question/answer text and source identifiers. Keep audit access and signing keys restricted. Merkle signatures link consecutive batch roots; an independent write-once root anchor remains an open infrastructure decision. Source-specific remote FGA types, expiring restricted grants and webhooks remain follow-ups identified in the audit. Week 3 differentiators and CodeBuddy/WorkBuddy evidence were not fabricated or implemented as part of this repair batch.
+The compliance audit contains question and answer text and source identifiers, so keep audit access and signing keys restricted. The remaining limits, such as the missing write-once anchor for Merkle roots, webhooks and source-specific remote FGA types, are listed under [Architecture: Limits](docs/architecture.md#limits). CodeBuddy/WorkBuddy evidence must be captured by someone using those products; none is fabricated.
 
-See [audit implementation notes](docs/audit-batch0.1-implementation.md), [architecture](docs/architecture.md), [trust boundary](docs/trust-boundary.md) and [project plan](internal-brain-five-stage-plan.md).
+## Documentation
+
+- [Architecture](docs/architecture.md): how the brief's requirements are met, and the pipeline with the five points that matter most.
+- [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
+- [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
+- [Decisions](decisions.md): every choice, the options considered and the trade-offs.
+- Setup: [Auth0 sign-in](apps/web/AUTH0.md), [live sources and persistence](docs/live-sources-and-sign-in.md), and [hosting on Tencent Cloud](infra/tencent/README.md).
+- Diagrams: the sources are in [docs/diagrams](docs/diagrams), with rendered images in [docs/images](docs/images). `pnpm test` checks that each diagram in the docs matches its source and that every link in the docs resolves.
+
+History, kept as a record:
+
+- [Five-stage plan](docs/internal-brain-five-stage-plan.md) (26 Sep 2026): the original design.
+- [Repository audit](docs/broppy-audit-batch0.1.md) (30 Sep 2026) and its [implementation notes](docs/audit-batch0.1-implementation.md).

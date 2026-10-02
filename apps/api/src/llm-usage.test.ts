@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { loadMockCorpus } from "@brain/connectors";
 import { calibrate, CALIBRATION, formatCalibration } from "./llm-calibrate.js";
 import { formatUsageReport, measureUsage } from "./llm-usage.js";
 import { ModelCallError, ModelUnavailable } from "./llm.js";
@@ -81,7 +82,8 @@ describe("pnpm llm:calibrate", () => {
     const result = await calibrate({ embed });
     const labelled = CALIBRATION.reduce((sum, item) => sum + item.relevant.length, 0);
     expect(result.relevant).toHaveLength(labelled);
-    expect(result.relevant.length + result.irrelevant.length).toBe(CALIBRATION.length * 24);
+    const documents = (await Promise.all(Object.values(loadMockCorpus().connectors).map(source => source.listIds()))).flat();
+    expect(result.relevant.length + result.irrelevant.length).toBe(CALIBRATION.length * documents.length);
     expect(result.suggestion).toBeGreaterThan(0);
     expect(result.suggestion).toBeLessThanOrEqual(1);
     expect(formatCalibration(result)).toContain("Suggested SEMANTIC_MIN");

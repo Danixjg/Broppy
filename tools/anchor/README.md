@@ -1,7 +1,7 @@
 # brain-anchor
 
 A small Rust tool that closes the audit log's open item: *an independent write-once root anchor*
-(`docs/trust-boundary.md`, `decisions.md` D36–D38).
+(`docs/trust-boundary.md`, `decisions.md` D50).
 
 The API signs every Merkle batch, but anyone holding the signing key and the log file could rewrite both. This tool
 copies each signed batch root into an append-only `anchors.jsonl` in a **separate repository**. Once a root is pushed

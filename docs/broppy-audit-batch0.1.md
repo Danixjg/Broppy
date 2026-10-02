@@ -1,3 +1,7 @@
+> **History (30 Sep 2026).** This audit describes the repository as it stood then, and most of its items have since
+> been resolved. The current design is in [Architecture](architecture.md); later choices are in
+> [decisions.md](../decisions.md).
+
 # Broppy (Internal Brain) — Repository Audit
 
 **Repo:** github.com/Danixjg/Broppy

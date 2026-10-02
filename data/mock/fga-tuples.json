@@ -178,5 +178,15 @@
     "user": "group:payments#member",
     "relation": "group_reader",
     "object": "document:drive:runbook-2025"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:db-wave-checklist"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:drive:api-spec-copy"
   }
 ]

@@ -40,6 +40,9 @@ export interface SourceDocument {
   metadata: Record<string, string>;
   permissions: SourcePermission;
   tier: Tier;
+  /** IDs of the items this one links to, as its source says: issue links, attachments, page links, or keys and links
+   * in its text. A link to an ID that names no item goes nowhere. */
+  links?: string[];
   deletedAt?: string;
 }
 
@@ -122,13 +125,17 @@ export interface Citation {
   version: number;
   updatedAt: string;
   lastIndexedAt: string;
+  /** The document this one was reached through, when a link brought it in rather than the question's words. */
+  linkedFrom?: string;
 }
 
-/** Where an answer looked first and the time range it kept to, when the question named them. */
+/** Where an answer looked first and the time range it kept to, when the question named them, and the project it kept
+ * to, when it was asked about one. */
 export interface QueryScope {
   sources: Source[];
   from?: string;
   to?: string;
+  project?: string;
 }
 
 export interface QueryAnswer {

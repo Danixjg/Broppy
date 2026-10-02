@@ -1,0 +1,53 @@
+flowchart TB
+  classDef point fill:#fff4d6,stroke:#b7791f,stroke-width:3px,color:#1a202c
+  classDef store fill:#edf2f7,stroke:#4a5568,color:#1a202c
+  classDef stop fill:#fde8e8,stroke:#c53030,color:#1a202c
+
+  subgraph SyncLane["Sync: every 30 s with mock sources, every 5 min with live ones"]
+    Sources["Sources: Slack, Jira,<br/>Confluence, Drive<br/>(mock or live)"] --> Sync["Sync: changed IDs (mock)<br/>or every ID (live)"]
+    Sync -->|"content changed"| Rechunk["Re-chunk<br/>and re-embed"]
+    Sync -->|"permissions only"| Grants["③ Update grants only:<br/>no re-chunk, no re-embed"]
+    Sync -->|"gone at the source"| Tomb["Tombstone: drop<br/>chunks and grants"]
+  end
+
+  Rechunk --> Index[("Search index:<br/>local, or Supabase")]
+  Tomb --> Index
+  Grants --> Permissions[("Grants per<br/>document ID")]
+  Tomb --> Permissions
+
+  subgraph QueryLane["Query"]
+    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms named,<br/>time window"]
+    Plan --> Search["① Hybrid search over the<br/>whole index: keywords,<br/>vectors and freshness;<br/>returns IDs only"]
+    Search --> Check["② Access check on<br/>document IDs only"]
+    Check --> Links["Follow links one hop,<br/>from allowed documents<br/>only, then ② again"]
+    Links --> Live["④ Live check at the source:<br/>permission and version"]
+    Live --> Context["Context: up to 8 passages,<br/>platforms take turns"]
+    Context --> Writer["Writer: built-in,<br/>or a metered model"]
+    Writer --> Ground["Grounding: only lines<br/>copied word for word"]
+    Ground --> Recheck["④ Recheck the person<br/>and every cited source"]
+    Recheck --> Answer["Answer with citations"]
+    Check -->|"nothing allowed"| Fixed["Fixed reply: no<br/>accessible information"]
+    Live -->|"nothing usable"| Fixed
+    Recheck -->|"access changed"| Fixed
+  end
+
+  Index --> Search
+  Permissions --> Check
+  Sources --> Live
+
+  subgraph AuditLane["⑤ Audit: every sync and query step appends an event"]
+    Events["Events"] --> Chain["Hash chain"]
+    Chain --> Merkle["Merkle batches,<br/>signed in SSO mode"]
+    Merkle --> Rows[("Supabase: no updates,<br/>deletes or truncates")]
+    Rows --> Compliance["Compliance search,<br/>proofs, verify"]
+    Events --> Own["The asker's own trace:<br/>only what they could see"]
+  end
+
+  Permissions ~~~ Events
+  SyncLane -.-> Events
+  QueryLane -.-> Events
+
+  class Search,Check,Grants,Live,Recheck point
+  class Index,Permissions,Rows store
+  class Fixed stop
+  style AuditLane fill:#fffaf0,stroke:#b7791f,stroke-width:3px
