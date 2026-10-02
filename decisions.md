@@ -436,6 +436,140 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Screenshots:** taken in the public demo, with the API's and the browser's clocks set to 15 October 2026, 14:05
   UTC.
 
+## 2026-10-01 — Docs and diagrams catch up with the code (R8)
+
+- **Input:** `docs/architecture.md`, `docs/trust-boundary.md` and the diagram source still described the September
+  design. That meant a Python static site, browser PKCE with the token in `sessionStorage`, and Hunyuan as the only
+  model. There was no demo, hosting, usage meter or query plan. The five-stage plan asks for a final diagram that
+  makes five points "visually unavoidable". The README's link to that plan was broken.
+- **How decided:** chosen explicitly in a planning session.
+
+### D36 — A brief-first architecture doc
+- **Options:** brief-first / today's layout with every stale fact corrected.
+- **Chosen:** brief-first. `docs/architecture.md` opens with the brief's five requirements, each tied to the code,
+  the test that proves it and the worked example. The pipeline diagram follows, with the plan's five points numbered
+  ①–⑤.
+- **Trade-off:** it's written for judges first. The engineering detail sits in shorter sections below.
+
+### D37 — The September docs stay, marked as history
+- **Options:** keep them, marked as history / move them to `docs/history/` / delete them.
+- **Chosen:** keep them where they are. The five-stage plan, the 30 Sep audit and its implementation notes are
+  unchanged apart from a dated note at the top pointing to the current design. The README lists them under History.
+- **Trade-off:** they still describe the old design, so readers rely on that note.
+
+### D38 — Mermaid plus rendered images
+- **Options:** Mermaid plus PNGs / Mermaid only.
+- **Chosen:** both. GitHub draws the Mermaid, and `docs/images/diagram-*.png` serve the video and slides. The images
+  are made in the development sandbox from a downloaded copy of Mermaid, with no new dependency.
+- **Trade-off:** the images need re-rendering whenever a diagram changes. The script is kept with the team's notes.
+
+### D39 — The tests check the docs
+- **Options:** `pnpm test` checks the diagrams and links / review by hand only.
+- **Chosen:** the tests check them, in `apps/api/src/docs.test.ts`.
+- **Trade-off:** moving a file or editing a diagram means updating the docs in the same change.
+
+### Implementation details (docs and diagrams)
+- **Sources:** each diagram lives in `docs/diagrams/NAME.mmd`; the old `docs/diagram-source.mmd` is now
+  `pipeline.mmd`. A doc embeds a diagram, copied exactly, after a `<!-- diagram: docs/diagrams/NAME.mmd -->` line.
+- **Check:** `docs.test.ts` reads the README, this file, `apps/web/AUTH0.md`, `infra/tencent/README.md` and
+  `docs/*.md`.
+  - Every relative link and image outside code blocks must point to a file that exists.
+  - Every embedded diagram must equal its source.
+  - Every source must be embedded somewhere and have its `docs/images/diagram-NAME.png`.
+- **Diagrams:** flowcharts and one sequence diagram, using only syntax that parses in Mermaid 11 and 12. Node text
+  keeps each line to 24 characters or fewer, because Mermaid wraps longer lines on its own.
+- **Images:** rendered at twice the size in Chromium with Mermaid 11.17.2. The script, `r8-diagrams.mjs`, also checks
+  that each diagram parses in Mermaid 12.
+
+## 2026-10-01 — Links across platforms, project pages and workspace actions (R9)
+
+- **Input:** the brief asks that one answer can draw on "a Jira ticket, its linked Slack discussion, the related
+  Confluence doc and an attached Drive file", respecting each platform's permissions. D26 had deferred cross-links to
+  this round. The five-stage plan's additional features were still browser heuristics:
+  - the Slack → Jira card only paired a thread with an existing issue;
+  - a task had no Mark done;
+  - the Latest badge gave no reasons;
+  - the duplicate notice needed a file already labelled superseded;
+  - the catch-up was one intern question;
+  - the master page was fixed to the PAY space.
+- **How decided:** chosen explicitly in a planning session.
+
+### D40 — What R9 includes
+- **Options:** any of cross-links / project pages and catch-up / Slack → Jira and Mark done / duplicates and the
+  Latest badge.
+- **Chosen:** all four.
+- **Trade-off:** a larger round. Each part is its own commit, with its own tests.
+
+### D41 — Links change answers
+- **Options:** answers and the workspace / the workspace only.
+- **Chosen:** both. Linked items join an answer's context, and each passes the same checks as a search result.
+- **Trade-off:** answers draw on more items, so the worked examples changed and were reviewed.
+
+### D42 — Who may change tasks
+- **Options:** project members / admins only / no writes.
+- **Chosen:** project members, on mock sources. Anyone who can see an issue in a Jira project may create a task there
+  from an agreement, or mark a task done. With live sources the app links to Jira and keeps read-only scopes.
+- **Trade-off:** in the shared public demo, any visitor can create or close demo tasks until it restarts.
+
+### D43 — Duplicate merge
+- **Options:** a clickable preview / a working merge in the demo.
+- **Chosen:** a preview that changes nothing, as the five-stage plan asked.
+- **Trade-off:** merging stays a manual step at the source.
+
+### D44 — Spotting agreements
+- **Options:** fixed phrases / ask the model.
+- **Chosen:** fixed phrases at the start of a sentence, such as "Agreed:", "Decision:" or "OK, let's".
+- **Trade-off:** looser wording isn't caught. In return it is predictable and free, and it works with the built-in
+  writer.
+
+### D45 — The catch-up
+- **Options:** by role and groups / add job titles to the directory.
+- **Chosen:** role and groups, with no directory change.
+- **Trade-off:** Ravi and David get the same kind of catch-up. The Ravi persona question stays open.
+
+### D46 — What a project is
+- **Options:** a master page and its links / a configured list.
+- **Chosen:** a Confluence page labelled "master" defines a project. It holds what the page links to, the issues,
+  pages and channels tagged with its key, and what those issues link to. A project is listed only to people who can
+  open its master page.
+- **Trade-off:** an item that nothing links to or tags stays outside every project, under All sources.
+
+### D47 — Links from live sources
+- **Options:** collect them from what's already read / mock sources only.
+- **Chosen:** collect them, with no extra requests. That covers Jira's issue links and description links, Confluence's
+  storage-format links, Jira macros and "master" label, and links in Slack messages.
+- **Trade-off:** tested with recorded responses only, because the development sandbox can't reach the services.
+
+### Implementation details (links, projects and workspace actions)
+- **Links:** `SourceDocument.links` holds item IDs.
+  - `linksIn` reads issue keys, and links by their path: Jira `/browse/KEY`, Confluence `pageId` or `/pages/ID`,
+    Slack `/archives/ID` and Drive `/d/ID`.
+  - A link counts only where an item with that ID exists.
+  - The index hashes links with the metadata, so a link-only change never re-embeds.
+- **Links in answers:**
+  - **Where from:** documents the asker may open that score at least half the best of them, up to eight. Links are
+    followed one hop, in either direction.
+  - **How checked:** a linked item scores half the item it came through, takes its first chunk and keeps to the time
+    window. It is audited as `candidate_linked` and passes ② and ④. It counts only while the item it came through
+    passes its own live check.
+  - **Ordering:** it never takes a named platform's first places, nor makes a platform clearly relevant. That kept
+    scenario 1's cited lines unchanged.
+- **Workspace:** `/v1/workspace` adds projects, the latest files, duplicates and suggestions. `workspace.ts` computes
+  them from the visible documents only. Duplicates share at least 60% of their content words, or a title where one is
+  superseded.
+- **Tasks:** `POST /v1/tasks` and `POST /v1/tasks/done`.
+  - A new task's title and text come from the agreed sentence, and it links back to the thread.
+  - It copies the permissions and tier of the issue it is modelled on: the one the thread links to, else the
+    project's latest.
+  - Both are audited, as `task_created` and `task_status_changed`.
+- **Catch-up:** `POST /v1/catch-up`. `Brain.query` gained an optional project scope, which the answer's scope and the
+  asker's trace report.
+- **Built-in writer:** it now picks a source's best sentence by topic words, ignoring small words such as "is" or
+  "of". The worked examples were unchanged by this.
+- **Demo data:** six items gained links and the two master pages their label. #db-migration gained an agreement. Two
+  Drive files are new: a wave checklist reached only through links, and a near-copy of the API spec.
+- **Screenshots:** the seven worked-example screenshots were re-taken, and the README gained two of the workspace.
+
 ---
 
 ## Deferred (not decided yet)
@@ -446,8 +580,7 @@ These are open. Pick them up in a later round and record the decision here.
   SSO API during local `pnpm dev:sso` work, or give it its own Supabase project.
 - **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or
   per-visitor state aren't decided.
-- **Additional features:** Slack "ok" → Jira suggestion card; task → doc "Mark done"; latest-doc badge scoring;
-  duplicate merge; intern catch-up; master page hard-coded to `PAY`.
+- **Additional features:** done in R9 (D40–D47), except a working duplicate merge, which stays a preview (D43).
 - **Brain as an MCP server:** not started.
 - **CodeBuddy/WorkBuddy evidence:** must be captured by someone using those products. The project isn't scored
   without it.

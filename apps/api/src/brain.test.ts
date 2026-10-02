@@ -27,6 +27,24 @@ describe("Internal Brain security and sync", () => {
     expect(answer.citations.map(citation => citation.docId)).not.toContain("drive:cutover-duplicate");
   });
 
+  it("links each item to what it names and what names it, among items that exist", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    expect(brain.linkedIds("jira:DB-12")).toEqual(expect.arrayContaining([
+      "confluence:db-migration-plan", "drive:db-wave-checklist", "jira:DB-15", "slack:db-migration"]));
+    expect(brain.linkedIds("jira:DB-12")).not.toContain("jira:DB-12");
+    // DB-15 links to #db-oncall; #db-migration's text and the plan page name DB-15.
+    expect(brain.linkedIds("jira:DB-15")).toEqual(expect.arrayContaining([
+      "confluence:db-migration-plan", "jira:DB-12", "slack:db-migration", "slack:db-oncall"]));
+
+    // A key that names no item links nowhere, and a deleted item drops out.
+    brain.connectors.drive.updateContent("drive:api-spec", "Settlement API specification, UTF-8 encoded, for PAY and SETL.");
+    brain.connectors.drive.delete("drive:db-wave-checklist");
+    await brain.sync("drive");
+    expect(brain.linkedIds("drive:api-spec")).toEqual(["confluence:payment-master"]);
+    expect(brain.linkedIds("jira:DB-12")).not.toContain("drive:db-wave-checklist");
+  });
+
   it("does not re-embed permission-only changes", async () => {
     const brain = new Brain();
     await brain.syncAll();

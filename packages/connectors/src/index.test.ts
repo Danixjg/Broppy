@@ -23,9 +23,10 @@ describe("Stage 1 mock corpus", () => {
       "drive:cutover-plan", "drive:cutover-duplicate", "drive:recon-sheet",
       "drive:steering-deck", "drive:api-spec",
       "jira:DB-12", "jira:DB-15", "slack:db-migration", "slack:db-oncall", "slack:db-planning",
-      "confluence:db-migration-plan", "confluence:payment-service-runbook", "drive:runbook-2025"
+      "confluence:db-migration-plan", "confluence:payment-service-runbook", "drive:runbook-2025",
+      "drive:db-wave-checklist", "drive:api-spec-copy"
     ]));
-    expect(ids).toHaveLength(24);
+    expect(ids).toHaveLength(26);
     for (const connector of Object.values(connectors)) {
       for (const doc of await connector.listItems()) {
         expect(doc.content).toBeTruthy();
@@ -48,6 +49,25 @@ describe("Stage 1 mock corpus", () => {
         }
       }
     }
+  });
+
+  it("links items the way their sources do, and marks each project's master page", async () => {
+    const { connectors } = loadMockCorpus();
+    const docs = (await Promise.all(Object.values(connectors).map(connector => connector.listItems()))).flat();
+    const ids = new Set(docs.map(doc => doc.docId));
+    // Every link a fixture declares points at a fixture.
+    for (const doc of docs) for (const target of doc.links ?? []) expect(ids, `${doc.docId} → ${target}`).toContain(target);
+    expect(docs.filter(doc => doc.metadata.label === "master").map(doc => doc.docId).sort())
+      .toEqual(["confluence:db-migration-plan", "confluence:payment-master"]);
+
+    // A fetched item carries its declared links plus the issue keys in its text.
+    const issue = await connectors.jira.fetchDocument("jira:DB-12");
+    expect(issue?.links).toEqual(expect.arrayContaining(["confluence:db-migration-plan", "drive:db-wave-checklist",
+      "jira:DB-15", "slack:db-migration"]));
+    expect(issue?.links).not.toContain("jira:DB-12");
+    expect((await connectors.jira.fetchDocument("jira:DB-15"))?.links).toContain("slack:db-oncall");
+    expect((await connectors.slack.fetchDocument("slack:db-migration"))?.content)
+      .toContain("Agreed: Maya raises the replica storage quota before the final wave.");
   });
 
   it("dates the fixtures relative to now, keeping their spacing", async () => {

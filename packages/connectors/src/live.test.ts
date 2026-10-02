@@ -68,3 +68,68 @@ it("discovers all Slack pages and imports every history page and thread reply", 
   const doc = await connector.fetchDocument("slack:C1");
   expect(doc?.content).toContain("Older history"); expect(doc?.content).toContain("Thread decision");
 });
+
+it("collects links from what each live source already returns, with no extra requests", async () => {
+  const responses: Record<"slack" | "jira" | "confluence", (url: URL) => unknown> = {
+    slack: url => url.pathname.endsWith("info")
+      ? { ok: true, channel: { name: "payments", created: 1700000000, context_team_id: "T123" } }
+      : { ok: true, messages: [{ text: "<https://atlassian.example.test/browse/SEC-44|the drill> needs sign-off.", ts: "1700000001.000000" }] },
+    jira: () => ({ fields: {
+      summary: "Payment cutover", updated: "2026-09-26T11:00:00.000Z", status: { name: "Open" }, project: { key: "PAY" },
+      issuelinks: [{ outwardIssue: { key: "SEC-44" } }, { inwardIssue: { key: "SETL-27" } }],
+      description: { type: "doc", content: [
+        { type: "paragraph", content: [{ type: "text", text: "Read the cutover plan.",
+          marks: [{ type: "link", attrs: { href: "https://drive.google.com/file/d/file-1/view" } }] }] },
+        { type: "paragraph", content: [{ type: "inlineCard", attrs: { url: "https://acme.slack.com/archives/C123/p1700000001000000" } }] }
+      ] }
+    } }),
+    confluence: () => ({ title: "Cutover page", status: "current", version: { createdAt: "2026-09-26T11:00:00.000Z" },
+      labels: { results: [{ name: "master" }, { name: "payments" }] },
+      body: { storage: { value: '<p>Read <a href="https://drive.google.com/file/d/file-1/view">the plan</a> first.</p>' +
+        '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">PAY-101</ac:parameter></ac:structured-macro>' } } })
+  };
+  const expected = {
+    slack: ["jira:SEC-44"],
+    jira: ["drive:file-1", "jira:SEC-44", "jira:SETL-27", "slack:C123"],
+    confluence: ["drive:file-1", "jira:PAY-101"]
+  };
+  for (const source of ["slack", "jira", "confluence"] as const) {
+    const requests: URL[] = [];
+    const transport = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      return Response.json(responses[source](url));
+    });
+    const connector = new LiveConnector(source, { ids: [ids[source]], baseUrl: "https://atlassian.example.test/",
+      serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" } }, [user], transport as typeof fetch);
+    const doc = await connector.fetchDocument(`${source}:${ids[source]}`);
+    expect(doc?.links, source).toEqual(expected[source]);
+    if (source === "jira") {
+      expect(requests.every(url => url.searchParams.get("fields")?.split(",").includes("issuelinks"))).toBe(true);
+    }
+    if (source === "confluence") {
+      expect(doc?.metadata.label).toBe("master");
+      expect(doc?.content).not.toContain("<");
+      expect(requests.every(url => url.searchParams.get("include-labels") === "true")).toBe(true);
+    }
+  }
+});
+
+it("still imports an item whose optional link or label fields are malformed", async () => {
+  const bodies = {
+    jira: { fields: { summary: "Payment cutover", updated: "2026-09-26T11:00:00.000Z", status: { name: "Open" },
+      issuelinks: ["oops", { outwardIssue: "nope" }, { inwardIssue: { key: "not a key" } }],
+      description: { content: [{ type: "text", text: "Cutover requires approval.", marks: ["bad", { type: "link", attrs: [] }] }] } } },
+    confluence: { title: "Cutover page", status: "current", version: { createdAt: "2026-09-26T11:00:00.000Z" }, labels: ["master"],
+      body: { storage: { value: "<p>Cutover requires approval.</p>" } } }
+  };
+  for (const source of ["jira", "confluence"] as const) {
+    const transport = vi.fn(async () => Response.json(bodies[source]));
+    const connector = new LiveConnector(source, { ids: [ids[source]], baseUrl: "https://atlassian.example.test/",
+      serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" } }, [user], transport as typeof fetch);
+    const doc = await connector.fetchDocument(`${source}:${ids[source]}`);
+    expect(doc?.content, source).toContain("Cutover requires approval.");
+    expect(doc?.links, source).toEqual([]);
+    expect(doc?.metadata.label, source).toBeUndefined();
+  }
+});

@@ -2,7 +2,8 @@ import { narrowerPermissionError } from "./permissions.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
-const state = { docs: [], selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
+const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
@@ -82,8 +83,8 @@ function setView(view) {
 }
 function resetIdentity() {
   state.identity++;
-  state.docs = []; state.selected = null; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
-  for (const id of ["slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
+  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
   for (const id of ["question", "adminContent", "auditSearch", "memberGroup", "memberChannelDoc"]) $(id).value = "";
@@ -137,9 +138,12 @@ async function initAuth() {
     resetIdentity();
   }
 }
+const docById = docId => state.docs.find(doc => doc.docId === docId);
+function currentProject() { return state.workspace.projects.find(project => project.key === state.project); }
+function inProject(docId) { const project = currentProject(); return !project || project.docIds.includes(docId); }
 function filteredDocs(source) {
   const term = $("search").value.trim().toLocaleLowerCase();
-  return state.docs.filter(doc => (!source || doc.source === source) && (!term || `${doc.title} ${doc.source} ${safeText(doc.content)} ${safeText(doc.metadata?.status)} ${safeText(doc.metadata?.project)}`.toLocaleLowerCase().includes(term)));
+  return state.docs.filter(doc => (!source || doc.source === source) && inProject(doc.docId) && (!term || `${doc.title} ${doc.source} ${safeText(doc.content)} ${safeText(doc.metadata?.status)} ${safeText(doc.metadata?.project)}`.toLocaleLowerCase().includes(term)));
 }
 function selectDoc(doc) {
   if (!state.docs.some(item => item.docId === doc.docId)) return;
@@ -154,76 +158,136 @@ function selectDoc(doc) {
   if (doc.content) appendText(box, "p", "", doc.content);
   else appendText(box, "p", "muted", "Preview is loading from the workspace API. Open the source or ask the Brain for a cited summary.");
   box.append(externalLink(doc.url, "Open source ↗"));
+  renderLinked(box, doc);
   reveal(box);
+}
+// Items linked to this one that this person may also open: the API never lists any others.
+function linkedDocs(doc) { return (Array.isArray(doc.links) ? doc.links : []).map(docById).filter(Boolean); }
+function renderLinked(box, doc) {
+  const linked = linkedDocs(doc);
+  if (!linked.length) return;
+  const wrap = node("div", "linked-items"); appendText(wrap, "strong", "", "Linked items");
+  for (const item of linked) {
+    const button = node("button", "text-button", `${sourceName(item.source)} · ${item.title}`); button.type = "button";
+    button.addEventListener("click", () => item.source === "jira" ? openTask(item) : selectDoc(item));
+    wrap.append(button);
+  }
+  box.append(wrap);
 }
 function activityButton(doc, source) {
   const button = node("button", "activity-item"); button.type = "button";
   button.append(node("span", "item-title", doc.title), node("span", "item-meta", `${sourceName(source)} · ${documentStatus(doc)} · ${fmtDate(doc.updatedAt)}`));
-  button.addEventListener("click", () => source === "jira" ? openJiraSection(doc) : selectDoc(doc));
+  button.addEventListener("click", () => source === "jira" ? openTask(doc) : selectDoc(doc));
   return button;
 }
-function openJiraSection(doc) {
+const sentencesOf = text => safeText(text).split(/\n|(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+// A Jira task with the section of its linked page or file that names it, and Mark done.
+function openTask(doc) {
   selectDoc(doc);
-  const key = doc.docId.split(":")[1];
-  const workDocs = state.docs.filter(item => ["confluence", "drive"].includes(item.source));
-  const target = workDocs.find(item => item.content?.toLowerCase().includes(key.toLowerCase())) ||
-    workDocs.find(item => item.content?.toLowerCase().includes(key.split("-")[0].toLowerCase()));
-  if (!target) { appendText($("selectedDetail"), "p", "muted", "No matching section in accessible project documents."); return; }
   const box = $("selectedDetail");
-  const section = target.content?.split(/\n|(?<=[.!?])\s+/).find(part => part.toLowerCase().includes(key.toLowerCase())) ||
-    target.content?.split(/\n|(?<=[.!?])\s+/).find(part => part.toLowerCase().includes(key.split("-")[0].toLowerCase()));
+  const key = doc.docId.split(":")[1] || "";
+  const work = linkedDocs(doc).filter(item => ["confluence", "drive"].includes(item.source));
+  const target = work.find(item => sentencesOf(item.content).some(sentence => sentence.includes(key))) || work[0];
   const wrap = node("div", "answer-block");
-  appendText(wrap, "strong", "", `Relevant ${sourceName(target.source)} section`);
-  appendText(wrap, "p", "", section || "No matching section in this document.");
-  wrap.append(externalLink(target.url, `Open ${target.title} ↗`));
+  if (target) {
+    appendText(wrap, "strong", "", `Working doc: ${target.title}`);
+    appendText(wrap, "p", "", sentencesOf(target.content).find(sentence => sentence.includes(key)) || sentencesOf(target.content)[0] || "");
+    wrap.append(externalLink(target.url, `Open ${target.title} ↗`));
+  } else appendText(wrap, "p", "muted", "No linked page or file that you can open.");
+  if (documentStatus(doc) === "done") appendText(wrap, "p", "muted", "This task is done.");
+  else {
+    const done = node("button", "secondary-button", "Mark done"); done.type = "button";
+    done.addEventListener("click", () => markDone(doc, done));
+    wrap.append(done);
+  }
   box.append(wrap);
 }
-function relatedJira(slack) {
-  const jira = state.docs.filter(doc => doc.source === "jira");
-  if (!jira.length) return null;
-  const text = `${safeText(slack.content)} ${slack.title}`.toLowerCase();
-  const byKey = jira.find(doc => text.includes(doc.docId.split(":")[1].toLowerCase()));
-  return byKey || jira.find(doc => /payment|cutover/i.test(doc.title) && /payment|cutover/i.test(text)) || null;
+async function markDone(doc, button) {
+  const generation = state.identity;
+  button.disabled = true; $("globalStatus").textContent = "Marking the task done…";
+  try {
+    await post("/v1/tasks/done", { docId: doc.docId });
+    if (generation !== state.identity) return;
+    await loadWorkspace();
+    if (generation === state.identity) $("globalStatus").textContent = `${doc.title} is done.`;
+  } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }
+}
+// Agreements in this project's threads that could become a Jira task. The API offers them only from threads this
+// person may open, and only when creating the task here is possible; with live sources it links to Jira instead.
+function renderSuggestions() {
+  const box = $("suggestion"); clear(box);
+  const items = state.workspace.suggestions.filter(item => inProject(item.threadDocId) && docById(item.threadDocId));
+  if (!items.length) { appendText(box, "p", "empty", "No agreement in these threads is waiting for a task."); return; }
+  for (const item of items) {
+    const card = node("div", "agreement");
+    appendText(card, "strong", "", `Agreement in ${docById(item.threadDocId).title}`);
+    appendText(card, "blockquote", "", item.sentence);
+    if (item.canCreate) {
+      const button = node("button", "", `Create Jira task in ${item.project} ↗`); button.type = "button";
+      button.addEventListener("click", () => createTask(item, button));
+      card.append(button);
+    } else if (item.jiraUrl) card.append(externalLink(item.jiraUrl, `Open ${item.project} in Jira ↗`));
+    box.append(card);
+  }
+}
+async function createTask(item, button) {
+  const generation = state.identity;
+  button.disabled = true; $("globalStatus").textContent = "Creating the Jira task…";
+  try {
+    const result = await post("/v1/tasks", { threadDocId: item.threadDocId, sentence: item.sentence });
+    if (generation !== state.identity) return;
+    await loadWorkspace();
+    if (generation !== state.identity) return;
+    $("globalStatus").textContent = `Created ${safeText(result.title)}.`;
+    const created = docById(result.docId);
+    if (created) { state.selected = created.docId; openTask(created); }
+  } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }
 }
 function renderActivity() {
   const slack = filteredDocs("slack"); const jira = filteredDocs("jira");
-  clear($("slackList")); clear($("jiraList")); clear($("suggestion"));
+  clear($("slackList")); clear($("jiraList"));
   for (const doc of slack) $("slackList").append(activityButton(doc, "slack"));
   for (const doc of jira) $("jiraList").append(activityButton(doc, "jira"));
   if (!slack.length) appendText($("slackList"), "p", "empty", "No accessible Slack threads match.");
   if (!jira.length) appendText($("jiraList"), "p", "empty", "No accessible Jira tasks match.");
   $("activityCount").textContent = `${slack.length + jira.length}`;
-  const suggestion = slack.map(item => ({ slack: item, jira: relatedJira(item) })).find(item => item.jira);
-  if (suggestion) {
-    appendText($("suggestion"), "strong", "", suggestion.slack.title);
-    appendText($("suggestion"), "p", "", `Related task: ${suggestion.jira.title}`);
-    const button = node("button", "", "View task and related section ↗"); button.type = "button";
-    button.addEventListener("click", () => openJiraSection(suggestion.jira)); $("suggestion").append(button);
-  } else appendText($("suggestion"), "p", "empty", "No accessible thread and task pair found.");
+  renderSuggestions();
 }
-function scoreDoc(doc) {
-  const status = documentStatus(doc);
-  const points = { final: 40, "in review": 20, draft: 8, superseded: -100 }[status] || 0;
-  const age = Math.max(0, (Date.now() - new Date(doc.updatedAt).getTime()) / 86400000);
-  return points + Math.max(0, 30 - age) + Math.min(Number(doc.version) || 0, 10);
+function renderProjects() {
+  const select = $("projectSelect"); clear(select);
+  for (const project of state.workspace.projects) {
+    const option = node("option", "", project.name); option.value = project.key; select.append(option);
+  }
+  const all = node("option", "", "All sources"); all.value = ""; select.append(all);
+  select.value = state.project;
+  select.disabled = !state.workspace.projects.length;
 }
-function latestDoc(docs) { return [...docs].filter(doc => documentStatus(doc) !== "superseded").sort((a,b) => scoreDoc(b)-scoreDoc(a))[0]; }
+// The project this person last chose, if they may still open it, else their first.
+function chooseProject() {
+  let saved = "";
+  try { saved = localStorage.getItem("brain-project") || ""; } catch { saved = ""; }
+  const keys = state.workspace.projects.map(project => project.key);
+  state.project = keys.includes(state.project) ? state.project : keys.includes(saved) ? saved : keys[0] || "";
+}
 function renderMaster() {
-  const master = state.docs.find(doc => doc.source === "confluence" && doc.metadata?.space === "PAY");
+  const project = currentProject();
+  const master = project && docById(project.masterDocId);
   clear($("masterContent")); clear($("conclusions")); clear($("masterBadge"));
+  $("projectCrumb").textContent = project ? project.name : "All sources";
   if (!master) {
-    $("docHeading").textContent = "Payment migration";
-    appendText($("masterContent"), "p", "empty", "No accessible Confluence master page in this workspace.");
-    appendText($("conclusions"), "p", "empty", "No conclusions available from the master page.");
+    $("docHeading").textContent = "All accessible sources";
+    appendText($("masterContent"), "p", "empty", state.workspace.projects.length ? "Choose a project to see its master page." :
+      "No project's master page is shared with you. Your accessible sources are listed below.");
+    appendText($("conclusions"), "p", "empty", "Conclusions appear on a project's master page.");
     return;
   }
-  $("docHeading").textContent = master.title;
+  $("docHeading").textContent = project.name;
   $("masterBadge").append(statusBadge(master));
   if (master.content) appendText($("masterContent"), "p", "", master.content);
   else appendText($("masterContent"), "p", "muted", "Master content will appear when the workspace API provides it.");
   const meta = node("p", "detail-meta", `Version ${master.version} · Edited ${fmtDate(master.updatedAt)}`);
   $("masterContent").append(meta, externalLink(master.url, "Open Confluence master ↗"));
-  const conclusions = safeText(master.content).split(/\n|(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean);
+  const conclusions = sentencesOf(master.content);
   if (conclusions.length) for (const text of conclusions) appendText($("conclusions"), "div", "conclusion", text);
   else appendText($("conclusions"), "p", "empty", "Conclusions will appear with authorized master content.");
   if (role() === "admin" && master.content) {
@@ -242,43 +306,50 @@ function renderMaster() {
     $("conclusions").append(form);
   }
 }
-function duplicatePair(docs) {
-  const normalize = title => title.toLowerCase().replace(/\b(copy|draft|final|v\d+)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-  for (const old of docs.filter(doc => documentStatus(doc) === "superseded")) {
-    const current = docs.find(doc => doc.docId !== old.docId && documentStatus(doc) !== "superseded" && normalize(doc.title) === normalize(old.title));
-    if (current) return { old, current };
+// What a merge would do, shown without changing anything: the five-stage plan asked for a clickable preview.
+function previewMerge(pair, area, button) {
+  const open = area.querySelector(".merge-preview");
+  if (open) { open.remove(); button.setAttribute("aria-expanded", "false"); return; }
+  const keep = docById(pair.keep); const other = docById(pair.other);
+  const preview = node("div", "merge-preview");
+  appendText(preview, "strong", "", "Merge preview");
+  appendText(preview, "p", "", `Keep ${keep.title}. ${other.title} would be marked superseded, with a link to ${keep.title}.`);
+  for (const [doc, only] of [[other, pair.onlyInOther], [keep, pair.onlyInKeep]]) {
+    if (!only.length) continue;
+    appendText(preview, "p", "", `Only in ${doc.title}:`);
+    const list = node("ul", ""); for (const sentence of only) appendText(list, "li", "", sentence); preview.append(list);
   }
-  return null;
+  appendText(preview, "p", "muted", "Preview only: nothing was changed.");
+  area.append(preview); button.setAttribute("aria-expanded", "true");
 }
 function renderDrive() {
-  const docs = filteredDocs("drive"); clear($("driveList")); clear($("duplicate")); $("duplicate").hidden = true;
+  const docs = filteredDocs("drive"); clear($("driveList")); clear($("duplicate")); clear($("latestExplanation"));
+  $("duplicate").hidden = true;
   $("driveCount").textContent = `${docs.length} accessible`;
-  const latest = latestDoc(state.docs.filter(doc => doc.source === "drive"));
-  $("latestExplanation").textContent = latest ? `Latest: ${latest.title}. Score favors final status, recent edits, and higher versions; superseded copies are excluded.` : "";
+  const latest = state.workspace.latest.find(item => (item.project || "") === state.project && docById(item.docId));
+  if (latest) {
+    appendText($("latestExplanation"), "p", "", `Latest: ${docById(latest.docId).title}. Superseded copies never count.`);
+    const why = node("details", "latest-reasons"); appendText(why, "summary", "", "Why latest?");
+    const list = node("ul", ""); for (const reason of latest.reasons) appendText(list, "li", "", reason); why.append(list);
+    $("latestExplanation").append(why);
+  }
   for (const doc of docs) {
     const button = node("button", "file-row"); button.type = "button";
     button.append(node("span", "file-icon", "D"));
     const main = node("span", "file-main"); main.append(node("span", "item-title", doc.title), node("span", "item-meta", `Edited ${fmtDate(doc.updatedAt)} · v${doc.version}`));
     button.append(main, statusBadge(doc));
-    if (latest?.docId === doc.docId) {
-      const badge = node("span", "badge", "Latest"); badge.title = "Highest weighted score: final status, recent edit, and version. Superseded files are excluded."; button.append(badge);
-    }
+    if (latest?.docId === doc.docId) button.append(node("span", "badge", "Latest"));
     button.addEventListener("click", () => selectDoc(doc)); $("driveList").append(button);
   }
   if (!docs.length) appendText($("driveList"), "p", "empty", "No accessible Drive documents match.");
-  const pair = duplicatePair(docs);
-  if (pair) {
-    const area = $("duplicate"); area.hidden = false;
+  const shown = new Set(docs.map(doc => doc.docId));
+  for (const pair of state.workspace.duplicates.filter(item => (shown.has(item.keep) || shown.has(item.other)) && docById(item.keep) && docById(item.other))) {
+    const area = node("div", "duplicate-pair"); $("duplicate").hidden = false;
     appendText(area, "strong", "", "Possible duplicate · review before merging");
-    appendText(area, "p", "", `${pair.old.title} is superseded by ${pair.current.title}.`);
-    const button = node("button", "", "Compare documents ↗"); button.type = "button";
-    button.addEventListener("click", () => {
-      selectDoc(pair.current);
-      const box = $("selectedDetail"); const compare = node("div", "answer-block");
-      appendText(compare, "strong", "", "Superseded copy");
-      appendText(compare, "p", "", pair.old.content || "Open the source to compare its content.");
-      compare.append(externalLink(pair.old.url, `Open ${pair.old.title} ↗`)); box.append(compare);
-    }); area.append(button);
+    appendText(area, "p", "", `${docById(pair.other).title} looks like a copy of ${docById(pair.keep).title}: ${pair.reasons.join("; ")}.`);
+    const button = node("button", "", "Preview merge"); button.type = "button"; button.setAttribute("aria-expanded", "false");
+    button.addEventListener("click", () => previewMerge(pair, area, button));
+    area.append(button); $("duplicate").append(area);
   }
 }
 function renderSources() {
@@ -294,7 +365,7 @@ function renderSources() {
   for (const doc of state.docs) { const option = node("option", "", `${doc.title} · ${doc.docId}`); option.value = doc.docId; $("adminDoc").append(option); }
   if (state.docs.some(doc => doc.docId === selectedAdminDoc)) $("adminDoc").value = selectedAdminDoc;
 }
-function renderWorkspace() { renderActivity(); renderMaster(); renderDrive(); renderSources(); }
+function renderWorkspace() { renderProjects(); renderActivity(); renderMaster(); renderDrive(); renderSources(); }
 function clearNativeEditor() {
   state.nativeCurrent = null;
   $("nativeDocLabel").textContent = "Select an accessible document.";
@@ -368,11 +439,19 @@ async function loadWorkspace() {
     const result = await call("/v1/workspace");
     if (generation !== state.identity) return;
     state.docs = Array.isArray(result.documents) ? result.documents.filter(doc => doc && typeof doc.docId === "string" && typeof doc.title === "string") : [];
+    const list = value => Array.isArray(value) ? value.filter(item => item && typeof item === "object") : [];
+    state.workspace = {
+      projects: list(result.projects).filter(project => typeof project.key === "string" && typeof project.name === "string" && Array.isArray(project.docIds)),
+      latest: list(result.latest).filter(item => typeof item.docId === "string" && Array.isArray(item.reasons)),
+      duplicates: list(result.duplicates).filter(item => typeof item.keep === "string" && typeof item.other === "string" && Array.isArray(item.reasons) && Array.isArray(item.onlyInKeep) && Array.isArray(item.onlyInOther)),
+      suggestions: list(result.suggestions).filter(item => typeof item.threadDocId === "string" && typeof item.sentence === "string" && typeof item.project === "string")
+    };
+    chooseProject();
     renderWorkspace();
     if (role() === "admin") await loadNativePermissions();
     if (generation !== state.identity) return;
     $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.`;
-    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) selectDoc(doc); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; } }
+    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; } }
     applyLandingPreference();
     if (!state.landingApplied) {
       state.landingApplied = true;
@@ -386,17 +465,19 @@ function renderCitations(parent, citations) {
   const list = node("div", "citation-list"); appendText(list, "strong", "", "Sources");
   for (const citation of citations) {
     if (!citation || !safeUrl(citation.url)) continue;
-    list.append(externalLink(citation.url, `${safeText(citation.title)} · v${citation.version} · edited ${fmtDate(citation.updatedAt)}`));
+    const via = typeof citation.linkedFrom === "string" ? ` · linked from ${docById(citation.linkedFrom)?.title || citation.linkedFrom}` : "";
+    list.append(externalLink(citation.url, `${safeText(citation.title)} · v${citation.version} · edited ${fmtDate(citation.updatedAt)}${via}`));
   }
   parent.append(list);
 }
-// Where the answer looked first and the dates it kept to, when the question named them.
+// Where the answer looked first and the dates it kept to, when the question named them, and the project it kept to.
 function scopeText(scope) {
   const names = Array.isArray(scope?.sources) ? scope.sources.map(sourceName).join(" and ") : "";
   const dates = scope?.from && scope?.to ? `${fmtDay(scope.from)} – ${fmtDay(scope.to)}` : "";
-  if (names && dates) return `Searched ${names} (${dates}) first, then the other sources at any date.`;
-  if (names) return `Searched ${names} first, then the other sources.`;
-  return dates ? `Searched everything from ${dates}.` : "";
+  const project = safeText(scope?.project) ? `Kept to ${safeText(scope.project)}.` : "";
+  const searched = names && dates ? `Searched ${names} (${dates}) first, then the other sources at any date.` :
+    names ? `Searched ${names} first, then the other sources.` : dates ? `Searched everything from ${dates}.` : "";
+  return [project, searched].filter(Boolean).join(" ");
 }
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
@@ -547,6 +628,7 @@ function traceDetails(entry, rank) {
   switch (entry.type) {
     case "query_received": return ["Question received", "Question recorded as a hash."];
     case "candidates_found": return ["Hybrid candidates", `${data.count ?? 0} document IDs retrieved before authorization.`];
+    case "candidate_linked": return ["Linked item", `Reached by a link from an item you may open, score ${data.score ?? "unknown"}${ref}`];
     case "candidate_ranked": return ["Candidate ranked", `Rank ${rank} · score ${data.score ?? "unknown"}${ref} · chunk ref ${String(data.chunkRef || "").slice(0, 12)}…`];
     case "access_decision": return ["FGA and tier check", `${data.allowed ? "Allowed" : "Denied"}${ref} · reason ${safeText(data.reason) || "unspecified"}`];
     case "live_access_decision": return ["Live source check", `${data.allowed ? "Allowed" : "Denied"}${ref}${data.sourceVersion ? ` · source v${data.sourceVersion}` : ""}${data.refreshed === true ? " · refreshed" : data.refreshed === false ? " · version current" : ""}`];
@@ -612,10 +694,25 @@ $("queryForm").addEventListener("submit", async event => {
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
 });
+// A catch-up chosen by the API from this person's role and groups, kept to the chosen project.
 $("catchUp").addEventListener("click", async () => {
-  const target = $("catchUpResult");
-  try { await ask("Summarize the current payment migration status, PAY-101, SEC-44, cutover decisions and the chargeback workflow for a new intern. Cite accessible sources only.", target); }
-  catch (error) { target.textContent = error.message; }
+  const target = $("catchUpResult"); const generation = state.identity;
+  target.hidden = false; setMessage(target, "Preparing your catch-up…");
+  try {
+    const result = await post("/v1/catch-up", state.project ? { project: state.project } : {});
+    if (generation !== state.identity) return;
+    if (result.kind === "audit") {
+      clear(target); appendText(target, "strong", "", "Audit trail, last 7 days");
+      const list = node("ul", ""); for (const line of Array.isArray(result.lines) ? result.lines : []) appendText(list, "li", "", line);
+      target.append(list);
+    } else renderAnswer(target, { ...result.answer, traceId: result.traceId }, `Asked: ${safeText(result.question)}`);
+  } catch (error) { if (generation === state.identity) target.textContent = error.message; }
+});
+$("projectSelect").addEventListener("change", () => {
+  state.project = $("projectSelect").value;
+  try { localStorage.setItem("brain-project", state.project); } catch { /* The choice is only remembered when storage works. */ }
+  clear($("catchUpResult")); $("catchUpResult").hidden = true;
+  renderWorkspace();
 });
 $("contentForm").addEventListener("submit", event => { event.preventDefault(); adminAction("/v1/admin/content", { docId: $("adminDoc").value, content: $("adminContent").value }, "Content updated and synced."); });
 $("adminDoc").addEventListener("change", loadNativePermissions);

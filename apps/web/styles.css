@@ -462,6 +462,46 @@ h3 {
 .duplicate p {
   margin:.35rem 0 .65rem
 }
+.agreement {
+  display:grid;
+  gap:.45rem
+}
+.agreement + .agreement {
+  margin-top:.8rem;
+  padding-top:.8rem;
+  border-top:1px solid #efe4cc
+}
+.agreement blockquote {
+  margin:0;
+  padding-left:.7rem;
+  border-left:2px solid #d59d49;
+  color:#334658
+}
+.linked-items {
+  display:grid;
+  gap:.35rem;
+  justify-items:start;
+  margin-top:1rem
+}
+.latest-reasons summary {
+  cursor:pointer;
+  color:#276196;
+  font-weight:700
+}
+.latest-reasons ul,.merge-preview ul {
+  margin:.4rem 0;
+  padding-left:1.1rem
+}
+.duplicate-pair + .duplicate-pair {
+  margin-top:.8rem;
+  padding-top:.8rem;
+  border-top:1px solid #efe4cc
+}
+.merge-preview {
+  margin-top:.7rem;
+  padding-top:.7rem;
+  border-top:1px dashed #e4dbb9
+}
 .duplicate button {
   border:0;
   background:transparent;

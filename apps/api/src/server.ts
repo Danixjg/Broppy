@@ -87,7 +87,8 @@ export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "seque
     entry.type === "live_access_decision" && entry.data.allowed === true)
     .map(entry => entry.data.docRef));
   const visible = entries.filter(entry => {
-    if (entry.type === "candidate_ranked" || entry.type === "access_decision") {
+    // A linked item shows only once it passed the live check, and only items the asker may open are followed.
+    if (entry.type === "candidate_ranked" || entry.type === "candidate_linked" || entry.type === "access_decision") {
       return allowedRefs.has(entry.data.docRef) &&
         (entry.type !== "access_decision" || entry.data.allowed === true);
     }
@@ -245,7 +246,33 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       if (request.method === "GET" && url.pathname === "/v1/workspace") {
-        return await reply(response, 200, { documents: await brain.visibleDocuments(user) });
+        return await reply(response, 200, await brain.workspace(user));
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/catch-up") {
+        const input = await body(request);
+        if (input.project !== undefined && (typeof input.project !== "string" || input.project.length > 64)) {
+          throw new Error("Invalid project");
+        }
+        let traceId: string | undefined;
+        const result = await brain.catchUp(user, input.project as string | undefined, id => { traceId = id; },
+          () => identity(request, brain, auth0, !connectors));
+        return await reply(response, 200, result.kind === "audit" ? result : { ...result, traceId });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/tasks") {
+        const input = await body(request);
+        if (typeof input.threadDocId !== "string" || typeof input.sentence !== "string" || input.sentence.length > 1000) {
+          throw new Error("Invalid task");
+        }
+        return await reply(response, 201, await brain.createTask(user, input.threadDocId, input.sentence));
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/tasks/done") {
+        const input = await body(request);
+        if (typeof input.docId !== "string") throw new Error("Invalid task");
+        await brain.markDone(user, input.docId);
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/admin/tier") {
@@ -369,6 +396,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
       if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });
+      if (message === "Live sources are read-only") {
+        return await reply(response, 409, { error: "This app only reads live sources. Make the change in Jira." });
+      }
+      if (message === "Already tracked") return await reply(response, 409, { error: "A Jira task already quotes this agreement." });
       if (message === "Unknown document" || message === "Unknown source item" || message === "Unknown user" ||
         message === "Unknown group membership" || message === "Unknown channel membership") {
         return await reply(response, 404, { error: "Not found" });

@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  actor P as Person
+  participant W as Next.js web host
+  participant A as Auth0
+  participant S as SSO API
+  participant D as Demo API
+
+  rect rgb(235, 244, 255)
+    note over P,S: Sign in with SSO
+    P->>W: /auth/login
+    W-->>P: Redirect to Auth0 with the organization and API audience
+    P->>A: Log in
+    A-->>P: Redirect to /auth/callback with a code
+    P->>W: /auth/callback
+    W->>A: Exchange the code, with the client secret
+    A-->>W: ID, access and refresh tokens
+    W-->>P: Encrypted HttpOnly session cookie: the page can't read the tokens
+    P->>W: /api/brain/v1/query with the cookie
+    note right of W: Same-origin check, then the<br/>access token is read on the server
+    W->>S: POST /v1/query with the Bearer token
+    S->>A: Signing keys (cached)
+    note right of S: RS256, issuer, audience, expiry,<br/>org_id, active directory entry.<br/>Checked again before replying.
+    S-->>W: Answer with citations
+    W-->>P: Answer
+  end
+
+  rect rgb(255, 248, 230)
+    note over P,D: Try the demo
+    P->>W: /demo
+    W-->>P: brain_demo cookie: the mode only, never an identity
+    P->>W: /api/brain/v1/query with x-demo-user: david
+    note right of W: Same-origin check, and the<br/>persona must be a short ID
+    W->>D: POST /v1/query with x-demo-user only: no cookies, no tokens
+    D-->>W: Answer from fictional data
+    W-->>P: Answer
+  end

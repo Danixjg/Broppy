@@ -109,8 +109,8 @@ function introduction(writer: string, withModel: boolean): string[] {
     `- **Writer:** ${writer}`,
     "- **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in " +
       "compliance, Alex is an intern and Wei Ming is a contractor.",
-    "- **Decision tables** are the compliance view of the audit trail. The person asking sees only their own trace, " +
-      "which never names what they couldn't see.",
+    "- **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose " +
+      "link brought a document in. The person asking sees only their own trace, which never names what they couldn't see.",
     ""
   ];
 }
@@ -141,7 +141,7 @@ function citations(answer: QueryAnswer): string[] {
   ];
 }
 
-interface Checks { score?: number; access?: boolean; live?: string; output?: boolean }
+interface Checks { score?: number; linkedFrom?: string; access?: boolean; live?: string; output?: boolean }
 
 // Every check each document went through, in ranking order, from a query's full trace.
 function checks(trace: AuditEntry[]): Map<string, Checks> {
@@ -151,6 +151,7 @@ function checks(trace: AuditEntry[]): Map<string, Checks> {
     if (typeof docId !== "string") continue;
     const row = rows.get(docId) ?? {};
     if (entry.type === "candidate_ranked" && typeof entry.data.score === "number") row.score = entry.data.score;
+    if (entry.type === "candidate_linked" && typeof entry.data.fromDocId === "string") row.linkedFrom = entry.data.fromDocId;
     if (entry.type === "access_decision") row.access = entry.data.allowed === true;
     if (entry.type === "live_access_decision") {
       row.live = entry.data.allowed === true
@@ -164,6 +165,8 @@ function checks(trace: AuditEntry[]): Map<string, Checks> {
 }
 
 const verdict = (value?: boolean) => (value === undefined ? "–" : value ? "allowed" : "**denied**");
+// A search score, or the item a link reached it through.
+const match = (row: Checks) => row.score !== undefined ? row.score.toFixed(2) : row.linkedFrom ? `link from ${code(row.linkedFrom)}` : "–";
 
 function decisions(asked: Asked): string[] {
   const sent = sentToWriter(asked.trace);
@@ -171,7 +174,7 @@ function decisions(asked: Asked): string[] {
     "| Document | Match | Access check | Live check at the source | Sent to the writer | Rechecked after writing | Cited |",
     "| --- | --- | --- | --- | --- | --- | --- |",
     ...[...checks(asked.trace)].map(([docId, row]) => `| ${code(docId)} | ` +
-      `${row.score === undefined ? "–" : row.score.toFixed(2)} | ${verdict(row.access)} | ${row.live ?? "–"} | ` +
+      `${match(row)} | ${verdict(row.access)} | ${row.live ?? "–"} | ` +
       `${yes(sent.has(docId))} | ${verdict(row.output)} | ${yes(cites(asked, docId))} |`)
   ];
 }

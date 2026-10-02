@@ -1,3 +1,6 @@
+> **History (30 Sep 2026).** These notes record audit batch 0.1. The current design is in
+> [Architecture](architecture.md).
+
 # Audit batch 0.1 implementation
 
 Reference: `broppy-audit-batch0.1.md`. This batch addresses the repository blockers and the identity, audit, persistence and onboarding work in the audit's suggested order. No UI redesign or week 3 differentiator work was added.

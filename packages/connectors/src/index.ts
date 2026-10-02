@@ -1,6 +1,9 @@
 import documents from "../../../data/mock/documents.json" with { type: "json" };
 import users from "../../../data/mock/users.json" with { type: "json" };
 import type { NativePermission, Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import { withLinks } from "./links.js";
+
+export { linkFromUrl, linksIn, withLinks } from "./links.js";
 
 export type Change = {
   source: Source;
@@ -131,7 +134,7 @@ export class MockConnector implements Connector {
 
   async fetchDocument(id: string): Promise<SourceDocument | undefined> {
     const doc = this.docs.get(id);
-    return doc ? copy(doc) : undefined;
+    return doc ? withLinks(copy(doc)) : undefined;
   }
 
   async fetchPermissions(id: string): Promise<SourcePermission | undefined> {
@@ -192,6 +195,22 @@ export class MockConnector implements Connector {
     this.require(id);
     this.docs.delete(id);
     this.emit(id, "deletion");
+  }
+
+  /** A new item, as when someone creates it at the source. */
+  create(doc: SourceDocument): void {
+    if (doc.source !== this.source || doc.permissions.native?.source !== this.source) throw new Error("Source mismatch");
+    if (this.docs.has(doc.docId)) throw new Error("Source item exists");
+    this.docs.set(doc.docId, copy(doc));
+    this.emit(doc.docId, "content");
+  }
+
+  /** Changes fields such as an issue's status, as a new version of the item. */
+  updateMetadata(id: string, fields: Record<string, string>): void {
+    const doc = this.require(id);
+    this.docs.set(id, { ...doc, metadata: { ...doc.metadata, ...fields }, version: doc.version + 1,
+      updatedAt: new Date().toISOString() });
+    this.emit(id, "content");
   }
 
   private emit(docId: string, kind: Change["kind"]): void {

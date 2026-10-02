@@ -5,6 +5,9 @@ date: "2026-09-26"
 audience: "Internal Brain team — shareable brief"
 ---
 
+> **History (26 Sep 2026).** This is the original design plan, kept as a record. The current design is in
+> [Architecture](architecture.md).
+
 > **Context:** Your team is competing in the Aspire FinTech track of the *AI CAN DO IT — Tencent Cloud Hackathon Singapore 2026*, building **The Internal Brain** — a permission-aware enterprise knowledge system across Slack, Jira, Confluence, and Google Drive. This document captures the Onyx-inspired five-stage implementation plan, drawing on the design patterns from [`onyx-dot-app/onyx`](https://github.com/onyx-dot-app/onyx) (connectors, permission-aware retrieval, hybrid indexing, sync workers) while preserving your original query workflow.
 
 ---

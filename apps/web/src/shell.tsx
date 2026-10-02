@@ -33,7 +33,7 @@ export function Shell() {
         </div>
         <span className="header-divider" aria-hidden="true" />
         <label className="project-switch">Project
-          <select id="project"><option value="payments">Payment migration</option></select>
+          <select id="projectSelect" />
         </label>
         <label className="search-box">
           <Search size={17} strokeWidth={1.8} aria-hidden="true" />
