@@ -572,6 +572,67 @@ Each entry records the options that were considered, what was chosen, and the tr
 
 ---
 
+## 2026-10-02 — Connectors first, and the root anchor
+
+- **Input:** an audit of the repo against the Notion plan, then the Coucou review and its "active Brain" proposal.
+- **How decided:** chosen explicitly in a planning session.
+
+### D48 — Proposal storage
+- **Options:** the existing in-memory and snapshot state / a new Supabase migration for `proposals` and
+  `agent_settings`.
+- **Chosen:** the existing state. No schema change.
+
+### D49 — Scope: connectors before features
+- **Chosen:** no new features and no Active/Paused toggle for now. Connector reliability comes first. The Slack-to-Jira task
+  suggestion had already merged from R9 (D44), so no further feature is planned.
+- **Trade-off:** the Coucou ideas (status bar, queue, watchers) wait until the connectors are solid.
+
+### D50 — Root anchor: a separate GitHub repository, written by a Rust tool
+- **Options:** Tencent COS retention lock / a separate GitHub repository.
+- **Chosen:** a separate GitHub repository, written by `tools/anchor` (Rust, no network code, public key only).
+- **Trade-off:** it stays outside the pnpm workspace, and it reads the JSONL log, not Supabase-only batches. The
+  repository still needs creating, and someone must run `publish` and push. See `tools/anchor/README.md`.
+
+### D51 — What a company includes from each source
+- **Context:** a trace of connecting a source found that every source started as connected with an empty scope, which
+  meant "everything". The five-minute sync would import all a credential could see before an admin chose anything. The
+  only controls were free-text ID fields and a date.
+- **Chosen:** an explicit mode, `all`, `selected` or `none`, with `none` as the default after the OAuth callback. A
+  "new or changed from now on" option fixes its starting moment when saved. A checklist is loaded from the provider.
+  Saving starts the import, and narrowing removes what is no longer included.
+- **Trade-off:** "from now on" uses the source's modified time, so an older item edited later counts. A scope with no
+  mode keeps its old meaning, so demo onboarding, which imports everything, is unchanged.
+
+### D52 — New companies are not onboarded automatically
+- **Context:** `docs/live-sources-and-sign-in.md` states one API process serves one `AUTH0_ORG_ID`, and a new
+  organization is not provisioned or routed. A new company can't register itself today.
+- **Chosen:** not changed. Self-registration needs multi-tenant provisioning (an Auth0 organization and directory
+  rows per company, and routing), which is new infrastructure and waits for approval.
+
+### D53 — The Brain is one pipeline, not agents reading agents
+- **Chosen:** four connectors behind one interface feed one index, one authorization check and one answer path. The
+  language model only picks and orders sentences. The sync orchestrator is a timer, not an agent. The Notion notes
+  proposed an orchestrator with a sub-agent per platform; the build replaced that with the single gateway in
+  `docs/internal-brain-five-stage-plan.md`.
+
+### Implementation details (connector hardening)
+- **A rejected credential is not a deleted item.** A 401 from a provider, or Slack's `invalid_auth`, `token_revoked`
+  and similar, now throws `CredentialRejected`. Before, `LiveConnector` returned "not found", which sync turns into
+  a tombstone and a purge of the item. Now the sync fails and keeps the index. A user's rejected credential still
+  means "no access". 403 and 404 still mean gone.
+- **Dropped connections** (reset, refused, timeout) are retried three times with 250, 500 and 1000 ms backoff.
+- **`listUpdatedSince`** reports only items whose version moved since the last poll, not every configured item.
+- **Per-user permission checks** run together, not one by one.
+- **Rate limits are pauses, never "gone".** Drive reports one as a 403 (`userRateLimitExceeded`), and Slack can report
+  `ratelimited` inside a 200. Both retry with 1, 2 and 4 second waits, then fail the sync so it resumes later. A
+  Slack channel lookup that fails for any reason other than `channel_not_found` or `not_in_channel` now fails the
+  sync; before, any `ok: false` read as a missing channel and was tombstoned.
+- **Trashed items are not indexed.** A trashed Drive file and a Confluence page that isn't `current` can still be
+  fetched by ID, so both now read as gone. A Confluence page moved to another space keeps its ID and is picked up or
+  dropped by the container it now sits in.
+
+---
+
 ## Deferred (not decided yet)
 These are open. Pick them up in a later round and record the decision here.
 
@@ -581,7 +642,8 @@ These are open. Pick them up in a later round and record the decision here.
 - **Demo state:** the public demo shares one state across all visitors until it restarts. Scheduled restarts or
   per-visitor state aren't decided.
 - **Additional features:** done in R9 (D40–D47), except a working duplicate merge, which stays a preview (D43).
-- **Brain as an MCP server:** not started.
+- **Brain as an MCP server:** not started; to be written in Rust after submission.
+- **Anchor repository:** not created yet; the tool is built (D50).
 - **CodeBuddy/WorkBuddy evidence:** must be captured by someone using those products. The project isn't scored
   without it.
 - **Directory caching:** `UserDirectory.bySub` re-reads the whole directory on every request, and every proxied

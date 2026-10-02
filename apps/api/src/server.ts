@@ -10,7 +10,7 @@ import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./au
 import { modelsFromEnv } from "./llm-budget.js";
 import { UserDirectory } from "./user-directory.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
-import { MockConnector, loadMockCorpus } from "@brain/connectors";
+import { MockConnector, loadMockCorpus, type ImportScope } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
 import { RemoteFgaAdapter } from "@brain/fga-adapter";
 import { SupabaseIndex } from "@brain/retrieval";
@@ -175,7 +175,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
         const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
-        brain.connections.set(source, { source, status: "Connected", scope: {}, connectedBy: actor.id, connectedAt: new Date().toISOString() });
+        // Nothing is imported until the admin chooses what to include.
+        brain.connections.set(source, { source, status: "Connected", scope: { mode: "none" }, connectedBy: actor.id, connectedAt: new Date().toISOString() });
         brain.audit.append("connection_created", actor.id, { source });
         await brain.persist();
         response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
@@ -225,19 +226,26 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           for (const source of sources) { await brain.connect(user, source); await brain.startImport(user, source); }
           return await reply(response, 202, { jobs: [...brain.jobs.values()] });
         }
-        const match = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)(?:\/(authorize|callback|scope|import))?$/.exec(url.pathname);
+        const match = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)(?:\/(authorize|callback|scope|import|containers))?$/.exec(url.pathname);
         if (!match) return await reply(response, 404, { error: "Not found" });
         const source = match[1] as Source;
         if (match[2] === "authorize" && request.method === "POST") {
           if (oauth) return await reply(response, 200, { url: oauth.begin(source, user) });
           await brain.connect(user, source); return await reply(response, 200, { connected: true });
         }
+        if (match[2] === "containers" && request.method === "GET") return await reply(response, 200, { containers: await brain.listContainers(user, source) });
         if (match[2] === "scope" && request.method === "PUT") {
           const input = await body(request);
+          if (input.mode !== undefined && !["all", "selected", "none"].includes(String(input.mode))) throw new Error("Invalid scope");
+          if (input.futureOnly !== undefined && typeof input.futureOnly !== "boolean") throw new Error("Invalid scope");
           if (input.containers !== undefined && (!Array.isArray(input.containers) || !input.containers.every(id => typeof id === "string" && id.length > 0))) throw new Error("Invalid scope");
           if (input.ids !== undefined && (!Array.isArray(input.ids) || !input.ids.every(id => typeof id === "string" && id.length > 0))) throw new Error("Invalid scope");
           if (input.since !== undefined && (typeof input.since !== "string" || !Number.isFinite(Date.parse(input.since)))) throw new Error("Invalid scope");
-          await brain.setScope(user, source, { containers: input.containers as string[] | undefined, ids: input.ids as string[] | undefined, since: input.since as string | undefined });
+          const mode = input.mode as ImportScope["mode"];
+          await brain.setScope(user, source, { mode, containers: input.containers as string[] | undefined, ids: input.ids as string[] | undefined,
+            since: input.since as string | undefined, futureOnly: input.futureOnly as boolean | undefined });
+          // Saving what to include starts importing it; choosing none only removes.
+          if (mode !== "none") await brain.startImport(user, source);
           return await reply(response, 200, { ok: true });
         }
         if (match[2] === "import" && request.method === "POST") { await brain.startImport(user, source); return await reply(response, 202, { ok: true }); }

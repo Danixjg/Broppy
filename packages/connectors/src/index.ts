@@ -12,10 +12,25 @@ export type Change = {
   cursor: number;
 };
 
-export interface ImportScope { containers?: string[]; ids?: string[]; since?: string; }
+/** What a company lets the Brain import from one source.
+ * `none` imports nothing, `all` everything the credential can see, and `selected` only the listed containers
+ * (channels, projects, spaces, shared drives) and item IDs. A scope with no mode keeps the older meaning, where
+ * empty meant all. `futureOnly` limits the import to what is new or changed after `since`, which the API fixes to the
+ * moment it was chosen. */
+export type ImportMode = "all" | "selected" | "none";
+export interface ImportScope { mode?: ImportMode; containers?: string[]; ids?: string[]; since?: string; futureOnly?: boolean; }
+
+/** True when the scope selects nothing, so no request to the provider is needed. */
+export function selectsNothing(scope: ImportScope = {}): boolean {
+  return scope.mode === "none" || (scope.mode === "selected" && !scope.containers?.length && !scope.ids?.length);
+}
+
+export interface Container { id: string; name: string; }
 
 export interface Connector {
   discover(scope?: ImportScope): Promise<string[]>;
+  /** What an admin can pick from: Slack channels, Jira projects, Confluence spaces, shared drives. */
+  listContainers(): Promise<Container[]>;
   readonly source: Source;
   listItems(): Promise<SourceDocument[]>;
   listIds(): Promise<string[]>;
@@ -104,11 +119,27 @@ export class MockConnector implements Connector {
     }
   }
 
+  private containerOf(doc: SourceDocument): string {
+    const native = doc.permissions.native;
+    return doc.metadata.space ?? doc.metadata.project ?? (native?.source === "slack" ? native.channelId :
+      native?.source === "jira" ? native.projectKey : native?.source === "confluence" ? native.spaceKey : doc.sourceNativeId);
+  }
+
   async discover(scope: ImportScope = {}): Promise<string[]> {
-    return [...this.docs.values()].filter(doc => (!scope.containers?.length || scope.containers.includes(
-      doc.metadata.space ?? doc.metadata.project ?? (doc.permissions.native?.source === "slack" ? doc.permissions.native.channelId :
-        doc.permissions.native?.source === "jira" ? doc.permissions.native.projectKey : doc.permissions.native?.source === "confluence" ? doc.permissions.native.spaceKey : doc.sourceNativeId))) && (!scope.ids?.length || scope.ids.includes(doc.sourceNativeId)) &&
+    if (selectsNothing(scope)) return [];
+    return [...this.docs.values()].filter(doc =>
+      (!scope.containers?.length || scope.containers.includes(this.containerOf(doc))) &&
+      (!scope.ids?.length || scope.ids.includes(doc.sourceNativeId)) &&
       (!scope.since || doc.updatedAt >= scope.since)).map(doc => doc.docId);
+  }
+
+  async listContainers(): Promise<Container[]> {
+    const names = new Map<string, string>();
+    for (const doc of this.docs.values()) {
+      const id = this.containerOf(doc);
+      if (!names.has(id)) names.set(id, this.source === "slack" ? doc.title : id);
+    }
+    return [...names].map(([id, name]) => ({ id, name })).sort((a, b) => a.id.localeCompare(b.id));
   }
 
   async listItems(): Promise<SourceDocument[]> {
