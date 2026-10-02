@@ -9,6 +9,8 @@ export class CredentialRejected extends Error {
 }
 
 const slackAuthErrors = new Set(["invalid_auth", "not_authed", "token_revoked", "token_expired", "account_inactive"]);
+/** Slack answers for a channel the credential can no longer see with one of these; anything else is not "gone". */
+const slackGone = new Set(["channel_not_found", "not_in_channel"]);
 const transientCodes = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "UND_ERR_SOCKET"]);
 
 function transient(error: unknown): boolean {
@@ -134,10 +136,25 @@ export class LiveConnector extends MockConnector {
       return this.get(path, authorization, attempt + 1);
     }
     if (response.status === 401) throw new CredentialRejected(this.source);
-    if (response.status === 403 || response.status === 404) return undefined;
+    if (response.status === 403) {
+      // Google reports a rate limit as a 403 (userRateLimitExceeded and similar). That is not a permission answer.
+      if (/rate.?limit/i.test(await response.text())) {
+        if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1); }
+        throw new Error(`${this.source} rate limited; import will resume on retry`);
+      }
+      return undefined;
+    }
+    if (response.status === 404) return undefined;
     if (!response.ok) throw new Error(`${this.source} source request failed (${response.status})`);
     const contentType = response.headers.get("content-type") ?? "";
-    return contentType.includes("json") ? response.json() : response.text();
+    if (!contentType.includes("json")) return response.text();
+    const body = await response.json();
+    // Slack can report a rate limit inside a 200 response.
+    if (this.source === "slack" && body && typeof body === "object" && (body as { error?: unknown }).error === "ratelimited") {
+      if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1); }
+      throw new Error("slack rate limited; import will resume on retry");
+    }
+    return body;
   }
 
   private async slackMessages(method: string, channel: string, authorization: string, ts?: string): Promise<Record<string, unknown>[]> {
@@ -245,8 +262,10 @@ export class LiveConnector extends MockConnector {
       const info = await this.get(`/api/conversations.info?channel=${escaped}`, authorization);
       if (!info) return undefined;
       if (object(info).ok !== true) {
-        if (slackAuthErrors.has(text(object(info).error))) throw new CredentialRejected("slack");
-        return undefined;
+        const error = text(object(info).error);
+        if (slackAuthErrors.has(error)) throw new CredentialRejected("slack");
+        if (slackGone.has(error)) return undefined;
+        throw new Error(`Slack channel lookup failed (${error || "unknown"})`);
       }
       const channel = object(object(info).channel);
       const messages = await this.slackMessages("conversations.history", id, authorization);
@@ -282,6 +301,8 @@ export class LiveConnector extends MockConnector {
       const page = object(result); const body = object(page.body ?? {});
       const storage = object(body.storage ?? {});
       const changed = object(page.version ?? {});
+      // A trashed, archived or draft page can still be fetched by ID; it is not something to answer from.
+      if (text(page.status) && text(page.status) !== "current") return undefined;
       // A page labelled "master" is a project's source of truth.
       const labels = optional(page.labels).results;
       const master = Array.isArray(labels) && labels.some(label => text(optional(label).name).toLowerCase() === "master");
@@ -290,9 +311,10 @@ export class LiveConnector extends MockConnector {
         metadata: { status: text(page.status), space: text(page.spaceId), ...(master ? { label: "master" } : {}) },
         links: storageLinks(text(storage.value)) };
     }
-    const metadata = await this.get(`/drive/v3/files/${escaped}?fields=id,name,mimeType,modifiedTime,webViewLink&supportsAllDrives=true`, authorization);
+    const metadata = await this.get(`/drive/v3/files/${escaped}?fields=id,name,mimeType,modifiedTime,webViewLink,trashed&supportsAllDrives=true`, authorization);
     if (!metadata) return undefined;
     const file = object(metadata); const mime = text(file.mimeType);
+    if (file.trashed === true) return undefined;
     let content: unknown;
     if (mime === "application/vnd.google-apps.document") {
       content = await this.get(`/drive/v3/files/${escaped}/export?mimeType=text%2Fplain`, authorization);

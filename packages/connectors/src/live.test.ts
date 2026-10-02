@@ -113,6 +113,44 @@ describe("live connector failure handling", () => {
     await expect(dead.fetchVersion("jira:PAY-101")).rejects.toThrow("fetch failed");
   });
 
+  it("treats Slack's ratelimited reply as a pause, never as a missing channel", async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const slack = new LiveConnector("slack", { ...settings, ids: ["C1"] }, [user], vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("info") && ++calls < 3) return Response.json({ ok: false, error: "ratelimited" });
+      return Response.json(url.pathname.endsWith("info")
+        ? { ok: true, channel: { name: "payments", created: 1700000000 } }
+        : { ok: true, messages: [{ text: "Cutover requires approval.", ts: "1700000001.000000" }] });
+    }) as typeof fetch, async ms => { waits.push(ms); });
+    expect((await slack.fetchDocument("slack:C1"))?.content).toContain("Cutover");
+    expect(waits).toEqual([1000, 2000]);
+    const always = new LiveConnector("slack", { ...settings, ids: ["C1"] }, [user],
+      vi.fn(async () => Response.json({ ok: false, error: "ratelimited" })) as typeof fetch, instant);
+    await expect(always.fetchDocument("slack:C1")).rejects.toThrow("rate limited");
+    const odd = new LiveConnector("slack", { ...settings, ids: ["C1"] }, [user],
+      vi.fn(async () => Response.json({ ok: false, error: "internal_error" })) as typeof fetch, instant);
+    await expect(odd.fetchDocument("slack:C1")).rejects.toThrow("internal_error");
+  });
+
+  it("treats a Drive 403 rate limit as a pause, and a plain 403 as no access", async () => {
+    const drive = (body: string) => new LiveConnector("drive", { ...settings, ids: ["f1"] }, [user],
+      vi.fn(async () => new Response(body, { status: 403, headers: { "content-type": "application/json" } })) as typeof fetch, instant);
+    await expect(drive('{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}').fetchDocument("drive:f1")).rejects.toThrow("rate limited");
+    expect(await drive('{"error":{"errors":[{"reason":"forbidden"}]}}').fetchDocument("drive:f1")).toBeUndefined();
+  });
+
+  it("does not index a trashed Drive file or a trashed Confluence page", async () => {
+    const file = new LiveConnector("drive", { ...settings, ids: ["f1"] }, [user], vi.fn(async () => Response.json({
+      name: "Old plan", mimeType: "application/vnd.google-apps.document", modifiedTime: "2026-09-26T11:00:00.000Z", trashed: true })) as typeof fetch, instant);
+    expect(await file.fetchDocument("drive:f1")).toBeUndefined();
+    const page = (status: string) => new LiveConnector("confluence", { ...settings, ids: ["42"] }, [user], vi.fn(async () => Response.json({
+      title: "Cutover", status, body: { storage: { value: "<p>Cutover requires approval.</p>" } },
+      version: { createdAt: "2026-09-26T11:00:00.000Z" } })) as typeof fetch, instant);
+    expect(await page("trashed").fetchVersion("confluence:42")).toBeUndefined();
+    expect(await page("current").fetchVersion("confluence:42")).toBeTypeOf("number");
+  });
+
   it("polls only the items whose version moved", async () => {
     let updated = "2026-09-26T11:00:00.000Z";
     const connector = new LiveConnector("jira", settings, [], vi.fn(async () => issue(updated)) as typeof fetch, instant);

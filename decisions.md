@@ -623,6 +623,13 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Dropped connections** (reset, refused, timeout) are retried three times with 250, 500 and 1000 ms backoff.
 - **`listUpdatedSince`** reports only items whose version moved since the last poll, not every configured item.
 - **Per-user permission checks** run together, not one by one.
+- **Rate limits are pauses, never "gone".** Drive reports one as a 403 (`userRateLimitExceeded`), and Slack can report
+  `ratelimited` inside a 200. Both retry with 1, 2 and 4 second waits, then fail the sync so it resumes later. A
+  Slack channel lookup that fails for any reason other than `channel_not_found` or `not_in_channel` now fails the
+  sync; before, any `ok: false` read as a missing channel and was tombstoned.
+- **Trashed items are not indexed.** A trashed Drive file and a Confluence page that isn't `current` can still be
+  fetched by ID, so both now read as gone. A Confluence page moved to another space keeps its ID and is picked up or
+  dropped by the container it now sits in.
 
 ---
 
