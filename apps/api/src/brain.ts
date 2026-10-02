@@ -24,7 +24,7 @@ import type {
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 export class Brain {
-  readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string }>();
+  readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
   readonly orgId: string;
   private persistence?: Persistence;
@@ -119,7 +119,10 @@ export class Brain {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(() => this.syncSource(source)).catch(async error => {
       const connection = this.connections.get(source);
-      if (connection && connection.status !== "Not connected") connection.status = "Error";
+      if (connection && connection.status !== "Not connected") {
+        connection.status = "Error";
+        connection.error = error instanceof Error ? error.message : "Sync failed";
+      }
       const job = this.jobs.get(source);
       if (job?.status === "running") { job.status = "failed"; job.error = error instanceof Error ? error.message : "Source discovery failed"; }
       await this.persist();
@@ -227,7 +230,7 @@ export class Brain {
         this.audit.append("import_completed", "sync", { ...job });
       }
       const connection = this.connections.get(source);
-      if (connection) connection.status = "Live";
+      if (connection) { connection.status = "Live"; connection.error = undefined; }
       await this.persist();
     } catch (error: unknown) {
       this.runs.set(source, { ...run, status: "failed" });
@@ -241,6 +244,17 @@ export class Brain {
     }
   }
 
+  /** A provider sign-in finished. A new connection imports nothing until the admin chooses. Reconnecting a source that is
+   * already set up, for instance after its credential was rejected, keeps the scope the admin chose. */
+  markConnected(actor: User, source: Source): void {
+    this.assertOrg(actor);
+    const existing = this.connections.get(source);
+    const keep = existing && existing.status !== "Not connected";
+    this.connections.set(source, { source, status: "Connected", scope: keep ? existing.scope : { mode: "none" },
+      connectedBy: actor.id, connectedAt: new Date().toISOString() });
+    this.audit.append("connection_created", actor.id, { source, reconnected: Boolean(keep) });
+  }
+
   /** Admin picker: the channels, projects, spaces or shared drives the connected credential can see. */
   async listContainers(actor: User, source: Source): Promise<Container[]> {
     this.assertOrg(actor);
@@ -249,10 +263,13 @@ export class Brain {
     return this.connectors[source].listContainers();
   }
 
-  async connect(actor: User, source: Source, scope: ImportScope = {}): Promise<void> {
+  async connect(actor: User, source: Source, scope?: ImportScope): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live OAuth setup is required");
+    // Connecting again keeps the scope already chosen, unless a new one is given.
+    const existing = this.connections.get(source);
+    scope ??= existing && existing.status !== "Not connected" ? existing.scope : {};
     this.connections.set(source, { source, status: "Connected", scope, connectedBy: actor.id, connectedAt: new Date().toISOString() });
     this.audit.append("connection_created", actor.id, { source });
     await this.persist();

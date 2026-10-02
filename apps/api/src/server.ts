@@ -175,9 +175,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
         const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
-        // Nothing is imported until the admin chooses what to include.
-        brain.connections.set(source, { source, status: "Connected", scope: { mode: "none" }, connectedBy: actor.id, connectedAt: new Date().toISOString() });
-        brain.audit.append("connection_created", actor.id, { source });
+        brain.markConnected(actor, source);
         await brain.persist();
         response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
         response.end(); return;
