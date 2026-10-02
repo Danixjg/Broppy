@@ -15,6 +15,7 @@ import { AuditLog, FileAuditStore } from "@brain/audit";
 import { RemoteFgaAdapter } from "@brain/fga-adapter";
 import { SupabaseIndex } from "@brain/retrieval";
 import type { AuditEntry, Source, SourcePermission, Tier, User } from "@brain/types";
+import { track } from "@vercel/analytics/server";
 
 export interface ApiServer {
   brain: Brain;
@@ -154,9 +155,24 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
+    const startTime = Date.now();
     const reply = async (response: ServerResponse, status: number, data: unknown) => {
       if (status >= 200 && status < 300) await brain.persist();
       send(response, status, data);
+      
+      // Track analytics after sending response (non-blocking)
+      const url = new URL(request.url ?? "/", "http://localhost");
+      const duration = Date.now() - startTime;
+      track("api_request", {
+        method: request.method,
+        path: url.pathname,
+        status,
+        duration_ms: duration,
+      }, {
+        request: { headers: request.headers as Record<string, string | string[] | undefined> }
+      }).catch(() => {
+        // Silently fail analytics tracking to not affect the API response
+      });
     };
     try {
       const url = new URL(request.url ?? "/", "http://localhost");

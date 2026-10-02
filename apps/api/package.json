@@ -9,6 +9,7 @@
     "@brain/fga-adapter": "workspace:*",
     "@brain/retrieval": "workspace:*",
     "@brain/types": "workspace:*",
+    "@vercel/analytics": "^2.0.1",
     "jose": "6.1.3"
   }
 }
