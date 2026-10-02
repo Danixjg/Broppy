@@ -47,8 +47,9 @@ fn deleted_batches_are_caught_even_when_the_rest_still_verifies() {
     let anchors = dir.path().join("anchors.jsonl");
     brain_anchor::publish(&log, &key, &anchors).unwrap();
     // A log that simply stops after batch 2 is internally valid; only the anchor shows the loss.
-    let kept: Vec<String> = fs::read_to_string(&log).unwrap().lines()
-        .filter(|l| !l.contains("\"firstSequence\":7")).map(String::from).collect();
+    let text = fs::read_to_string(&log).unwrap();
+    let last_batch = text.lines().filter(|l| l.contains("\"kind\":\"batch\"")).last().unwrap().to_string();
+    let kept: Vec<String> = text.lines().filter(|l| *l != last_batch).map(String::from).collect();
     fs::write(&log, kept.join("\n") + "\n").unwrap();
     let problems = brain_anchor::verify(&log, &key, &anchors).unwrap_err();
     assert!(problems[0].contains("deleted"), "{problems:?}");
@@ -60,4 +61,58 @@ fn refuses_a_private_key() {
     let path = dir.path().join("k.pem");
     fs::write(&path, "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n").unwrap();
     assert!(brain_anchor::load_key(&path).unwrap_err().contains("PUBLIC"));
+}
+
+fn rewrite(log: &PathBuf, mut change: impl FnMut(usize, &mut serde_json::Value) -> bool) {
+    let lines: Vec<String> = fs::read_to_string(log).unwrap().lines().enumerate().filter_map(|(i, line)| {
+        let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+        change(i, &mut record).then(|| serde_json::to_string(&record).unwrap())
+    }).collect();
+    fs::write(log, lines.join("\n") + "\n").unwrap();
+}
+
+#[test]
+fn a_changed_entry_is_caught_even_when_its_batch_record_is_untouched() {
+    let (_dir, log, key) = setup();
+    rewrite(&log, |_, record| {
+        if record["value"]["type"] == "query_received" && record["value"]["data"]["question"].as_str().is_some_and(|q| q.contains("Café")) {
+            record["value"]["data"]["question"] = "What does PAY-101 need?".into();
+        }
+        true
+    });
+    let error = brain_anchor::read_batches(&log, &key).unwrap_err();
+    assert!(error.contains("was changed"), "{error}");
+}
+
+#[test]
+fn an_entry_rewritten_with_fresh_hashes_still_fails_its_batch_root() {
+    let (_dir, log, key) = setup();
+    // Someone who edits an entry and recomputes every later hash keeps the chain intact, but not the signed root.
+    let mut previous = String::new();
+    let mut edited = false;
+    rewrite(&log, |_, record| {
+        if record["kind"] == "entry" {
+            let value = &mut record["value"];
+            if !edited && value["type"] == "answer_returned" {
+                value["data"]["answer"] = "Nothing to report.".into();
+                edited = true;
+            }
+            if edited {
+                value["previousHash"] = previous.clone().into();
+                value["hash"] = brain_anchor::entry_hash(value).unwrap().into();
+            }
+            previous = value["hash"].as_str().unwrap().to_string();
+        }
+        true
+    });
+    let error = brain_anchor::read_batches(&log, &key).unwrap_err();
+    assert!(error.contains("does not match its entries"), "{error}");
+}
+
+#[test]
+fn a_deleted_entry_is_caught() {
+    let (_dir, log, key) = setup();
+    rewrite(&log, |_, record| !(record["kind"] == "entry" && record["value"]["sequence"] == 40));
+    let error = brain_anchor::read_batches(&log, &key).unwrap_err();
+    assert!(error.contains("deleted or reordered"), "{error}");
 }

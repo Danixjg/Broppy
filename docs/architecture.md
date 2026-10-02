@@ -209,8 +209,9 @@ person may also open.
 ## Limits
 
 - **No webhooks:** freshness comes from polling plus the live check in each question.
-- **No anchoring:** Merkle roots aren't anchored in an external write-once store. Someone holding both the database
-  and the signing key could rewrite history undetected.
+- **Anchoring isn't running:** `tools/anchor` can copy the signed roots of a file-based audit log into a separate
+  repository and check the log against them, but that repository isn't set up, and roots kept in Supabase aren't read
+  yet. Until then, someone holding both the database and the signing key could rewrite history undetected.
 - **Remote FGA:** it uses a generic per-document schema. Each platform's own permission shape is enforced in the
   connector layer.
 - **Embeddings:** semantic search uses Hunyuan's China-site embedding API. Embeddings through TokenHub are

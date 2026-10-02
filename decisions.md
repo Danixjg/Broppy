@@ -639,6 +639,10 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Trashed items are not indexed.** A trashed Drive file and a Confluence page that isn't `current` can still be
   fetched by ID, so both now read as gone. A Confluence page moved to another space keeps its ID and is picked up or
   dropped by the container it now sits in.
+- **The anchor tool checks entries too** (2 Oct). `publish` and `verify` used to check only the batch records, so a
+  changed audit entry passed `verify` as long as its batch record was untouched. Both now recompute every entry's
+  hash from its content, exactly as `packages/audit` does, check the chain between entries, and rebuild each batch's
+  root from its entries. The test fixture is a real 130-entry log written by the TypeScript `AuditLog`.
 
 ---
 
