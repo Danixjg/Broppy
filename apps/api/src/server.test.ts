@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
-import { createApiServer } from "./server.js";
+import { createServer } from "node:http";
+import handler, { createApiServer } from "./server.js";
 
 const openServers: Server[] = [];
 
@@ -218,5 +219,18 @@ describe("Public demo mode", () => {
     delete process.env.AUTH0_ISSUER;
     process.env.SUPABASE_URL = "https://project.supabase.co";
     await expect(createApiServer({ startOrchestrator: false })).rejects.toThrow("remove SUPABASE_URL");
+  });
+});
+
+describe("serverless entry", () => {
+  it("serves requests through the default export", async () => {
+    process.env.ALLOW_DEMO_AUTH = "true";
+    const host = createServer((request, response) => void handler(request, response));
+    openServers.push(host);
+    await new Promise<void>(resolve => host.listen(0, "127.0.0.1", resolve));
+    const address = host.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP address");
+    const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+    expect(response.status).toBe(200);
   });
 });
