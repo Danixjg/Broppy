@@ -161,7 +161,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
         await brain.audit.flush();
       }
-      if (status >= 200 && status < 300) await brain.persist();
+      // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own).
+      if (status >= 200 && status < 300) await (request.method === "GET" ? brain.audit.flush() : brain.persist());
       send(response, status, data);
     };
     try {

@@ -9,4 +9,6 @@ it("loads real Auth0 subjects and scopes the directory by organisation", async (
   expect(await directory.bySub("auth0|real")).toMatchObject({ id: "ravi", orgId: "org_a", active: true });
   expect(await directory.bySub("unknown")).toBeUndefined();
   expect(transport.mock.calls.length).toBe(2);
+  expect(String((transport.mock.calls[0] as unknown[])[0])).toContain("auth0_sub=eq.auth0%7Creal");
+  expect(String((transport.mock.calls[0] as unknown[])[0])).toContain("limit=1");
 });

@@ -40,8 +40,8 @@ export class UserDirectory {
     }
   }
 
-  private async page(offset: number): Promise<User[]> {
-    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?select=*&org_id=eq.${encodeURIComponent(this.orgId)}&order=user_id&limit=500&offset=${offset}`, {
+  private async page(offset: number, filter = "", limit = 500): Promise<User[]> {
+    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?select=*&org_id=eq.${encodeURIComponent(this.orgId)}${filter}&order=user_id&limit=${limit}&offset=${offset}`, {
       headers: { apikey: this.config.secretKey, authorization: `Bearer ${this.config.secretKey}` },
       signal: AbortSignal.timeout(5000)
     });
@@ -79,6 +79,7 @@ export class UserDirectory {
   }
 
   async bySub(sub: string): Promise<User | undefined> {
-    return (await this.list()).find(user => user.auth0Sub === sub);
+    // One keyed lookup (org_id + auth0_sub), not a read of the whole directory on every request.
+    return (await this.page(0, `&auth0_sub=eq.${encodeURIComponent(sub)}`, 1)).find(user => user.auth0Sub === sub);
   }
 }
