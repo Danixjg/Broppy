@@ -35,8 +35,13 @@ const STOPWORDS = new Set([
   "recently", "since", "today", "week", "weeks", "yesterday"
 ]);
 
-/** Minimum semantic cosine that makes a chunk relevant without a shared topic term. */
-export const SEMANTIC_MIN = 0.35;
+/**
+ * Minimum semantic cosine that makes a chunk relevant without a shared topic term. Tuned on 3 Oct with
+ * `pnpm llm:calibrate` against Cloudflare's bge-m3 over the mock items: matching pairs had a 25th percentile of 0.51,
+ * and non-matching ones a 95th percentile of 0.51 (highest 0.61). The earlier 0.35 let in 176 of 234 non-matching
+ * pairs. Tune it again when the documents change.
+ */
+export const SEMANTIC_MIN = 0.51;
 
 /** A question's topic terms: its terms without stopwords or single characters. */
 export function queryTerms(text: string): string[] {

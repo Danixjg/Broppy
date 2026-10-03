@@ -192,7 +192,8 @@ for `llm_fallback` shows when, and why, the built-in writer stepped in.
 
 **Semantic search with Cloudflare (optional, D56).** In the Cloudflare dashboard, open **Workers AI**, choose **Use
 REST API**, create a Workers AI API token, and copy the account ID. On a laptop, put the Cloudflare lines from
-`.env.example` in `.env.local` and run `pnpm llm:calibrate`, then set the `SEMANTIC_MIN` it suggests. Only then
+`.env.example` in `.env.local` and run `pnpm llm:calibrate`; if the documents changed since it was tuned (0.51, on
+3 Oct), set the `SEMANTIC_MIN` it suggests. Only then
 uncomment the Cloudflare lines in `sso.env` (and in `demo.env`, if the demo should use it too) and restart. If
 Cloudflare refuses a call, answers use keywords for five minutes and the next sync tries again.
 
