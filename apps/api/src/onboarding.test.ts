@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { Brain } from "./brain.js";
+import type { Persistence } from "./persistence.js";
 it("imports scoped history and disconnect purges documents and grants", async () => {
   const brain = new Brain(); const admin = brain.user("maya")!;
   await brain.connect(admin, "drive");
@@ -113,4 +114,14 @@ it("pressing Connect again in the demo keeps the scope already chosen", async ()
   await brain.setScope(admin, "slack", { mode: "selected", containers: ["DB"] });
   await brain.connect(admin, "slack");
   expect(brain.connections.get("slack")!.scope).toEqual({ mode: "selected", containers: ["DB"] });
+});
+it("keeps a disconnected source's raw documents out of the saved state", async () => {
+  let snapshot: { connectorDocuments?: Array<{ source: string }> } = {};
+  const persistence = { loadState: async () => undefined, saveState: async (value: typeof snapshot) => { snapshot = structuredClone(value); } } as unknown as Persistence;
+  const brain = new Brain(undefined, { persistence });
+  await brain.syncAll(); await brain.persist();
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "slack")).toBe(true);
+  await brain.disconnect(brain.user("maya")!, "slack");
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "slack")).toBe(false);
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "jira")).toBe(true);
 });

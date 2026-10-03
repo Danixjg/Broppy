@@ -97,7 +97,10 @@ export class Brain {
     const next = this.persistQueue.catch(() => undefined).then(async () => {
       await this.audit.flush();
       if (!this.persistence) return;
-      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources.map(source => this.connectors[source].listItems()))).flat();
+      // A disconnected source is purged, so its mock originals are not written to the snapshot either.
+      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources
+        .filter(source => this.connections.get(source)?.status !== "Not connected")
+        .map(source => this.connectors[source].listItems()))).flat();
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
