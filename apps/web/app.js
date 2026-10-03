@@ -1,9 +1,10 @@
 import { narrowerPermissionError } from "./permissions.js";
+import { answerLines, isDemoAddress, numberSources, quotedRanges } from "./answer.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
-const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
@@ -21,7 +22,7 @@ const node = (tag, className, text) => {
   return element;
 };
 const clear = element => element.replaceChildren();
-const reveal = element => element?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+const reveal = (element, block = "nearest") => element?.scrollIntoView({ block, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
 const appendText = (parent, tag, className, text) => parent.append(node(tag, className, text));
 const setMessage = (element, message) => { element.textContent = message; };
 const sourceName = source => ({ slack: "Slack", jira: "Jira", confluence: "Confluence", drive: "Drive" })[source] || "Source";
@@ -37,6 +38,22 @@ function externalLink(url, text) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   return link;
+}
+// A document's own page at its platform. The demo's documents have placeholder addresses that no browser can open.
+function sourceLink(url, source) {
+  if (isDemoAddress(url)) return node("span", "muted demo-note", `Demo document: there's no live ${sourceName(source)} page.`);
+  return externalLink(url, `Open in ${sourceName(source)} ↗`);
+}
+// The document's text with the lines an answer quoted from it marked.
+function highlighted(content, quotes) {
+  const paragraph = node("p", "document-text");
+  let position = 0;
+  for (const [start, end] of quotedRanges(content, quotes)) {
+    paragraph.append(content.slice(position, start), node("mark", "", content.slice(start, end)));
+    position = end;
+  }
+  paragraph.append(content.slice(position));
+  return paragraph;
 }
 function statusBadge(doc) {
   const status = documentStatus(doc);
@@ -83,7 +100,7 @@ function setView(view) {
 }
 function resetIdentity() {
   state.identity++;
-  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
   for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
@@ -145,21 +162,32 @@ function filteredDocs(source) {
   const term = $("search").value.trim().toLocaleLowerCase();
   return state.docs.filter(doc => (!source || doc.source === source) && inProject(doc.docId) && (!term || `${doc.title} ${doc.source} ${safeText(doc.content)} ${safeText(doc.metadata?.status)} ${safeText(doc.metadata?.project)}`.toLocaleLowerCase().includes(term)));
 }
-function selectDoc(doc) {
+// quotes: the lines an answer took from this document, marked in its text. focus: opened from an answer, so the
+// panel takes the keyboard focus.
+function selectDoc(doc, quotes = [], { focus = false } = {}) {
   if (!state.docs.some(item => item.docId === doc.docId)) return;
-  state.selected = doc.docId;
+  state.selected = doc.docId; state.selectedQuotes = quotes;
   const box = $("selectedDetail"); clear(box); box.hidden = false;
   appendText(box, "p", "eyebrow", `${sourceName(doc.source)} · ${documentStatus(doc)}`);
-  appendText(box, "h3", "", doc.title);
+  const heading = node("h3", "", doc.title); heading.tabIndex = -1; box.append(heading);
   appendText(box, "p", "detail-meta", `Version ${doc.version} · Edited ${fmtDate(doc.updatedAt)} · Tier ${doc.tier}`);
   if (doc.lastIndexedAt) appendText(box, "p", "detail-meta", `Indexed ${fmtDate(doc.lastIndexedAt)}`);
   if (doc.lastPermissionSyncAt) appendText(box, "p", "detail-meta", `Permissions synced ${fmtDate(doc.lastPermissionSyncAt)}`);
   appendText(box, "p", "detail-meta", `Access tier ${doc.tier} narrows source access; native source permissions still apply.`);
-  if (doc.content) appendText(box, "p", "", doc.content);
+  if (doc.content) box.append(highlighted(doc.content, quotes));
   else appendText(box, "p", "muted", "Preview is loading from the workspace API. Open the source or ask the Brain for a cited summary.");
-  box.append(externalLink(doc.url, "Open source ↗"));
+  box.append(sourceLink(doc.url, doc.source));
   renderLinked(box, doc);
-  reveal(box);
+  if (focus) heading.focus({ preventScroll: true });
+  // A marked line is centred, so the reader sees it with the text around it.
+  const mark = box.querySelector("mark");
+  if (mark) reveal(mark, "center"); else reveal(box);
+}
+// A document an answer cited, opened here with the answer's lines from it marked. Every cited document is one this
+// person may open, so the workspace lists it.
+function openSource(source, quotes) {
+  const doc = docById(source.docId);
+  if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, quotes, { focus: true });
 }
 // Items linked to this one that this person may also open: the API never lists any others.
 function linkedDocs(doc) { return (Array.isArray(doc.links) ? doc.links : []).map(docById).filter(Boolean); }
@@ -182,8 +210,8 @@ function activityButton(doc, source) {
 }
 const sentencesOf = text => safeText(text).split(/\n|(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
 // A Jira task with the section of its linked page or file that names it, and Mark done.
-function openTask(doc) {
-  selectDoc(doc);
+function openTask(doc, quotes = [], options = {}) {
+  selectDoc(doc, quotes, options);
   const box = $("selectedDetail");
   const key = doc.docId.split(":")[1] || "";
   const work = linkedDocs(doc).filter(item => ["confluence", "drive"].includes(item.source));
@@ -191,8 +219,12 @@ function openTask(doc) {
   const wrap = node("div", "answer-block");
   if (target) {
     appendText(wrap, "strong", "", `Working doc: ${target.title}`);
-    appendText(wrap, "p", "", sentencesOf(target.content).find(sentence => sentence.includes(key)) || sentencesOf(target.content)[0] || "");
-    wrap.append(externalLink(target.url, `Open ${target.title} ↗`));
+    const sentence = sentencesOf(target.content).find(item => item.includes(key)) || sentencesOf(target.content)[0] || "";
+    appendText(wrap, "p", "", sentence);
+    const open = node("button", "text-button", `Open ${target.title}`); open.type = "button";
+    open.addEventListener("click", () => selectDoc(target, sentence ? [sentence] : [], { focus: true }));
+    wrap.append(open);
+    if (!isDemoAddress(target.url)) wrap.append(" ", sourceLink(target.url, target.source));
   } else appendText(wrap, "p", "muted", "No linked page or file that you can open.");
   if (documentStatus(doc) === "done") appendText(wrap, "p", "muted", "This task is done.");
   else {
@@ -286,7 +318,7 @@ function renderMaster() {
   if (master.content) appendText($("masterContent"), "p", "", master.content);
   else appendText($("masterContent"), "p", "muted", "Master content will appear when the workspace API provides it.");
   const meta = node("p", "detail-meta", `Version ${master.version} · Edited ${fmtDate(master.updatedAt)}`);
-  $("masterContent").append(meta, externalLink(master.url, "Open Confluence master ↗"));
+  $("masterContent").append(meta, sourceLink(master.url, master.source));
   const conclusions = sentencesOf(master.content);
   if (conclusions.length) for (const text of conclusions) appendText($("conclusions"), "div", "conclusion", text);
   else appendText($("conclusions"), "p", "empty", "Conclusions will appear with authorized master content.");
@@ -451,7 +483,7 @@ async function loadWorkspace() {
     if (role() === "admin") await loadNativePermissions();
     if (generation !== state.identity) return;
     $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.`;
-    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; } }
+    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, state.selectedQuotes); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; state.selectedQuotes = []; } }
     applyLandingPreference();
     if (!state.landingApplied) {
       state.landingApplied = true;
@@ -460,14 +492,24 @@ async function loadWorkspace() {
     return true;
   } catch (error) { if (generation === state.identity) $("workspaceNotice").textContent = `Workspace unavailable: ${error.message}`; return false; }
 }
-function renderCitations(parent, citations) {
-  if (!Array.isArray(citations) || !citations.length) return;
+// The answer's sources, numbered as its lines cite them. Each opens in the workspace with its quoted lines marked.
+function renderCitations(parent, sources, lines) {
+  if (!sources.length) return;
   const list = node("div", "citation-list"); appendText(list, "strong", "", "Sources");
-  for (const citation of citations) {
-    if (!citation || !safeUrl(citation.url)) continue;
-    const via = typeof citation.linkedFrom === "string" ? ` · linked from ${docById(citation.linkedFrom)?.title || citation.linkedFrom}` : "";
-    list.append(externalLink(citation.url, `${safeText(citation.title)} · v${citation.version} · edited ${fmtDate(citation.updatedAt)}${via}`));
+  const items = node("ol", "source-list");
+  for (const source of sources) {
+    const via = typeof source.linkedFrom === "string" ? ` · linked from ${docById(source.linkedFrom)?.title || source.linkedFrom}` : "";
+    const label = `${safeText(source.title)} · v${source.version} · edited ${fmtDate(source.updatedAt)}${via}`;
+    const item = node("li", "");
+    if (docById(source.docId)) {
+      const quotes = lines.filter(line => line.refs.includes(source.number)).map(line => line.text);
+      const button = node("button", "source-button", label); button.type = "button";
+      button.addEventListener("click", () => openSource(source, quotes));
+      item.append(button);
+    } else item.append(isDemoAddress(source.url) || !safeUrl(source.url) ? node("span", "", label) : externalLink(source.url, label));
+    items.append(item);
   }
+  list.append(items);
   parent.append(list);
 }
 // Where the answer looked first and the dates it kept to, when the question named them, and the project it kept to.
@@ -479,13 +521,29 @@ function scopeText(scope) {
     names ? `Searched ${names} first, then the other sources.` : dates ? `Searched everything from ${dates}.` : "";
   return [project, searched].filter(Boolean).join(" ");
 }
+// One line per claim, each followed by numbered chips for the sources it was copied from.
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
-  appendText(target, "div", "", safeText(result.text) || "No answer returned.");
+  const sources = numberSources(result.citations);
+  const lines = answerLines(safeText(result.text) || "No answer returned.", sources);
+  const body = node("div", "answer-lines");
+  for (const line of lines) {
+    const row = node("p", "answer-line", line.text);
+    for (const number of line.refs) {
+      const source = sources[number - 1];
+      const chip = node("button", "cite", String(number)); chip.type = "button";
+      chip.title = safeText(source.title);
+      chip.setAttribute("aria-label", `Source ${number}: ${safeText(source.title)}`);
+      chip.addEventListener("click", () => openSource(source, [line.text]));
+      row.append(" ", chip);
+    }
+    body.append(row);
+  }
+  target.append(body);
   const scope = scopeText(result.scope);
   if (scope) appendText(target, "p", "muted", scope);
-  renderCitations(target, result.citations);
+  renderCitations(target, sources, lines);
   if (result.traceId) {
     const button = node("button", "text-button", "Why this result? View trace ↗"); button.type = "button";
     button.addEventListener("click", () => showTrace(result.traceId)); target.append(button);
