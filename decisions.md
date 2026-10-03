@@ -785,6 +785,12 @@ Each entry records the options that were considered, what was chosen, and the tr
     Keyword matches are unaffected.
   - **Retune** when the documents change.
 
+### Implementation details (setting up sign-in, 3 Oct)
+- **Migration 005's Vault grant.** It granted `vault.update_secret(uuid,text,text,text)`. Newer Supabase Vault versions
+  give that function a fifth input (a key ID), so the statement failed and, with it, the whole migration. It now grants
+  whatever versions of `create_secret` and `update_secret` the project has. The failure was found while applying the
+  migrations to the team's Supabase project.
+
 ---
 
 ## Deferred (not decided yet)
