@@ -117,6 +117,13 @@ The project pays for no model use (`decisions.md`, D27, D28 and D55):
     balance was insufficient, and calls failed with code `401006`. The client keeps its `tokenhub` and `hunyuan`
     presets as tested options. They only start with a usage file and token budgets below the free tokens, and Tencent
     bills only if post-paid billing is turned on.
+- **Its instructions** ([`llm.ts`](apps/api/src/llm.ts)) tell the model to:
+  - copy sentences exactly, one per line, each with its citation;
+  - answer every part of the question, using every passage that helps and leaving out unrelated ones;
+  - keep status labels such as "DB-15 (blocked):" and every step of a procedure;
+  - put the direct answer first, in at most eight sentences.
+
+  Any line that isn't copied exactly is dropped afterwards, so the model can only choose and order sentences.
 - **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or no line of its reply is copied word for word, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
   - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
   - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.

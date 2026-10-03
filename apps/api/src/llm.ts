@@ -38,8 +38,22 @@ const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unkn
   groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
 };
 
-const SYSTEM = "Answer with exact sentences copied from the supplied context, one sentence per line. Cite each " +
-  "sentence with its context citation in square brackets. If the context cannot answer, say so.";
+// The model only chooses and orders sentences: a line not copied exactly from a passage is dropped after it answers
+// (groundedOutput). With only that rule, a run on 3 Oct answered half of scenario 1 (the Slack blocker, not the Jira
+// status), so the rules below ask it to cover the whole question.
+const SYSTEM = [
+  "You answer a question about a company's work using only the context passages supplied, which the asker may see.",
+  "Rules:",
+  "1. Write only sentences copied exactly from the passages, one sentence per line, each followed by its passage's " +
+    "citation in square brackets.",
+  "2. Answer every part of the question. If it asks about several things, such as a project's status and its " +
+    "blockers, include sentences for each.",
+  "3. Use every passage that helps answer the question, not just the first. Leave out passages unrelated to it.",
+  "4. Keep status labels that begin a passage, such as \"DB-15 (blocked):\", as part of the copied sentence.",
+  "5. When a passage lists steps, include every step, in order.",
+  "6. Put the most direct answer first, and use at most eight sentences.",
+  "7. If the passages can't answer the question, say so in one line."
+].join("\n");
 
 /** For a provider that doesn't report usage: about three characters a token, rounded up, so the count errs high. */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 3);
