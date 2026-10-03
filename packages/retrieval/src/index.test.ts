@@ -83,6 +83,17 @@ describe("HybridIndex semantic scoring", () => {
     expect(await index.refreshSemantic("doc", client)).toBe(false);
   });
 
+  it("treats the same permissions and metadata with their keys in another order as no change", () => {
+    const index = new HybridIndex();
+    const original = { ...document("doc", "Reimbursement procedure"), metadata: { status: "final", project: "PAY" } };
+    index.upsert(original);
+    const before = index.documents.get("doc")!;
+    const reordered = { ...original, metadata: { project: "PAY", status: "final" },
+      permissions: { public: false, groups: [], users: ["alice"] } };
+    expect(index.upsert(reordered)).toEqual({ contentChanged: false, permissionChanged: false });
+    expect(index.documents.get("doc")!.metadataHash).toBe(before.metadataHash);
+  });
+
   it("keeps a document's links with its metadata, so a link-only change never re-chunks or re-embeds", async () => {
     const index = new HybridIndex();
     const client = { embed: vi.fn(async () => vector(0)) };

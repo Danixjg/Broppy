@@ -461,9 +461,18 @@ function isMainModule(): boolean {
   return Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
 }
 
+/** Printed once the API accepts requests, so a quiet window doesn't look like one still starting. */
+export function startupMessage(host: string, port: number, env: NodeJS.ProcessEnv = process.env): string {
+  const signIn = env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID ? "with Auth0 sign-in"
+    : env.PUBLIC_DEMO === "true" ? "as the public demo, on mock data only" : "in demo mode (x-demo-user)";
+  return `API ready at http://${host}:${port} ${signIn}. Leave this window open; Ctrl+C stops it.`;
+}
+
 if (isMainModule()) {
   const { brain, orchestrator, server } = await createApiServer();
-  server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "127.0.0.1");
+  const port = Number(process.env.PORT ?? 3000);
+  const host = process.env.HOST ?? "127.0.0.1";
+  server.listen(port, host, () => process.stdout.write(`${startupMessage(host, port)}\n`));
 
   const stop = (): void => {
     orchestrator.stop();

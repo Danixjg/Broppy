@@ -8,8 +8,18 @@ const passwords = JSON.parse(required("MOCK_USER_PASSWORDS_JSON")) as Record<str
 for (const url of [issuer, supabase]) if (new URL(url).protocol !== "https:") throw new Error("HTTPS required");
 async function request(url: string, init: RequestInit = {}): Promise<any> {
   const response = await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15000) });
-  if (!response.ok) throw new Error(`User provisioning failed (${response.status})`);
-  const text = await response.text(); return text ? JSON.parse(text) : undefined;
+  const text = await response.text();
+  if (!response.ok) {
+    // Auth0 and Supabase explain a refusal in the body ("access_denied: Unauthorized", a password rule), which never
+    // repeats the credentials that were sent.
+    let reason = "";
+    try {
+      const body = JSON.parse(text);
+      reason = [body.error ?? body.code, body.error_description ?? body.message].filter(Boolean).join(": ");
+    } catch { /* not JSON: the status alone */ }
+    throw new Error(`User provisioning failed (${response.status})${reason ? `: ${String(reason).slice(0, 300)}` : ""}`);
+  }
+  return text ? JSON.parse(text) : undefined;
 }
 const token = await request(new URL("oauth/token", issuer).href, { method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ grant_type: "client_credentials", client_id: required("AUTH0_MANAGEMENT_CLIENT_ID"),

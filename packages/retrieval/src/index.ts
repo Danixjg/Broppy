@@ -2,8 +2,20 @@ import { createHash } from "node:crypto";
 import type { Citation, IndexedDocument, QueryAnswer, SearchCandidate, SourceChunk, SourceDocument } from "@brain/types";
 export { SupabaseIndex } from "./supabase.js";
 
+/** Object keys are sorted first, so a copy whose keys came back reordered hashes the same: Postgres jsonb, which holds
+ * the saved state, returns keys shortest first. Without this, every document read as a permission change after a
+ * restart. */
 export function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(sortedKeys(value))).digest("hex");
+}
+
+function sortedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedKeys);
+  if (!value || typeof value !== "object") return value;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(record).sort().map(key => [key, sortedKeys(record[key])]));
 }
 
 const synonyms: Record<string, string[]> = {

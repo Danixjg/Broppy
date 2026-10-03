@@ -33,4 +33,15 @@ grant execute on function public.store_source_token(text,text,jsonb,text), publi
 grant usage on schema vault to service_role;
 grant select on vault.decrypted_secrets to service_role;
 grant select, insert, update, delete on vault.secrets to service_role;
-grant execute on function vault.create_secret(text,text,text,uuid), vault.update_secret(uuid,text,text,text) to service_role;
+-- Grants whatever versions of these functions the installed Vault has: newer Vault versions give update_secret a fifth
+-- input, so naming exact inputs fails on some projects.
+do $$
+declare f regprocedure;
+begin
+  for f in
+    select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'vault' and p.proname in ('create_secret', 'update_secret')
+  loop
+    execute format('grant execute on function %s to service_role', f);
+  end loop;
+end $$;

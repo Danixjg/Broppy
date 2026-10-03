@@ -726,6 +726,15 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **One fallback:** in scenario 4, one answer came from the built-in writer, because Groq's free plan rate-limited
     the call. The page says so.
   - **Header:** it now names the search as well as the writer.
+- **Repeatable answers** (*added 3 Oct*).
+  - **What showed it:** on the team's real sign-in, Ravi's scenario 1 answer was three lines. It left out DB-12's
+    status and his #db-oncall blocker, although both were sent to the model, and the captured run had included them.
+  - **Why:** the request set no seed, so each call sampled afresh.
+  - **Now:** Groq requests carry a fixed seed, so the same question over the same passages gets the same answer as
+    far as Groq can manage. The temperature stays at the default, because OpenAI recommends 1.0 for gpt-oss and
+    forcing 0 can make a reasoning model loop.
+  - **Not solved:** a seed makes answers repeat; it doesn't make them complete. That is judged on the next
+    `pnpm scenarios:model` run.
 
 ---
 
@@ -784,6 +793,26 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **What's left:** the two groups overlap, so about one unrelated pair in twenty still passes on similarity alone.
     Keyword matches are unaffected.
   - **Retune** when the documents change.
+
+### Implementation details (setting up sign-in, 3 Oct)
+- **Migration 005's Vault grant.** It granted `vault.update_secret(uuid,text,text,text)`. Newer Supabase Vault versions
+  give that function a fifth input (a key ID), so the statement failed and, with it, the whole migration. It now grants
+  whatever versions of `create_secret` and `update_secret` the project has. The failure was found while applying the
+  migrations to the team's Supabase project.
+- **Seeding the demo users.** The seed script reported only a status code. It now prints the reason Auth0 or
+  Supabase gave, and `apps/web/AUTH0.md` lists what each reason means.
+  - **The 400 the team hit:** new Auth0 database connections require passwords of at least 15 characters by default,
+    while the script only checks for 12. The guide now says the connection's policy applies too.
+  - **Windows:** the guide gained a PowerShell version of the command.
+  - **Afterwards:** the guide says to delete the machine-to-machine application once seeding is done.
+- **No false permission changes after a restart.** The team's audit export showed all 26 documents logged as
+  `document_synced` with `permissionChanged: true` after the API restarted, although nothing had changed.
+  - **Why:** Supabase keeps the saved state in a `jsonb` column, which returns object keys shortest first. The index
+    hashed permissions and metadata with plain `JSON.stringify`, which depends on key order, so every reloaded
+    document looked changed. The audit log already sorts keys for the same reason (hash version 2).
+  - **Now:** the index sorts object keys before hashing.
+  - **Once more:** hashes saved before this change were made the old way, so the first sync after updating logs one
+    last round of permission changes. After that they stop.
 
 ---
 
