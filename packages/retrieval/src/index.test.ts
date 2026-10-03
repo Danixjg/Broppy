@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Citation, SourceDocument } from "@brain/types";
-import { groundedOutput, HybridIndex, LocalGroundedLlm, type SemanticEmbeddingClient } from "./index.js";
+import { groundedOutput, HybridIndex, LocalGroundedLlm, NO_RESULT, type SemanticEmbeddingClient } from "./index.js";
 
 const vector = (dimension: number): number[] => Array.from({ length: 1024 }, (_, index) => index === dimension ? 1 : 0);
 
@@ -200,6 +200,26 @@ describe("LocalGroundedLlm", () => {
     ];
     const output = await new LocalGroundedLlm().generate(context, "What is the status of the database, and what are the blockers?");
     expect(output.split("\n")[1]).toBe("Blocker raised on the ledger database. [thread:0]");
+  });
+
+  it("keeps a sentence copied with lookalike hyphens, quotes or spaces, and shows the source's own text", () => {
+    const allowed = new Map([["runbook:0", citation("runbook:0")]]);
+    const evidence = new Map([["runbook:0",
+      "Step 1: page the payments on-call engineer. Don't skip the drill. Step 2: freeze deploys."]]);
+    const output = [
+      // A non-breaking hyphen, and a narrow no-break space before the citation.
+      "Step 1: page the payments on\u2011call engineer.\u202f[runbook:0]",
+      "Don\u2019t skip the drill. [runbook:0]",
+      "step 2: FREEZE deploys. [runbook:0]"
+    ].join("\n");
+    expect(groundedOutput(output, allowed, evidence).text.split("\n")).toEqual([
+      "Step 1: page the payments on-call engineer. [runbook:0]",
+      "Don't skip the drill. [runbook:0]",
+      "Step 2: freeze deploys. [runbook:0]"
+    ]);
+    // The words must still match: a reworded sentence is dropped.
+    expect(groundedOutput("Step 1: call the payments on-call engineer. [runbook:0]", allowed, evidence).text)
+      .toBe(NO_RESULT);
   });
 
   it("quotes at most six sentences of the first source", async () => {

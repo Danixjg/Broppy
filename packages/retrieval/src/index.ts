@@ -274,6 +274,23 @@ export class LocalGroundedLlm implements LlmClient {
 
 export const NO_RESULT = "No accessible information was found for this query.";
 
+// A model may copy a sentence with lookalike characters: a non-breaking hyphen, curly quotes or special spaces. Both
+// sides are folded before they are compared, so those don't drop a faithful copy; the words must still match.
+function fold(text: string): string {
+  return text.normalize("NFKC").toLowerCase()
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\u2018\u2019\u201a\u201b\u2032]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f\u2033]/g, "\"")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The source's own sentence, when the claim copies one whole, so the answer shows the source's characters. */
+function sourceSentence(evidence: string | undefined, claim: string): string | undefined {
+  return evidence?.split(/(?<=[.!?])\s+/).map(sentence => sentence.replace(/\s+/g, " ").trim())
+    .find(sentence => fold(sentence) === claim);
+}
+
 export function groundedOutput(
   output: string,
   allowed: Map<string, Citation>,
@@ -288,11 +305,11 @@ export function groundedOutput(
     if (!cited.length || cited.length !== allMarkers.length) continue;
     const claims = line.replace(/\[[^\]]+\]/g, "").split(/(?<=[.!?])\s+/).filter(Boolean);
     if (claims.length > 1) continue;
-    const claim = claims[0]?.toLowerCase().replace(/\s+/g, " ").trim();
-    if (!claim || !cited.some(id => evidence.get(id)?.toLowerCase().replace(/\s+/g, " ").includes(claim))) {
-      continue;
-    }
-    kept.push(line);
+    const claim = fold(claims[0] ?? "");
+    if (!claim || !cited.some(id => fold(evidence.get(id) ?? "").includes(claim))) continue;
+    const original = cited.map(id => sourceSentence(evidence.get(id), claim)).find(Boolean);
+    kept.push(original ? `${original} ${allMarkers.map(id => `[${id}]`).join(" ")}`
+      : line.normalize("NFKC").replace(/[\u2010\u2011]/g, "-"));
     for (const id of cited) citations.set(id, allowed.get(id)!);
   }
   return {

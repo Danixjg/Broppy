@@ -184,6 +184,8 @@ person may also open.
   - A model receives the question and the authorized passages with their citation IDs, and nothing else.
   - Its instructions ask it to answer every part of the question from every passage that helps, and to keep status
     labels and steps. Each sentence must be copied exactly, with its citation; a line that isn't is dropped.
+    Lookalike characters (a non-breaking hyphen, curly quotes, special spaces) don't count as differences, and the
+    answer shows the source's own text.
 - **Fallbacks:** the built-in writer answers when the model is over a limit, rate limited or failing, or when none of
   its lines are copied word for word. The audit records `llm_fallback` with the reason. See decisions D27 to D31, D54
   and D55.

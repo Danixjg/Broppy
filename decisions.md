@@ -711,6 +711,14 @@ Each entry records the options that were considered, what was chosen, and the tr
     out unrelated ones, to keep status labels and every step, and to put the direct answer first, in at most eight
     sentences.
   - **Unchanged:** sentences must still be copied exactly, so the grounding check is the same.
+- **The copy check** (*added 3 Oct*).
+  - **What the runs showed:** step 1 of the runbook ("page the payments on-call engineer") was missing in both
+    model runs. The first run had also lost every other hyphenated line: DB-12, DB-15 and "On-call…".
+  - **Why:** the model can write a non-breaking hyphen where the source has an ordinary one. The two look the same,
+    but the check compared characters, so it dropped the line.
+  - **Now:** both sides are folded before they're compared: NFKC, hyphen and dash variants, curly quotes and special
+    spaces. A kept line shows the source's own sentence.
+  - **Unchanged:** a reworded sentence is still dropped.
 
 ---
 
