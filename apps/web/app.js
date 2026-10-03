@@ -1,5 +1,5 @@
 import { narrowerPermissionError } from "./permissions.js";
-import { answerLines, isDemoAddress, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, isDemoAddress, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
@@ -85,7 +85,8 @@ async function call(path, options = {}) {
 }
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
 function role() { return state.authMode === "demo" ? roles[$("user").value] || "member" : state.me?.role || "member"; }
-function setView(view) {
+// load: whether opening Compliance loads the whole audit; a caller about to search it passes false.
+function setView(view, { load = true } = {}) {
   if (view === "admin" && role() !== "admin") view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
   state.view = view;
@@ -95,7 +96,7 @@ function setView(view) {
     button.classList.toggle("active", name === view);
     if (name === view) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   }
-  if (view === "compliance") loadAudit();
+  if (view === "compliance" && load) loadAudit();
   if (view === "operations") loadHealth();
 }
 function resetIdentity() {
@@ -549,6 +550,20 @@ function renderAnswer(target, result, question) {
     button.addEventListener("click", () => showTrace(result.traceId)); target.append(button);
   }
 }
+// The chat searches documents, so an audit question typed there finds nothing. Compliance staff are offered the audit
+// log instead; nobody else sees a difference.
+function appendAuditHint(target, question) {
+  const hint = node("div", "audit-hint");
+  appendText(hint, "p", "", "This looks like a question for the audit log, which records who asked and opened what.");
+  const button = node("button", "secondary-button", "Search the audit log"); button.type = "button";
+  button.addEventListener("click", () => {
+    setView("compliance", { load: false });
+    $("auditSearch").value = question;
+    searchAudit(question);
+  });
+  hint.append(button);
+  target.append(hint);
+}
 // While an answer is on its way: a spinner and the seconds so far, so a long wait doesn't look frozen. The chat is a
 // live region, so the counter is hidden from screen readers, which hear the label once.
 function showPending(target, label) {
@@ -763,7 +778,11 @@ $("queryForm").addEventListener("submit", async event => {
   const response = node("div", "message answer"); history.append(response);
   $("askButton").disabled = true; $("queryStatus").textContent = "Checking permissions and source versions…";
   history.scrollTop = history.scrollHeight;
-  try { const result = await ask(question, response); if (generation !== state.identity) return; $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = ""; }
+  try {
+    const result = await ask(question, response); if (generation !== state.identity) return;
+    if (role() === "compliance" && looksLikeAuditQuestion(question)) appendAuditHint(response, question);
+    $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = "";
+  }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
 });

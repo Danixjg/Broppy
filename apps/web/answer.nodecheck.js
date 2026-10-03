@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerLines, isDemoAddress, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, isDemoAddress, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const documents = JSON.parse(readFileSync(new URL("../../data/mock/documents.json", import.meta.url), "utf8"));
 const content = docId => documents.find(doc => doc.docId === docId).content;
@@ -61,4 +61,22 @@ test("recognises the demo's placeholder addresses and nothing else", () => {
   assert.equal(isDemoAddress("https://example.com/page"), false);
   assert.equal(isDemoAddress("not a url"), false);
   assert.equal(isDemoAddress(undefined), false);
+});
+
+test("spots audit questions without catching the scenarios' document questions", () => {
+  for (const question of [
+    "Show me everything user 'ravi' accessed in the last 30 days",
+    "Show me everything user 'jdoe' accessed related to the 'payment-gateway' Confluence space in the last 30 days",
+    "Who retrieved the Payment gateway operations page?",
+    "What did Alex ask yesterday?",
+    "Search the audit log for denied access"
+  ]) assert.equal(looksLikeAuditQuestion(question), true, question);
+  for (const question of [
+    "What's the status of the database migration project and were there any blockers raised in Slack last week?",
+    "What's the latest runbook for the payment-service incident?",
+    "Show me the security incident report from the Q3 breach",
+    "Show me the zebra onboarding notes from the Q9 offsite",
+    "What does PAY-101 need before cutover?",
+    "Who owns the access controls for the payment gateway?"
+  ]) assert.equal(looksLikeAuditQuestion(question), false, question);
 });

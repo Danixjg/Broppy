@@ -89,3 +89,16 @@ export function quotedRanges(content, sentences) {
 export function isDemoAddress(url) {
   try { return new URL(url).hostname.endsWith(".example"); } catch { return false; }
 }
+
+const AUDIT_WORDING = [
+  /\baudit\b/i,
+  /\b(accessed|retrieved)\b/i,
+  /\busers?\s+['"\u2018\u201c]/i,
+  /\bwho\s+(retrieved|accessed|viewed|opened|asked|saw)\b/i,
+  /\bwhat\s+did\s+\S+\s+(ask|access|open|view|retrieve|see)\b/i
+];
+/** Questions about who asked or saw what, which the audit log answers rather than the documents. */
+export function looksLikeAuditQuestion(question) {
+  const value = text(question);
+  return AUDIT_WORDING.some(pattern => pattern.test(value));
+}

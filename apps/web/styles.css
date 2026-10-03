@@ -667,6 +667,18 @@ h3 {
   display:inline-block;
   font-size:.76rem
 }
+.audit-hint {
+  display:grid;
+  justify-items:start;
+  gap:.5rem;
+  margin-top:.75rem;
+  padding-top:.65rem;
+  border-top:1px solid #dfe6e9
+}
+.audit-hint p {
+  margin:0;
+  white-space:normal
+}
 .pending {
   display:flex;
   align-items:center;
