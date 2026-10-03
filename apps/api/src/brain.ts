@@ -926,7 +926,17 @@ export class Brain {
     }
   }
 
+  /** A source that errors counts as denied for this document, so the other sources still answer. */
   private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
+    try {
+      return await this.checkedLiveDocument(user, docId);
+    } catch {
+      this.audit.append("source_check_failed", user.id, { ...this.auditDocument(docId) });
+      return undefined;
+    }
+  }
+
+  private async checkedLiveDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
     if (this.connections.get(connector.source)?.status === "Not connected") return undefined;
     if (!await connector.checkAccess(user, docId)) {

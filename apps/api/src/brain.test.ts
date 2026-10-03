@@ -27,6 +27,17 @@ describe("Internal Brain security and sync", () => {
     expect(answer.citations.map(citation => citation.docId)).not.toContain("drive:cutover-duplicate");
   });
 
+  it("still answers from the other sources when one source's access check throws", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    vi.spyOn(brain.connectors.slack, "checkAccess").mockRejectedValue(new Error("Slack is down"));
+    const answer = await brain.query(brain.user("ravi")!, "What does PAY-101 need before cutover?");
+    const sources = answer.citations.map(citation => citation.docId.split(":")[0]);
+    expect(sources).not.toContain("slack");
+    expect(sources).toEqual(expect.arrayContaining(["jira", "confluence", "drive"]));
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "source_check_failed" }));
+  });
+
   it("links each item to what it names and what names it, among items that exist", async () => {
     const brain = new Brain();
     await brain.syncAll();
