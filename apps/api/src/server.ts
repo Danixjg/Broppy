@@ -154,7 +154,13 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
+    let actor: User | undefined;
     const reply = async (response: ServerResponse, status: number, data: unknown) => {
+      // A refused request is part of the trail too. Only the actor, method and route are recorded, never the body.
+      if (status === 403 && actor) {
+        brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
+        await brain.audit.flush();
+      }
       if (status >= 200 && status < 300) await brain.persist();
       send(response, status, data);
     };
@@ -183,6 +189,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       const user = await identity(request, brain, auth0, !connectors);
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
+      actor = user;
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
@@ -362,7 +369,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
         if (query.length > 200) throw new Error("Invalid query");
         const documents = [...brain.index.documents.values()].map(doc => ({ docId: doc.docId, title: doc.title }));
-        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents));
+        const result = searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents);
+        brain.audit.append("audit_searched", user.id, { query, filters: result.filters, results: result.entries.length });
+        await brain.audit.flush();
+        return await reply(response, 200, result);
       }
 
       if (url.pathname === "/v1/audit/seal" && request.method === "POST") {
