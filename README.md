@@ -136,8 +136,8 @@ The project pays for no model use (`decisions.md`, D27, D28 and D55):
   Groq's daily limits. For the unused Tencent presets, it projects 350 answers against their free tokens instead. Its
   calls count against the meter.
 - **`pnpm llm:calibrate`** embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN`
-  from the scores. Run it once with the Cloudflare settings before semantic search goes into a demo: today's 0.35 was
-  never tuned against a real model, and set too low it lets unrelated documents match.
+  from the scores. On 3 Oct it set 0.51 against Cloudflare's `bge-m3`; the earlier 0.35 let in 176 of 234 unrelated
+  pairs. Run it again when the documents change, because the right value depends on them.
 
 Both scripts read `.env.local`. The hosted APIs take their model settings as described in [infra/tencent/README.md](infra/tencent/README.md).
 

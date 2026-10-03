@@ -219,7 +219,9 @@ person may also open.
 - **Remote FGA:** it uses a generic per-document schema. Each platform's own permission shape is enforced in the
   connector layer.
 - **Embeddings:** optional, from Cloudflare Workers AI's `bge-m3` (D56). The provider sees the text of every chunk,
-  and `SEMANTIC_MIN` hasn't been tuned against it yet (`pnpm llm:calibrate`).
+  and `SEMANTIC_MIN` (0.51) was tuned on the mock items (`pnpm llm:calibrate`). Related and unrelated pairs overlap
+  (the most similar unrelated pair scored 0.61), so about one unrelated pair in twenty still passes on similarity
+  alone; keyword matches are unaffected.
 - **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
 - **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.

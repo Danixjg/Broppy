@@ -751,6 +751,13 @@ Each entry records the options that were considered, what was chosen, and the tr
     embeds whatever still lacks vectors and rewrites those chunks in Supabase.
   - **Questions during the pause** skip the provider, and the audit records `embedding_fallback` with the reason
     (`failed` or `paused`).
+- **Threshold** (*tuned 3 Oct*). `pnpm llm:calibrate` ran against `bge-m3` over the 26 mock items.
+  - **Matching pairs:** lowest 0.43, 25th percentile 0.51, median 0.59.
+  - **Non-matching pairs:** median 0.40, 95th percentile 0.51, highest 0.61.
+  - **The change:** `SEMANTIC_MIN` moves from 0.35, which let in 176 of the 234 non-matching pairs, to 0.51.
+  - **What's left:** the two groups overlap, so about one unrelated pair in twenty still passes on similarity alone.
+    Keyword matches are unaffected.
+  - **Retune** when the documents change.
 
 ---
 
