@@ -670,6 +670,8 @@ Each entry records the options that were considered, what was chosen, and the tr
   `C:\C:\…`; it now uses `fileURLToPath`. `data/seed.ts` compared `import.meta.url` with `file://` plus the script
   path, which never matches on Windows; it now uses `pathToFileURL`, as the API does. `.npmrc` sets
   `shell-emulator=true`, so scripts such as `pnpm dev` (`ALLOW_DEMO_AUTH=true tsx …`) run on Windows too.
+  *Amended 3 Oct:* Git for Windows checks text out with CRLF line endings by default, so the docs check's diagram
+  markers never matched and every diagram read as not embedded. It now compares text with LF line endings.
 - **`pnpm llm:usage` with Groq** no longer judges the plan against Tencent's free tokens. Groq's free plan can't bill,
   so the report gives the tokens and points to Groq's per-day limits, and it exits 0 when any answer was measured.
 - **Examples** name `openai/gpt-oss-120b` for Groq and `LLM_MAX_TOKENS=4000` for reasoning models.
