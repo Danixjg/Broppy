@@ -815,6 +815,93 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **Once more:** hashes saved before this change were made the old way, so the first sync after updating logs one
     last round of permission changes. After that they stop.
 
+## 2026-10-04 — UI fixes, round 1
+
+- **Input:** using the workspace with real sign-in on 3 Oct.
+  - Clicking a source opened a browser error page.
+  - Answers ended every line in raw markers such as `[slack:db-oncall:0]`.
+  - A 15-second answer looked frozen.
+  - Nur's audit question in the chat got the fixed reply.
+  - The audit console listed every field of every entry, and each restart added 26 routine sync rows.
+- **How decided:** chosen explicitly in a planning session.
+
+### D57 — What round 1 covers
+- **Chosen:**
+  - sources that open in the workspace, with the quoted lines highlighted;
+  - numbered citations;
+  - progress while an answer is on its way;
+  - an audit hint in the chat for compliance users;
+  - a readable audit console.
+- **Not now:**
+  - a label saying which writer answered, the built-in one or the model;
+  - "Show more" for long lists, which waits for the generated dataset.
+
+### D58 — Demo addresses are labelled, not linked
+- **Why:** all 26 demo documents live at addresses on the reserved `.example` domain, which no browser can open.
+- **Options:** keep the links, drop them silently, or label them.
+- **Chosen:** a document at an `.example` address says "Demo document: there's no live Slack page" (or Jira,
+  Confluence, Drive) in place of a link. Real addresses keep "Open in Slack ↗".
+- **Trade-off:** the test is the host name alone. `.example` is reserved for documentation (RFC 2606), so no real
+  source uses it.
+
+### D59 — The audit hint is for compliance users only
+- **Chosen:** when a compliance user's chat question reads like an audit question, the answer offers **Search the
+  audit log**, which opens the console and runs the same question there.
+  - **The wording it looks for:** accessed, retrieved, audit, "user 'x'", "who opened…", and "what did … ask".
+- **Why only compliance:** only compliance can search the audit. Everyone else gets exactly the reply they got
+  before, so scenario 3's fixed reply stays the same whatever was asked.
+- **Trade-off:** a fixed list of patterns misses some audit questions. The console is one click away either way, and
+  a node check shows the hint never fires on the scenarios' document questions.
+
+### D60 — Routine sync checks are hidden by default
+- **What they are:** syncs that re-read a document and found neither its content nor its permissions changed.
+  - **How many:** a Supabase-backed API logs one per document at every restart. Live sources log one per unchanged
+    item at every full re-read, which runs hourly.
+- **Chosen:** a **Hide routine sync checks** toggle, on by default. It applies to whatever list is on screen, the
+  whole log or a search's results, and says how many entries it hides.
+- **Unchanged:** the entries stay in the log and the hash chain. The search still returns every match, the proofs
+  cover every entry, and the CSV export writes every entry. The toggle only changes what the table shows.
+
+### D61 — Browser checks stay outside the repository
+- **Chosen:** as with D35, the browser checks (Playwright in Chromium, against the public demo) stay out of the
+  repository. The new logic gets unit tests in `apps/web/answer.nodecheck.js`, which `pnpm test` runs.
+- **Trade-off:** CI doesn't check the pages in a browser. Each round checks them by hand.
+
+### Implementation details (UI fixes, round 1)
+- **One module for the logic:** `apps/web/answer.js` touches no page, so `node --test` checks it.
+  - **What it holds:** `numberSources`, `answerLines`, `quotedRanges`, `isDemoAddress`, `looksLikeAuditQuestion`,
+    `auditSummary` and `isRoutineSync`.
+  - **Tests:** nine node checks, each written and seen failing before the code.
+- **Numbering:** citations come one per passage, so a document cited for two passages keeps one number. Numbers
+  follow the order the answer first cites each document. A marker that names no cited passage stays as text.
+- **Highlighting:** a kept line is the source's own sentence, except Jira lines, which carry the status the brain
+  adds: "DB-12 (in progress) tracks…" or "DB-15 (blocked): …".
+  - **How lines are found:** the sentence as written first, then without the status, ignoring differences in
+    spacing.
+  - **Tests:** the node checks use the real DB-12 and DB-15 text.
+- **Opening a source:** a chip or a source opens the document in the workspace.
+  - It marks the quoted lines, centres the first one, and moves keyboard focus to the document's heading.
+  - A Jira task's working doc opens the same way.
+- **Progress:** the chat and the catch-up show a spinner and the seconds since asking.
+  - Screen readers don't hear the counter. In the chat they hear the existing status line when the question starts
+    and ends. The catch-up has no such line, before or after this round.
+  - The spinner turns only when the system allows motion.
+- **Audit lines:** each of the 37 event types the API writes has a line of its own. A node check fails when a new
+  type has none.
+  - **Left out of the line:** references that only tie entries together: docRef, chunkRef, fromRef, checkpointRef,
+    traceId, orgId and questionHash.
+  - **Raw data:** each row writes out its full entry, hashes included, only when opened.
+- **Accessibility:** axe (WCAG 2.0 and 2.1, A and AA) ran on `main` and on this branch.
+  - **New violations:** none, in any screen both builds have.
+  - **What both builds share:** the same colour-contrast failures, 26 on the workspace screen, mostly from the
+    app's shared grey (see Deferred).
+  - **Targets:** chips and source buttons are at least 24 px (WCAG 2.2, 2.5.8).
+  - **The demo note:** it is darker than the shared grey, at 5.2:1.
+- **Phone width (400 px):** no screen scrolls sideways. The audit table keeps a minimum width and scrolls inside its
+  frame.
+- **Screenshots:** the seven worked-example screenshots and the two README workspace screenshots were re-taken. Answers
+  now show chips, and demo documents no longer show a link.
+
 ---
 
 ## Deferred (not decided yet)
@@ -833,6 +920,13 @@ These are open. Pick them up in a later round and record the decision here.
 - **Directory caching:** `UserDirectory.bySub` re-reads the whole directory on every request, and every proxied
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
+- **UI round 1's "not now":** a label for which writer answered, and "Show more" for long lists (D57).
+- **Colour contrast:** axe finds 26 failures on `main`'s workspace screen, in the header, the lists and the panels.
+  - **Most of them:** one shared grey, `#73818b` in `apps/web/src/ui.css`, at 3.8–4:1 against the 4.5:1 minimum.
+  - **The worst:** the header's context label, at 2.46:1.
+- **Workspace build:** `vite build` copies Next's `public/` folder, which holds the last published bundle. So each
+  `build:workspace`, and each `pnpm --dir apps/web dev`, nests the previous bundle one level deeper under
+  `public/workspace/`. Setting Vite's `publicDir: false` would stop it.
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,
   source-specific FGA types, and webhooks. The snapshot write runs after every successful response, `/health`
   included, which matters once the SSO API is reachable from the internet.
