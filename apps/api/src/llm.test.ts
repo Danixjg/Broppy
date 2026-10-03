@@ -47,7 +47,7 @@ describe("ChatLlm", () => {
     expect(body).toMatchObject({ model: "hy3", stream: false, max_tokens: 1500 });
   });
 
-  it("uses Groq's endpoint without Hunyuan-only fields", async () => {
+  it("uses Groq's endpoint with a fixed seed and without Hunyuan-only fields", async () => {
     const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "At 2 PM. [jira:PAY-101:0]" }));
     const client = new ChatLlm({ provider: "groq", apiKey: "gsk-key", model: "llama-3.3-70b-versatile",
       fetch: fetcher as typeof fetch });
@@ -56,7 +56,9 @@ describe("ChatLlm", () => {
     expect(url).toBe("https://api.groq.com/openai/v1/chat/completions");
     const body = JSON.parse(init.body as string);
     expect(body).not.toHaveProperty("enable_enhancement");
-    expect(body).toMatchObject({ model: "llama-3.3-70b-versatile", stream: false, max_tokens: 1500 });
+    expect(body).toMatchObject({ model: "llama-3.3-70b-versatile", stream: false, max_tokens: 1500, seed: 1 });
+    // OpenAI recommends gpt-oss's default sampling, so only the seed makes answers repeat.
+    expect(body).not.toHaveProperty("temperature");
   });
 
   it("returns only the answer from a reasoning model, with the tokens the provider counted", async () => {

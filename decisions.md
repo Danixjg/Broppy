@@ -726,6 +726,15 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **One fallback:** in scenario 4, one answer came from the built-in writer, because Groq's free plan rate-limited
     the call. The page says so.
   - **Header:** it now names the search as well as the writer.
+- **Repeatable answers** (*added 3 Oct*).
+  - **What showed it:** on the team's real sign-in, Ravi's scenario 1 answer was three lines. It left out DB-12's
+    status and his #db-oncall blocker, although both were sent to the model, and the captured run had included them.
+  - **Why:** the request set no seed, so each call sampled afresh.
+  - **Now:** Groq requests carry a fixed seed, so the same question over the same passages gets the same answer as
+    far as Groq can manage. The temperature stays at the default, because OpenAI recommends 1.0 for gpt-oss and
+    forcing 0 can make a reasoning model loop.
+  - **Not solved:** a seed makes answers repeat; it doesn't make them complete. That is judged on the next
+    `pnpm scenarios:model` run.
 
 ---
 
