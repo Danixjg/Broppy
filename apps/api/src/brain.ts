@@ -688,8 +688,9 @@ export class Brain {
     const inProject = issues.filter(issue => issue.metadata.project === project);
     const model = inProject.find(issue => declared.includes(issue.docId)) ??
       [...inProject].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
-    const permissions = model && await this.connectors.jira.fetchPermissions(model.docId);
-    if (!model || !permissions) throw new Error("Unknown document");
+    const modelPermissions = model && await this.connectors.jira.fetchPermissions(model.docId);
+    if (!model || !modelPermissions) throw new Error("Unknown document");
+    const permissions = this.narrowedToThread(modelPermissions, model.tier, threadDocId);
     const numbers = (await this.connectors.jira.listIds()).map(id => id.match(new RegExp(`^jira:${project}-(\\d+)$`))?.[1])
       .filter((value): value is string => Boolean(value)).map(Number);
     const key = `${project}-${Math.max(0, ...numbers) + 1}`;
@@ -703,6 +704,26 @@ export class Brain {
     await this.sync("jira");
     this.audit.append("task_created", actor.id, { ...this.auditDocument(doc.docId), fromDocId: threadDocId });
     return { docId: doc.docId, title: doc.title };
+  }
+
+  /**
+   * The task quotes the thread, so its readers must be a subset of the thread's readers. When the model issue would
+   * let anyone in who can't open the thread, the permissions shrink to exactly the people who can open both.
+   */
+  private narrowedToThread(model: SourcePermission, tier: Tier, threadDocId: string): SourcePermission {
+    const probe = { docId: "task-audience", permissions: model, tier };
+    const modelGrants = new FgaAdapter();
+    modelGrants.upsert(probe);
+    const both = this.users.filter(user => modelGrants.check(user, probe.docId).allowed);
+    const readers = both.filter(user => this.fga.check(user, threadDocId).allowed);
+    if (readers.length === both.length) return model;
+    const jiraIdentity = (user: User) => user.platformIdentities?.jira;
+    return {
+      users: readers.map(user => user.email), groups: [], public: false,
+      native: model.native?.source === "jira"
+        ? { ...model.native, issueViewers: readers.map(jiraIdentity).filter((id): id is string => Boolean(id)) }
+        : model.native
+    };
   }
 
   /** Marks a Jira task done, on mock sources only. A status is metadata, so nothing is re-chunked or re-embedded. */

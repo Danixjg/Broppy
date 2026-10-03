@@ -38,6 +38,15 @@ describe("a Jira task from an agreement", () => {
     await expect(brain.createTask(david, thread, sentence)).rejects.toThrow("Already tracked");
   });
 
+  it("is not readable by someone who lost access to the thread it quotes", async () => {
+    const brain = await brainWith();
+    await brain.removeSlackMember(brain.user("maya")!, thread, "nur");
+    expect(await visibleTo(brain, "nur", thread)).toBe(false);
+    await brain.createTask(brain.user("david")!, thread, sentence);
+    expect(await visibleTo(brain, "nur", "jira:DB-16")).toBe(false);
+    expect(await visibleTo(brain, "david", "jira:DB-16")).toBe(true);
+  });
+
   it("is refused to someone who can't open the thread, for text that isn't an agreement, and on live sources", async () => {
     const brain = await brainWith();
     await expect(brain.createTask(brain.user("alex")!, thread, sentence)).rejects.toThrow("Unknown document");
