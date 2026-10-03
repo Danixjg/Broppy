@@ -667,6 +667,37 @@ h3 {
   display:inline-block;
   font-size:.76rem
 }
+.pending {
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  margin:0;
+  color:#4f6475
+}
+.spinner {
+  flex:none;
+  width:.9rem;
+  height:.9rem;
+  border:2px solid #c9d7e0;
+  border-top-color:#1d4e7e;
+  border-radius:50%
+}
+.pending-seconds {
+  margin-left:auto;
+  color:#627785;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
+}
+@media(prefers-reduced-motion:no-preference) {
+  .spinner {
+    animation:brain-spin .8s linear infinite
+  }
+}
+@keyframes brain-spin {
+  to {
+    transform:rotate(360deg)
+  }
+}
 .query-form {
   border:1px solid #d6e0e5;
   background:#fff;

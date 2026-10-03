@@ -549,10 +549,24 @@ function renderAnswer(target, result, question) {
     button.addEventListener("click", () => showTrace(result.traceId)); target.append(button);
   }
 }
+// While an answer is on its way: a spinner and the seconds so far, so a long wait doesn't look frozen. The chat is a
+// live region, so the counter is hidden from screen readers, which hear the label once.
+function showPending(target, label) {
+  clear(target); target.hidden = false;
+  const line = node("p", "pending");
+  const spinner = node("span", "spinner"); spinner.setAttribute("aria-hidden", "true");
+  const seconds = node("span", "pending-seconds"); seconds.setAttribute("aria-hidden", "true");
+  line.append(spinner, label, seconds);
+  target.append(line);
+  const started = Date.now();
+  const timer = setInterval(() => { seconds.textContent = `${Math.round((Date.now() - started) / 1000)} s`; }, 1000);
+  return () => clearInterval(timer);
+}
 async function ask(question, target, displayQuestion = false) {
   const generation = state.identity;
-  target.hidden = false; setMessage(target, "Checking accessible sources…");
-  const result = await post("/v1/query", { question });
+  const stop = showPending(target, "Checking permissions and sources…");
+  let result;
+  try { result = await post("/v1/query", { question }); } finally { stop(); }
   if (generation !== state.identity) return null;
   renderAnswer(target, result, displayQuestion ? question : "");
   if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
@@ -746,8 +760,9 @@ $("queryForm").addEventListener("submit", async event => {
   event.preventDefault(); const question = $("question").value.trim(); if (!question) return;
   const generation = state.identity; const history = $("chatHistory");
   appendText(history, "div", "message question", question);
-  const response = node("div", "message answer", "Checking accessible sources…"); history.append(response);
+  const response = node("div", "message answer"); history.append(response);
   $("askButton").disabled = true; $("queryStatus").textContent = "Checking permissions and source versions…";
+  history.scrollTop = history.scrollHeight;
   try { const result = await ask(question, response); if (generation !== state.identity) return; $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = ""; }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
@@ -755,9 +770,10 @@ $("queryForm").addEventListener("submit", async event => {
 // A catch-up chosen by the API from this person's role and groups, kept to the chosen project.
 $("catchUp").addEventListener("click", async () => {
   const target = $("catchUpResult"); const generation = state.identity;
-  target.hidden = false; setMessage(target, "Preparing your catch-up…");
+  const stop = showPending(target, "Preparing your catch-up…");
   try {
     const result = await post("/v1/catch-up", state.project ? { project: state.project } : {});
+    stop();
     if (generation !== state.identity) return;
     if (result.kind === "audit") {
       clear(target); appendText(target, "strong", "", "Audit trail, last 7 days");
@@ -765,6 +781,7 @@ $("catchUp").addEventListener("click", async () => {
       target.append(list);
     } else renderAnswer(target, { ...result.answer, traceId: result.traceId }, `Asked: ${safeText(result.question)}`);
   } catch (error) { if (generation === state.identity) target.textContent = error.message; }
+  finally { stop(); }
 });
 $("projectSelect").addEventListener("change", () => {
   state.project = $("projectSelect").value;
