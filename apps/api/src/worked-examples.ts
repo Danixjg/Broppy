@@ -17,6 +17,8 @@ export interface WorkedExampleOptions {
   at(iso: string): void;
   /** Who wrote the answers, for the introduction. */
   writer: string;
+  /** How search ranked documents, for the introduction, when it used more than keywords. */
+  search?: string;
 }
 
 const DAY = "2026-10-15";
@@ -85,7 +87,7 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
     return { answer, trace: brain.audit.entries.filter(entry => entry.data.traceId === traceId) };
   };
   return [
-    ...introduction(options.writer, options.llm !== undefined),
+    ...introduction(options.writer, options.llm !== undefined, options.search),
     ...await scenario1(freshBrain, ask),
     ...await scenario2(freshBrain, ask, at),
     ...await scenario3(freshBrain, ask),
@@ -94,7 +96,7 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
   ].join("\n");
 }
 
-function introduction(writer: string, withModel: boolean): string[] {
+function introduction(writer: string, withModel: boolean, search?: string): string[] {
   return [
     withModel ? "# Worked examples with a language model" : "# Worked examples",
     "",
@@ -107,6 +109,7 @@ function introduction(writer: string, withModel: boolean): string[] {
     "",
     "- **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so \"last week\" finds it.",
     `- **Writer:** ${writer}`,
+    ...(search ? [`- **Search:** ${search}`] : []),
     "- **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in " +
       "compliance, Alex is an intern and Wei Ming is a contractor.",
     "- **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose " +

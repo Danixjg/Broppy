@@ -719,6 +719,13 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **Now:** both sides are folded before they're compared: NFKC, hyphen and dash variants, curly quotes and special
     spaces. A kept line shows the source's own sentence.
   - **Unchanged:** a reworded sentence is still dropped.
+- **The model version of the worked examples** (*captured 3 Oct*, the third run, with Groq and Cloudflare's
+  embeddings) is committed as `docs/worked-examples-model.md`.
+  - **What it shows:** scenario 1 cites the same four sources as the built-in writer, the runbook answer has every
+    step, and scenario 3's fixed reply holds.
+  - **One fallback:** in scenario 4, one answer came from the built-in writer, because Groq's free plan rate-limited
+    the call. The page says so.
+  - **Header:** it now names the search as well as the writer.
 
 ---
 
