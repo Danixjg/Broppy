@@ -790,6 +790,12 @@ Each entry records the options that were considered, what was chosen, and the tr
   give that function a fifth input (a key ID), so the statement failed and, with it, the whole migration. It now grants
   whatever versions of `create_secret` and `update_secret` the project has. The failure was found while applying the
   migrations to the team's Supabase project.
+- **Seeding the demo users.** The seed script reported only a status code. It now prints the reason Auth0 or
+  Supabase gave, and `apps/web/AUTH0.md` lists what each reason means.
+  - **The 400 the team hit:** new Auth0 database connections require passwords of at least 15 characters by default,
+    while the script only checks for 12. The guide now says the connection's policy applies too.
+  - **Windows:** the guide gained a PowerShell version of the command.
+  - **Afterwards:** the guide says to delete the machine-to-machine application once seeding is done.
 
 ---
 
