@@ -31,13 +31,13 @@ export class ModelCallError extends Error {
 export const REQUEST_TIMEOUT_MS = 60_000;
 
 // All speak the same chat completions API. Hunyuan (Tencent's China site) has its search enhancement turned off, so
-// answers use only our context; TokenHub is Tencent's international model service. Groq gets a fixed seed, so the same
-// question over the same passages gets the same answer as far as Groq can manage. The temperature stays at the
-// default: OpenAI recommends 1.0 for gpt-oss, and forcing 0 can make a reasoning model loop.
+// answers use only our context; TokenHub is Tencent's international model service. Sampling stays at each model's
+// default: OpenAI recommends temperature 1.0 for gpt-oss, and forcing 0 can make a reasoning model loop. A fixed seed
+// was tried on Groq and didn't make the same question get the same answer, so answers vary from run to run.
 const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unknown> }> = {
   hunyuan: { baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", extra: { enable_enhancement: false } },
   tokenhub: { baseUrl: "https://tokenhub-intl.tencentcloudmaas.com/v1", extra: {} },
-  groq: { baseUrl: "https://api.groq.com/openai/v1", extra: { seed: 1 } }
+  groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
 };
 
 // The model only chooses and orders sentences: a line not copied exactly from a passage is dropped after it answers
