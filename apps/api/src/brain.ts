@@ -765,6 +765,42 @@ export class Brain {
     this.audit.append("native_permission_changed", actor.id, { ...this.auditDocument(docId) });
   }
 
+  /** An explicit block: the person loses this document whatever the source, the tier or any grant would allow. */
+  async blockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.block(docId, userId);
+    this.audit.append("user_blocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  async unblockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.unblock(docId, userId);
+    this.audit.append("user_unblocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  /** Lets one person past the tier of a restricted document, for a stated reason, until a date at most 90 days away. The admin who approves it is its owner. */
+  async grantRestricted(actor: User, docId: string, userId: string, reason: string, expiresAt: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.grantRestricted(docId, { userId, owner: actor.id, reason: reason.trim(), expiresAt });
+    this.audit.append("restricted_grant_created", actor.id, { ...this.auditDocument(docId), userId, reason: reason.trim(), expiresAt });
+    await this.persist();
+  }
+
+  /** Removes restricted grants that have ended, and records each one. */
+  sweepRestrictedGrants(now = new Date()): void {
+    for (const item of this.fga.sweepExpired(now)) {
+      this.audit.append("restricted_grant_expired", "sync", { ...this.auditDocument(item.docId), userId: item.userId, owner: item.owner });
+    }
+  }
+
   removeUserFromGroup(actor: User, userId: string, group: string): void {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");

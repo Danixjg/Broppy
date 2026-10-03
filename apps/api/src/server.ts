@@ -327,6 +327,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, { ok: true });
       }
 
+      if (request.method === "POST" && (url.pathname === "/v1/admin/block" || url.pathname === "/v1/admin/unblock")) {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string") throw new Error("Invalid block");
+        if (url.pathname === "/v1/admin/block") await brain.blockUser(user, input.docId, input.userId);
+        else await brain.unblockUser(user, input.docId, input.userId);
+        return await reply(response, 200, { ok: true });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/restricted-grant") {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string" || typeof input.reason !== "string" ||
+          typeof input.expiresAt !== "string") throw new Error("Invalid grant");
+        await brain.grantRestricted(user, input.docId, input.userId, input.reason, input.expiresAt);
+        return await reply(response, 200, { ok: true });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/admin/channel-member") {
         const input = await body(request);
         if (typeof input.userId !== "string" || typeof input.docId !== "string") {

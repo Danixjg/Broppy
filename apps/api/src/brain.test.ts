@@ -38,6 +38,20 @@ describe("Internal Brain security and sync", () => {
     expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "source_check_failed" }));
   });
 
+  it("lets an admin block one person from a document, audited, with no effect on others", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const ravi = brain.user("ravi")!;
+    const ask = async () => (await brain.query(ravi, "What are the fraud chargeback override rules?")).citations.map(c => c.docId);
+    expect(await ask()).toContain("slack:fraud-private");
+    await expect(brain.blockUser(brain.user("alex")!, "slack:fraud-private", "ravi")).rejects.toThrow("Forbidden");
+    await brain.blockUser(brain.user("maya")!, "slack:fraud-private", "ravi");
+    expect(await ask()).not.toContain("slack:fraud-private");
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "user_blocked", actor: "maya" }));
+    await brain.unblockUser(brain.user("maya")!, "slack:fraud-private", "ravi");
+    expect(await ask()).toContain("slack:fraud-private");
+  });
+
   it("links each item to what it names and what names it, among items that exist", async () => {
     const brain = new Brain();
     await brain.syncAll();
