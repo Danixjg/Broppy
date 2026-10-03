@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerLines, isDemoAddress, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, auditSummary, isDemoAddress, isRoutineSync, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const documents = JSON.parse(readFileSync(new URL("../../data/mock/documents.json", import.meta.url), "utf8"));
 const content = docId => documents.find(doc => doc.docId === docId).content;
@@ -79,4 +79,60 @@ test("spots audit questions without catching the scenarios' document questions",
     "What does PAY-101 need before cutover?",
     "Who owns the access controls for the payment gateway?"
   ]) assert.equal(looksLikeAuditQuestion(question), false, question);
+});
+
+test("summarises audit events in plain words, without internal references", () => {
+  const ref = "a".repeat(64);
+  const entry = (type, data) => ({ sequence: 1, timestamp: "2026-10-03T14:27:08.000Z", type, actor: "ravi",
+    data: { traceId: "t-1", orgId: "org_x", docRef: ref, chunkRef: ref, fromRef: ref, checkpointRef: ref, questionHash: ref, ...data } });
+  const cases = [
+    [entry("query_received", { question: "What's the status of DB-12?" }), "Asked: \"What's the status of DB-12?\""],
+    [entry("query_planned", { sources: ["slack"], from: "2026-09-26T00:00:00.000Z", to: "2026-10-03T14:27:08.800Z" }), "Planned: Slack first, 2026-09-26 to 2026-10-03"],
+    [entry("query_planned", { sources: [] }), "Planned: all sources"],
+    [entry("candidates_found", { count: 8 }), "Found 8 candidates before any access check"],
+    [entry("candidate_ranked", { docId: "jira:DB-12", score: 0.4706 }), "Ranked jira:DB-12 (score 0.4706)"],
+    [entry("candidate_linked", { docId: "drive:db-wave-checklist", fromDocId: "jira:DB-12", score: 0.2353 }), "Linked drive:db-wave-checklist from jira:DB-12 (score 0.2353)"],
+    [entry("access_decision", { docId: "jira:DB-12", allowed: true, reason: "fga" }), "Allowed jira:DB-12"],
+    [entry("access_decision", { docId: "slack:db-oncall", allowed: false, reason: "fga" }), "Denied slack:db-oncall (no permission)"],
+    [entry("access_decision", { docId: "drive:q3-incident", allowed: false, reason: "tier" }), "Denied drive:q3-incident (restricted tier)"],
+    [entry("live_access_decision", { docId: "jira:DB-12", allowed: true, sourceVersion: 4, refreshed: false }), "Live check allowed jira:DB-12, version 4"],
+    [entry("context_sent", { chunkIds: ["jira:DB-12:0", "slack:db-migration:0"] }), "Sent 2 passages to the writer: jira:DB-12:0, slack:db-migration:0"],
+    [entry("llm_fallback", { reason: "rate_limited" }), "The built-in writer answered: the model service was busy"],
+    [entry("llm_fallback", { reason: "ungrounded" }), "The built-in writer answered: the model quoted no source word for word"],
+    [entry("output_access_decision", { docId: "jira:DB-12", allowed: true }), "Rechecked after writing: allowed jira:DB-12"],
+    [entry("answer_returned", { answer: NO_RESULT, citationIds: [], empty: true }), "Answered with the fixed no-result reply"],
+    [entry("answer_returned", { answer: "DB-12 (in progress) tracks the project. [jira:DB-12:0]\nThe [draft] plan is blocked. [jira:DB-15:0]", citationIds: ["jira:DB-12:0", "jira:DB-15:0"], empty: false }),
+      "Answered with 2 citations: \"DB-12 (in progress) tracks the project. The [draft] plan is blocked.\""],
+    [entry("document_synced", { docId: "slack:db-migration", contentChanged: false, permissionChanged: false }), "Synced slack:db-migration: no change"],
+    [entry("document_synced", { docId: "slack:db-migration", contentChanged: false, permissionChanged: true }), "Synced slack:db-migration: permissions changed"],
+    [entry("import_completed", { source: "slack", found: 5, indexed: 4, skipped: 1, failed: 0 }), "Finished importing Slack: 4 items indexed, 1 skipped"],
+    [entry("sync_failed", { source: "jira" }), "Sync failed for Jira"],
+    [entry("search_fallback", {}), "Searched the local index only: the Supabase search failed"],
+    [entry("audit_searched", { query: "ravi", filters: { user: "ravi" }, results: 53 }), "Searched the audit for \"ravi\": 53 results"]
+  ];
+  for (const [event, summary] of cases) {
+    assert.equal(auditSummary(event), summary);
+    assert.doesNotMatch(auditSummary(event), /[0-9a-f]{64}|org_x|t-1/);
+  }
+  const unknown = auditSummary(entry("something_new", { docId: "jira:DB-12", note: "kept" }));
+  assert.equal(unknown, "something new · docId: jira:DB-12 · note: kept");
+  assert.equal(auditSummary(null), "");
+});
+
+test("has a summary of its own for every event the API writes", () => {
+  const code = ["brain.ts", "server.ts"].map(file => readFileSync(new URL(`../api/src/${file}`, import.meta.url), "utf8")).join("\n");
+  const types = [...new Set([...code.matchAll(/\b(?:append|audit)\(\s*"([a-z_]+)"/g)].map(match => match[1]))];
+  assert.ok(types.length >= 35, `found only ${types.length} event types`);
+  // An event without a summary of its own falls back to its type name with the underscores spaced out.
+  for (const type of types) assert.notEqual(auditSummary({ type, data: {} }), type.replaceAll("_", " "), type);
+});
+
+test("treats only a sync that changed nothing as routine", () => {
+  const sync = (contentChanged, permissionChanged) => ({ type: "document_synced", data: { docId: "jira:DB-12", contentChanged, permissionChanged } });
+  assert.equal(isRoutineSync(sync(false, false)), true);
+  assert.equal(isRoutineSync(sync(false, true)), false);
+  assert.equal(isRoutineSync(sync(true, false)), false);
+  assert.equal(isRoutineSync({ type: "document_synced", data: { docId: "jira:DB-12" } }), false);
+  assert.equal(isRoutineSync({ type: "access_decision", data: { allowed: true } }), false);
+  assert.equal(isRoutineSync(null), false);
 });

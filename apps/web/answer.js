@@ -1,4 +1,4 @@
-// Answer helpers for the workspace. They touch no page, so node checks them (answer.nodecheck.js).
+// Answer and audit helpers for the workspace. They touch no page, so node checks them (answer.nodecheck.js).
 
 const text = value => typeof value === "string" ? value : "";
 
@@ -101,4 +101,106 @@ const AUDIT_WORDING = [
 export function looksLikeAuditQuestion(question) {
   const value = text(question);
   return AUDIT_WORDING.some(pattern => pattern.test(value));
+}
+
+const names = { slack: "Slack", jira: "Jira", confluence: "Confluence", drive: "Drive" };
+const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const count = value => Number(value) || 0;
+const day = value => text(value).slice(0, 10);
+const short = (value, limit = 160) => {
+  const flat = text(value).replace(/\s+/g, " ").trim();
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+};
+// Why the access check said no (packages/fga-adapter), and why the built-in writer answered instead of the model.
+const DENIED = { fga: "no permission", blocked: "blocked by an admin", tier: "restricted tier" };
+const FALLBACK = {
+  budget: "the model's token budget is spent",
+  daily_limit: "today's model allowance is spent",
+  rate_limited: "the model service was busy",
+  meter: "the usage meter couldn't be read",
+  error: "the model call failed",
+  ungrounded: "the model quoted no source word for word"
+};
+// A citation marker as answers write it: [source:id:passage].
+const CITATION = /\s*\[[a-z]+:[^\]\s]+:\d+\]/g;
+// References that only tie an entry to others. A reader never needs them, and the raw entry still has them.
+const hiddenKey = key => key === "traceId" || key === "orgId" || key === "questionHash" || key.endsWith("Ref");
+
+/** One plain-language line for an audit entry, without the references that only link entries together. */
+export function auditSummary(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const data = entry.data && typeof entry.data === "object" ? entry.data : {};
+  const doc = text(data.docId);
+  const source = names[data.source] ?? text(data.source);
+  const allowed = data.allowed === true;
+  switch (entry.type) {
+    case "query_received": return `Asked: "${short(data.question, 300)}"`;
+    case "query_planned": {
+      const first = Array.isArray(data.sources) && data.sources.length
+        ? `${data.sources.map(item => names[item] ?? text(item)).join(" and ")} first` : "all sources";
+      const dates = data.from && data.to ? `, ${day(data.from)} to ${day(data.to)}` : "";
+      return `Planned: ${first}${dates}${data.project ? `, kept to ${text(data.project)}` : ""}`;
+    }
+    case "embedding_fallback": return `Searched by keywords only: the embedding service was ${data.reason === "paused" ? "paused" : "unavailable"}`;
+    case "search_fallback": return "Searched the local index only: the Supabase search failed";
+    case "candidates_found": return `Found ${plural(count(data.count), "candidate")} before any access check`;
+    case "candidate_ranked": return `Ranked ${doc} (score ${data.score})`;
+    case "candidate_linked": return `Linked ${doc} from ${text(data.fromDocId)} (score ${data.score})`;
+    case "access_decision": return allowed ? `Allowed ${doc}` : `Denied ${doc} (${DENIED[data.reason] ?? (text(data.reason) || "no reason given")})`;
+    case "live_access_decision":
+      return `Live check ${allowed ? "allowed" : "denied"} ${doc}${data.sourceVersion ? `, version ${data.sourceVersion}` : ""}${data.refreshed === true ? ", refreshed" : ""}`;
+    case "live_refresh": return `Refreshed ${doc} from its source${data.version ? `, now version ${data.version}` : ""}`;
+    case "live_permission_refresh": return `Refreshed the permissions of ${doc} from its source`;
+    case "source_check_failed": return `Couldn't check ${doc} at its source, so it was left out`;
+    case "context_sent": {
+      const ids = Array.isArray(data.chunkIds) ? data.chunkIds.map(text) : [];
+      return `Sent ${plural(ids.length, "passage")} to the writer${ids.length ? `: ${ids.join(", ")}` : ""}`;
+    }
+    case "llm_fallback": return `The built-in writer answered: ${FALLBACK[data.reason] ?? (text(data.reason) || "the model was unavailable")}`;
+    case "output_access_decision": return `Rechecked after writing: ${allowed ? "allowed" : "denied"} ${doc}`;
+    case "answer_returned": {
+      if (data.empty === true) return "Answered with the fixed no-result reply";
+      const cited = Array.isArray(data.citationIds) ? data.citationIds.length : 0;
+      return `Answered with ${plural(cited, "citation")}: "${short(text(data.answer).replace(CITATION, ""))}"`;
+    }
+    case "document_synced": {
+      const changed = data.contentChanged && data.permissionChanged ? "content and permissions changed"
+        : data.contentChanged ? "content changed" : data.permissionChanged ? "permissions changed" : "no change";
+      return `Synced ${doc}: ${changed}`;
+    }
+    case "document_deleted": return `Removed ${doc}: it's gone from its source`;
+    case "import_started": return `Started importing ${source}${typeof data.found === "number" ? `: ${plural(data.found, "item")}` : ""}`;
+    case "import_completed": {
+      const extra = [count(data.skipped) && `${count(data.skipped)} skipped`, count(data.failed) && `${count(data.failed)} failed`].filter(Boolean);
+      return `Finished importing ${source}: ${plural(count(data.indexed), "item")} indexed${extra.length ? `, ${extra.join(", ")}` : ""}`;
+    }
+    case "sync_failed": return `Sync failed for ${source}`;
+    case "connection_created": return `${data.reconnected ? "Reconnected" : "Connected"} ${source}`;
+    case "connection_removed": return `Disconnected ${source}`;
+    case "scope_changed": return `Changed what ${source} imports: ${text(data.mode) || "all"}${data.futureOnly ? ", only what is new" : ""}`;
+    case "task_created": return `Created ${doc} from ${text(data.fromDocId)}`;
+    case "task_status_changed": return `Marked ${doc} ${text(data.status)}`;
+    case "tier_narrowed": return `Narrowed ${doc} to the ${text(data.tier)} tier`;
+    case "native_permission_changed": return `Changed the source permissions of ${doc}`;
+    case "user_blocked": return `Blocked ${text(data.userId)} from ${doc}`;
+    case "user_unblocked": return `Unblocked ${text(data.userId)} from ${doc}`;
+    case "restricted_grant_created":
+      return `Gave ${text(data.userId)} restricted access to ${doc} until ${day(data.expiresAt)}: ${short(data.reason, 120)}`;
+    case "restricted_grant_expired": return `Restricted access to ${doc} for ${text(data.userId)} expired`;
+    case "group_membership_removed": return `Removed ${text(data.userId)} from the ${text(data.group)} group`;
+    case "channel_membership_removed": return `Removed ${text(data.userId)} from ${doc}`;
+    case "source_content_changed": return `Edited ${doc} at its source`;
+    case "audit_searched": return `Searched the audit for "${short(data.query, 120)}": ${plural(count(data.results), "result")}`;
+    case "request_denied": return `Refused ${text(data.method)} ${text(data.path)}`;
+    default: {
+      const pairs = Object.entries(data).filter(([key]) => !hiddenKey(key))
+        .map(([key, value]) => `${key}: ${value !== null && typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+      return [text(entry.type).replaceAll("_", " "), ...pairs].join(" · ");
+    }
+  }
+}
+
+/** A sync that re-read a document and found nothing changed: worth recording, rarely worth reading. */
+export function isRoutineSync(entry) {
+  return entry?.type === "document_synced" && entry.data?.contentChanged === false && entry.data?.permissionChanged === false;
 }

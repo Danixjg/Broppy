@@ -878,6 +878,41 @@ form button[type=submit],#applyTier,#previewAccess,#refreshHealth {
   font-size:.8rem;
   margin:.7rem 0
 }
+.audit-toggle {
+  display:inline-flex;
+  align-items:center;
+  gap:.4rem;
+  color:#31516b;
+  font-weight:650
+}
+.audit-toggle input {
+  width:1rem;
+  height:1rem;
+  margin:0;
+  accent-color:#245b81
+}
+.audit-line {
+  margin:0
+}
+.raw-data {
+  margin-top:.35rem
+}
+.raw-data summary {
+  width:max-content;
+  cursor:pointer;
+  color:#235d9c;
+  font-weight:650
+}
+.raw-data pre {
+  margin:.4rem 0 0;
+  padding:.55rem;
+  background:#f5f8f9;
+  border-radius:.35rem;
+  font-size:.7rem;
+  line-height:1.45;
+  white-space:pre-wrap;
+  word-break:break-all
+}
 .table-wrap {
   overflow:auto;
   background:#fff;

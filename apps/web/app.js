@@ -1,5 +1,5 @@
 import { narrowerPermissionError } from "./permissions.js";
-import { answerLines, isDemoAddress, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, auditSummary, isDemoAddress, isRoutineSync, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
@@ -102,10 +102,11 @@ function setView(view, { load = true } = {}) {
 function resetIdentity() {
   state.identity++;
   state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
-  for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
+  for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
   for (const id of ["question", "adminContent", "auditSearch", "memberGroup", "memberChannelDoc"]) $(id).value = "";
+  $("hideRoutine").checked = true;
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
   $("adminTab").hidden = role() !== "admin";
@@ -626,19 +627,31 @@ function localAuditSearch(entries, query) {
   const normalized = terms.map(term => ({ denied: "false", allowed: "true", permission: "permission", access: "access" })[term] || term);
   return entries.filter(entry => normalized.every(term => `${entry.type} ${entry.actor} ${eventSummary(entry)}`.toLowerCase().includes(term)));
 }
+// The list on screen may leave out routine sync checks; state.auditEntries, the search and the CSV export keep every entry.
 function renderAudit(entries) {
   state.auditEntries = entries; clear($("auditRows"));
-  for (const entry of entries) {
+  const shown = $("hideRoutine").checked ? entries.filter(entry => !isRoutineSync(entry)) : entries;
+  const hidden = entries.length - shown.length;
+  $("routineHidden").textContent = hidden ? `${hidden} hidden` : "";
+  for (const entry of shown) {
     const row = node("tr", "");
     appendText(row, "td", "", `#${entry.sequence} · ${fmtDate(entry.timestamp)}`);
     appendText(row, "td", "", entry.type);
     appendText(row, "td", "", entry.actor);
-    appendText(row, "td", "", eventSummary(entry));
+    const details = node("td", ""); appendText(details, "p", "audit-line", auditSummary(entry));
+    // The full entry is written out only when someone opens it, so a long log stays light.
+    const raw = node("details", "raw-data"); appendText(raw, "summary", "", "Raw data");
+    raw.addEventListener("toggle", () => { if (raw.open && !raw.querySelector("pre")) appendText(raw, "pre", "", JSON.stringify(entry, null, 2)); });
+    details.append(raw); row.append(details);
     const cell = node("td", ""); const button = node("button", "", "Inspect proof"); button.type = "button";
     button.addEventListener("click", () => inspectProof(entry.sequence)); cell.append(button); row.append(cell);
     $("auditRows").append(row);
   }
-  if (!entries.length) { const row = node("tr", ""); const cell = node("td", "empty", "No matching audit events."); cell.colSpan = 5; row.append(cell); $("auditRows").append(row); }
+  if (!shown.length) {
+    const row = node("tr", "");
+    const cell = node("td", "empty", hidden ? "Only routine sync checks match. Untick “Hide routine sync checks” to see them." : "No matching audit events.");
+    cell.colSpan = 5; row.append(cell); $("auditRows").append(row);
+  }
 }
 async function loadAudit() {
   if (role() !== "compliance") return;
@@ -658,12 +671,12 @@ async function searchAudit(query) {
     const result = await call(`/v1/audit/search?${new URLSearchParams({ q: query, ...($("auditFrom").value ? { from: $("auditFrom").value } : {}), ...($("auditTo").value ? { to: $("auditTo").value } : {}) })}`);
     if (generation !== state.identity || role() !== "compliance") return;
     const entries = Array.isArray(result.entries) ? result.entries : Array.isArray(result) ? result : [];
-    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching events`;
+    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching event${entries.length === 1 ? "" : "s"}`;
   } catch (error) {
     if (generation !== state.identity || role() !== "compliance") return;
     if (error.status !== 404) { $("auditStatus").textContent = error.message; return; }
     const entries = localAuditSearch(state.audit.entries || [], query);
-    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching events · local search`;
+    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching event${entries.length === 1 ? "" : "s"} · local search`;
   }
 }
 async function inspectProof(sequence) {
@@ -844,6 +857,7 @@ $("auditSearchForm").addEventListener("submit", event => { event.preventDefault(
 $("refreshAudit").addEventListener("click", loadAudit);
 $("sealAudit").addEventListener("click", async () => { const generation = state.identity; try { const result = await post("/v1/audit/seal", {}); if (generation !== state.identity || role() !== "compliance") return; await loadAudit(); $("auditStatus").textContent = result.batch ? "Audit batch sealed." : "No new events to seal."; } catch (error) { if (generation === state.identity && role() === "compliance") $("auditStatus").textContent = error.message; } });
 $("exportAudit").addEventListener("click", exportAudit);
+$("hideRoutine").addEventListener("change", () => renderAudit(state.auditEntries));
 $("refreshHealth").addEventListener("click", loadHealth);
 $("retrySync").addEventListener("click", async () => {
   const generation = state.identity; $("healthStatus").textContent = "Running connector sync…";
