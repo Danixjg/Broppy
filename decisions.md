@@ -702,6 +702,15 @@ Each entry records the options that were considered, what was chosen, and the tr
   guide's model step, the architecture page, and the hosting diagram with the trust-boundary table.
 - **The sign-in API on Groq:** `sso.env.example` has the Groq lines and a daily allowance of 100. The API counts its
   answers in `/data/usage-sso.json`, as before.
+- **The model's instructions** (*added 3 Oct*).
+  - **What the run showed:** `pnpm scenarios:model` with Groq and Cloudflare kept every access rule. But the model
+    answered only the Slack half of scenario 1, with no Jira status. It also left out Ravi's #db-oncall line and
+    step 1 of the runbook.
+  - **Why:** the instructions only said to copy sentences and cite them.
+  - **Now:** they also ask the model to answer every part of the question, to use every passage that helps and leave
+    out unrelated ones, to keep status labels and every step, and to put the direct answer first, in at most eight
+    sentences.
+  - **Unchanged:** sentences must still be copied exactly, so the grounding check is the same.
 
 ---
 

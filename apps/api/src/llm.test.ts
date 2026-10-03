@@ -27,6 +27,12 @@ describe("ChatLlm", () => {
     expect(body.messages.map((message: { role: string }) => message.role)).toEqual(["system", "user"]);
     expect(JSON.parse(body.messages[1].content)).toEqual({ question: "When is cutover?", context });
     expect(init.body).not.toContain("restricted-title-sentinel");
+    // The model only chooses and orders sentences copied from the passages, and it must cover the whole question.
+    const system: string = body.messages[0].content;
+    for (const rule of [/copied exactly/, /every part of the question/, /every passage that helps/, /status labels/,
+      /every step, in order/]) {
+      expect(system).toMatch(rule);
+    }
   });
 
   it("uses TokenHub's international endpoint without Hunyuan-only fields", async () => {
