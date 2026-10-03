@@ -154,8 +154,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
+    let actor: User | undefined;
     const reply = async (response: ServerResponse, status: number, data: unknown) => {
-      if (status >= 200 && status < 300) await brain.persist();
+      // A refused request is part of the trail too. Only the actor, method and route are recorded, never the body.
+      if (status === 403 && actor) {
+        brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
+        await brain.audit.flush();
+      }
+      // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own).
+      if (status >= 200 && status < 300) await (request.method === "GET" ? brain.audit.flush() : brain.persist());
       send(response, status, data);
     };
     try {
@@ -183,6 +190,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       const user = await identity(request, brain, auth0, !connectors);
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
+      actor = user;
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
@@ -319,6 +327,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, { ok: true });
       }
 
+      if (request.method === "POST" && (url.pathname === "/v1/admin/block" || url.pathname === "/v1/admin/unblock")) {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string") throw new Error("Invalid block");
+        if (url.pathname === "/v1/admin/block") await brain.blockUser(user, input.docId, input.userId);
+        else await brain.unblockUser(user, input.docId, input.userId);
+        return await reply(response, 200, { ok: true });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/restricted-grant") {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string" || typeof input.reason !== "string" ||
+          typeof input.expiresAt !== "string") throw new Error("Invalid grant");
+        await brain.grantRestricted(user, input.docId, input.userId, input.reason, input.expiresAt);
+        return await reply(response, 200, { ok: true });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/admin/channel-member") {
         const input = await body(request);
         if (typeof input.userId !== "string" || typeof input.docId !== "string") {
@@ -362,7 +386,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
         if (query.length > 200) throw new Error("Invalid query");
         const documents = [...brain.index.documents.values()].map(doc => ({ docId: doc.docId, title: doc.title }));
-        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents));
+        const result = searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents);
+        brain.audit.append("audit_searched", user.id, { query, filters: result.filters, results: result.entries.length });
+        await brain.audit.flush();
+        return await reply(response, 200, result);
       }
 
       if (url.pathname === "/v1/audit/seal" && request.method === "POST") {
@@ -435,12 +462,16 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  const { orchestrator, server } = await createApiServer();
+  const { brain, orchestrator, server } = await createApiServer();
   server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "127.0.0.1");
 
   const stop = (): void => {
     orchestrator.stop();
     server.close();
+    // Seal what is left and write it out before the process exits, so the last entries are not left unsealed.
+    void (async () => {
+      try { brain.audit.seal(); await brain.audit.flush(); await brain.persist(); } catch { /* exiting anyway */ }
+    })();
   };
 
   process.once("SIGINT", stop);

@@ -97,7 +97,10 @@ export class Brain {
     const next = this.persistQueue.catch(() => undefined).then(async () => {
       await this.audit.flush();
       if (!this.persistence) return;
-      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources.map(source => this.connectors[source].listItems()))).flat();
+      // A disconnected source is purged, so its mock originals are not written to the snapshot either.
+      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources
+        .filter(source => this.connections.get(source)?.status !== "Not connected")
+        .map(source => this.connectors[source].listItems()))).flat();
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
@@ -688,8 +691,9 @@ export class Brain {
     const inProject = issues.filter(issue => issue.metadata.project === project);
     const model = inProject.find(issue => declared.includes(issue.docId)) ??
       [...inProject].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
-    const permissions = model && await this.connectors.jira.fetchPermissions(model.docId);
-    if (!model || !permissions) throw new Error("Unknown document");
+    const modelPermissions = model && await this.connectors.jira.fetchPermissions(model.docId);
+    if (!model || !modelPermissions) throw new Error("Unknown document");
+    const permissions = this.narrowedToThread(modelPermissions, model.tier, threadDocId);
     const numbers = (await this.connectors.jira.listIds()).map(id => id.match(new RegExp(`^jira:${project}-(\\d+)$`))?.[1])
       .filter((value): value is string => Boolean(value)).map(Number);
     const key = `${project}-${Math.max(0, ...numbers) + 1}`;
@@ -703,6 +707,26 @@ export class Brain {
     await this.sync("jira");
     this.audit.append("task_created", actor.id, { ...this.auditDocument(doc.docId), fromDocId: threadDocId });
     return { docId: doc.docId, title: doc.title };
+  }
+
+  /**
+   * The task quotes the thread, so its readers must be a subset of the thread's readers. When the model issue would
+   * let anyone in who can't open the thread, the permissions shrink to exactly the people who can open both.
+   */
+  private narrowedToThread(model: SourcePermission, tier: Tier, threadDocId: string): SourcePermission {
+    const probe = { docId: "task-audience", permissions: model, tier };
+    const modelGrants = new FgaAdapter();
+    modelGrants.upsert(probe);
+    const both = this.users.filter(user => modelGrants.check(user, probe.docId).allowed);
+    const readers = both.filter(user => this.fga.check(user, threadDocId).allowed);
+    if (readers.length === both.length) return model;
+    const jiraIdentity = (user: User) => user.platformIdentities?.jira;
+    return {
+      users: readers.map(user => user.email), groups: [], public: false,
+      native: model.native?.source === "jira"
+        ? { ...model.native, issueViewers: readers.map(jiraIdentity).filter((id): id is string => Boolean(id)) }
+        : model.native
+    };
   }
 
   /** Marks a Jira task done, on mock sources only. A status is metadata, so nothing is re-chunked or re-embedded. */
@@ -739,6 +763,42 @@ export class Brain {
     connector.updatePermissions(docId, permissions);
     await this.sync(connector.source);
     this.audit.append("native_permission_changed", actor.id, { ...this.auditDocument(docId) });
+  }
+
+  /** An explicit block: the person loses this document whatever the source, the tier or any grant would allow. */
+  async blockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.block(docId, userId);
+    this.audit.append("user_blocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  async unblockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.unblock(docId, userId);
+    this.audit.append("user_unblocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  /** Lets one person past the tier of a restricted document, for a stated reason, until a date at most 90 days away. The admin who approves it is its owner. */
+  async grantRestricted(actor: User, docId: string, userId: string, reason: string, expiresAt: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.grantRestricted(docId, { userId, owner: actor.id, reason: reason.trim(), expiresAt });
+    this.audit.append("restricted_grant_created", actor.id, { ...this.auditDocument(docId), userId, reason: reason.trim(), expiresAt });
+    await this.persist();
+  }
+
+  /** Removes restricted grants that have ended, and records each one. */
+  sweepRestrictedGrants(now = new Date()): void {
+    for (const item of this.fga.sweepExpired(now)) {
+      this.audit.append("restricted_grant_expired", "sync", { ...this.auditDocument(item.docId), userId: item.userId, owner: item.owner });
+    }
   }
 
   removeUserFromGroup(actor: User, userId: string, group: string): void {
@@ -905,7 +965,17 @@ export class Brain {
     }
   }
 
+  /** A source that errors counts as denied for this document, so the other sources still answer. */
   private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
+    try {
+      return await this.checkedLiveDocument(user, docId);
+    } catch {
+      this.audit.append("source_check_failed", user.id, { ...this.auditDocument(docId) });
+      return undefined;
+    }
+  }
+
+  private async checkedLiveDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
     if (this.connections.get(connector.source)?.status === "Not connected") return undefined;
     if (!await connector.checkAccess(user, docId)) {

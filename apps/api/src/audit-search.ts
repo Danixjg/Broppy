@@ -44,7 +44,9 @@ export function searchAudit(entries: AuditEntry[], params: URLSearchParams, user
   }
   if (from !== undefined && to !== undefined && from > to) throw new Error("Invalid date range");
   const user = params.get("user") ?? users.find(user => [user.id, user.email, user.name.toLowerCase()].some(value =>
-    q.split(/[^a-z0-9@._-]+/).includes(value.toLowerCase())))?.id;
+    q.split(/[^a-z0-9@._-]+/).includes(value.toLowerCase())))?.id ??
+    // A user named but not in the directory matches nobody, rather than widening the search to everyone.
+    /\busers?\s+['"\u2018\u201c]?([a-z0-9@._-]+)/.exec(q)?.[1];
   const source = params.get("source") ?? ["slack", "jira", "confluence", "drive"].find(source => tokens.has(source));
   const spaces = [...new Set(entries.flatMap(e => [e.data.space, e.data.project]).filter((v): v is string => typeof v === "string"))];
   // Whole words only, longest first, so "payment-gateway" is not read as the PAY space.

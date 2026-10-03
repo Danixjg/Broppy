@@ -21,6 +21,7 @@ export class SyncOrchestrator {
     if (this.running) return;
     this.running = true;
     try {
+      this.brain.sweepRestrictedGrants();
       await this.brain.syncAll();
       this.brain.audit.seal();
       await this.brain.persist();

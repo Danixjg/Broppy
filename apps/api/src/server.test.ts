@@ -100,6 +100,16 @@ describe("API authorization and trace", () => {
       .toEqual(expect.arrayContaining([expect.objectContaining({ type: "access_decision" })]));
   });
 
+  it("records refused requests and audit searches in the audit log", async () => {
+    const { request, brain } = await start();
+    expect((await request("/v1/audit", "ravi")).status).toBe(403);
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({
+      type: "request_denied", actor: "ravi", data: { method: "GET", path: "/v1/audit" } }));
+    const search = await request("/v1/audit/search?q=" + encodeURIComponent("what did ravi do"), "nur");
+    expect(search.status).toBe(200);
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "audit_searched", actor: "nur" }));
+  });
+
   it("restricts audit verification to compliance", async () => {
     const { request } = await start();
     expect((await request("/v1/audit", "ravi")).status).toBe(403);

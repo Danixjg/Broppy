@@ -89,7 +89,7 @@ export interface SearchCandidate {
 export interface AccessDecision {
   docId: string;
   allowed: boolean;
-  reason: "fga" | "source" | "tier";
+  reason: "fga" | "source" | "tier" | "blocked";
 }
 
 export interface AuditEntry {

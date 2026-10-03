@@ -157,8 +157,8 @@ Read as: document `confluence:gateway-operations`. Retrieved for: Ravi.
 
 - Every entry carries the hash of the one before it. The chain verifies: yes.
 - Nur seals the log into a Merkle batch of entries 1 to 153. The proof for Ravi's answer, entry 83, verifies against it: yes.
-- A copy of the log with that answer changed is refused ("Invalid stored audit log").
-- A copy with entry 77 deleted is refused ("Invalid stored audit log").
+- A copy of the log with that answer changed is refused ("Invalid stored audit log: entry 83 does not match its hash chain").
+- A copy with entry 77 deleted is refused ("Invalid stored audit log: entry 77 does not match its hash chain").
 
 ![Nur's audit search](images/s5-nur.png)
 
