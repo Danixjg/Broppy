@@ -805,6 +805,14 @@ Each entry records the options that were considered, what was chosen, and the tr
     while the script only checks for 12. The guide now says the connection's policy applies too.
   - **Windows:** the guide gained a PowerShell version of the command.
   - **Afterwards:** the guide says to delete the machine-to-machine application once seeding is done.
+- **No false permission changes after a restart.** The team's audit export showed all 26 documents logged as
+  `document_synced` with `permissionChanged: true` after the API restarted, although nothing had changed.
+  - **Why:** Supabase keeps the saved state in a `jsonb` column, which returns object keys shortest first. The index
+    hashed permissions and metadata with plain `JSON.stringify`, which depends on key order, so every reloaded
+    document looked changed. The audit log already sorts keys for the same reason (hash version 2).
+  - **Now:** the index sorts object keys before hashing.
+  - **Once more:** hashes saved before this change were made the old way, so the first sync after updating logs one
+    last round of permission changes. After that they stop.
 
 ---
 
