@@ -616,10 +616,10 @@ h3 {
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  min-width:1.35rem;
-  height:1.35rem;
-  padding:0 .3rem;
-  margin-left:.1rem;
+  min-width:1.5rem;
+  height:1.5rem;
+  padding:0 .35rem;
+  margin-left:.15rem;
   border:1px solid #b9cbd6;
   border-radius:999px;
   background:#eef4f8;
@@ -644,9 +644,10 @@ h3 {
   font-weight:650
 }
 .source-button {
+  min-height:1.5rem;
   border:0;
   background:none;
-  padding:0;
+  padding:.15rem 0;
   color:#235d9c;
   text-align:left;
   vertical-align:top;
@@ -666,6 +667,10 @@ h3 {
 .demo-note {
   display:inline-block;
   font-size:.76rem
+}
+/* Darker than the shared .muted grey, which falls short of 4.5:1 on the panels' tints. */
+.muted.demo-note {
+  color:#576c7a
 }
 .audit-hint {
   display:grid;
@@ -939,6 +944,10 @@ td {
   max-width:28rem;
   overflow-wrap:anywhere
 }
+/* Event types read as one word, so they never wrap. */
+#auditRows td:nth-child(2) {
+  white-space:nowrap
+}
 td button {
   border:0;
   background:transparent;
@@ -1060,6 +1069,10 @@ td button {
   }
   .sort-label {
     white-space:nowrap
+  }
+  /* The audit table keeps readable columns on a phone and scrolls inside its frame instead. */
+  .table-wrap table {
+    min-width:44rem
   }
 }
 @media(prefers-reduced-motion:no-preference) {
