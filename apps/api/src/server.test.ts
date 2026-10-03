@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
-import handler, { createApiServer } from "./server.js";
+import handler, { createApiServer, startupMessage } from "./server.js";
 
 const openServers: Server[] = [];
 
@@ -242,5 +242,16 @@ describe("serverless entry", () => {
     if (!address || typeof address === "string") throw new Error("Expected TCP address");
     const response = await fetch(`http://127.0.0.1:${address.port}/health`);
     expect(response.status).toBe(200);
+  });
+});
+
+describe("startup message", () => {
+  it("says the API is ready, where, and how it signs people in", () => {
+    expect(startupMessage("127.0.0.1", 3000, { AUTH0_ISSUER: "https://tenant.example/" }))
+      .toBe("API ready at http://127.0.0.1:3000 with Auth0 sign-in. Leave this window open; Ctrl+C stops it.");
+    expect(startupMessage("127.0.0.1", 3000, { ALLOW_DEMO_AUTH: "true" }))
+      .toBe("API ready at http://127.0.0.1:3000 in demo mode (x-demo-user). Leave this window open; Ctrl+C stops it.");
+    expect(startupMessage("0.0.0.0", 8080, { PUBLIC_DEMO: "true" }))
+      .toBe("API ready at http://0.0.0.0:8080 as the public demo, on mock data only. Leave this window open; Ctrl+C stops it.");
   });
 });

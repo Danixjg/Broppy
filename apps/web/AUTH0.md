@@ -113,6 +113,9 @@ pnpm dev:sso               # API on 127.0.0.1:3000, Auth0 mode, reads .env.local
 pnpm --dir apps/web dev    # web host on 127.0.0.1:3001 (restart it after workspace UI edits)
 ```
 
+Run each in its own terminal and leave both open. The API prints
+`API ready at http://127.0.0.1:3000 with Auth0 sign-in` once it accepts requests, and the web host prints `Ready`.
+
 `pnpm dev` is still the **demo** API: it accepts `x-demo-user` for curl testing and for the website's demo, and it
 loads no env file. Sign-ins never reach it, because the website sends Auth0 tokens only to `BRAIN_API_URL`.
 
