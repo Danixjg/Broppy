@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const docs = ["README.md", "decisions.md", "apps/web/AUTH0.md", "infra/tencent/README.md",
   ...readdirSync(join(root, "docs")).filter(name => name.endsWith(".md")).map(name => `docs/${name}`)];
-const read = (path: string) => readFileSync(join(root, path), "utf8");
+// Git for Windows checks text out with CRLF line endings by default, so text is compared with LF ones.
+const read = (path: string) => readFileSync(join(root, path), "utf8").replace(/\r\n/g, "\n");
 const withoutCode = (text: string) => text.replace(/```[\s\S]*?```/g, "");
 const MARKER = /<!-- diagram: (docs\/diagrams\/[\w-]+\.mmd) -->\s*```mermaid\n([\s\S]*?)```/g;
 
