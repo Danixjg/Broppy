@@ -445,12 +445,16 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  const { orchestrator, server } = await createApiServer();
+  const { brain, orchestrator, server } = await createApiServer();
   server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "127.0.0.1");
 
   const stop = (): void => {
     orchestrator.stop();
     server.close();
+    // Seal what is left and write it out before the process exits, so the last entries are not left unsealed.
+    void (async () => {
+      try { brain.audit.seal(); await brain.audit.flush(); await brain.persist(); } catch { /* exiting anyway */ }
+    })();
   };
 
   process.once("SIGINT", stop);
