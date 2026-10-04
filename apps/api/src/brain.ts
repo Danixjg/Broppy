@@ -2,12 +2,13 @@ import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
 import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplicatesFor, latestFor, projectOf, projectsFor,
-  sentences, tracked, type WorkspaceDocument } from "./workspace.js";
+  sentences, tracked, type Project, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
-import { checkAnswer, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
+import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
+  type SupabaseIndex } from "@brain/retrieval";
 import type {
   Citation,
   ConnectorState,
@@ -380,11 +381,36 @@ export class Brain {
       this.audit.append(type, user.id, { traceId, ...data });
     audit("query_received", { question: trimmed, questionHash: hashQuestion(trimmed) });
     await this.audit.flush();
+
+    // ② Access is decided on document IDs only, and every decision is audited.
+    const authorize = async (docIds: string[]): Promise<Set<string>> => {
+      const localDecisions = this.fga.batchCheck(user, docIds);
+      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
+      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
+      const decisions = localDecisions.map(decision => {
+        const remote = remoteById.get(decision.docId);
+        return decision.allowed && remote && !remote.allowed ? remote :
+          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
+      });
+      for (const decision of decisions) {
+        audit("access_decision", {
+          ...this.auditDocument(decision.docId),
+          allowed: decision.allowed,
+          reason: decision.reason
+        });
+      }
+      return new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
+    };
+
     // Platforms the question names come first in the answer; a time range it names applies to those platforms, or to
     // every platform when it names none.
     const plan = planQuery(trimmed);
-    const within = options.within ? new Set(options.within.docIds) : undefined;
-    const project = options.within?.project;
+    // A question that names a project the person may open keeps to that project's items. A project they may not open
+    // changes nothing, and its refusal never reaches their own trace.
+    const named = options.within ? undefined : this.namedProject(trimmed);
+    const keptTo = named && (await authorize([named.masterDocId])).has(named.masterDocId) ? named : undefined;
+    const within = options.within ? new Set(options.within.docIds) : keptTo ? new Set(keptTo.docIds) : undefined;
+    const project = options.within?.project ?? keptTo?.name;
     const scope: QueryScope | undefined = plan.sources.length || plan.window || project
       ? { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) } : undefined;
     audit("query_planned", { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) });
@@ -403,9 +429,10 @@ export class Brain {
     let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
       try {
-        // Remote ranking may only reorder chunks that pass the local relevance gate.
-        const relevant = new Set(localCandidates.map(item => item.chunkId));
-        const remote = (await this.supabase.search(plan.searchText, queryVector, 30)).filter(item => relevant.has(item.chunkId));
+        // Remote ranking may only reorder chunks that pass the local relevance gate, and keeps their local coverage.
+        const relevant = new Map(localCandidates.map(item => [item.chunkId, item]));
+        const remote = (await this.supabase.search(plan.searchText, queryVector, 30)).filter(item => relevant.has(item.chunkId))
+          .map(item => ({ ...item, coverage: relevant.get(item.chunkId)!.coverage, semantic: relevant.get(item.chunkId)!.semantic }));
         const seen = new Set(remote.map(item => item.chunkId));
         candidates = [...remote, ...localCandidates.filter(item => !seen.has(item.chunkId))];
       }
@@ -428,36 +455,20 @@ export class Brain {
       });
     }
 
-    // ② Access is decided on document IDs only, and every decision is audited.
-    const authorize = async (docIds: string[]): Promise<Set<string>> => {
-      const localDecisions = this.fga.batchCheck(user, docIds);
-      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
-      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
-      const decisions = localDecisions.map(decision => {
-        const remote = remoteById.get(decision.docId);
-        return decision.allowed && remote && !remote.allowed ? remote :
-          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
-      });
-      for (const decision of decisions) {
-        audit("access_decision", {
-          ...this.auditDocument(decision.docId),
-          allowed: decision.allowed,
-          reason: decision.reason
-        });
-      }
-      return new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
-    };
-
     const allowedIds = await authorize(candidateDocIds);
     if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
-    const linked = this.linkedCandidates(candidates, allowedIds, plan, audit, within);
+    const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
+    const allowedHits = candidates.filter(item => allowedIds.has(item.docId));
+    // Outside a project, a weak partial match drops out before its links are followed.
+    const hits = within ? allowedHits : coveringHits(allowedHits, item =>
+      asksForHistory || this.index.documents.get(item.docId)?.metadata.status !== "superseded");
+    const linked = this.linkedCandidates(candidates, new Set(hits.map(item => item.docId)), plan, audit, within);
     const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
     const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
-      ...candidates.filter(item => allowedIds.has(item.docId)),
+      ...hits,
       ...linked.filter(item => linkedAllowed.has(item.docId))
     ];
-    const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
     const currentCandidates = authorizedCandidates.filter(item =>
       this.index.documents.get(item.docId)?.metadata.status !== "superseded");
     const answerCandidates = balanceBySource(!asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates,
@@ -565,6 +576,22 @@ export class Brain {
       } } : {})
     });
     return scope ? { ...answer, scope } : answer;
+  }
+
+  /**
+   * The one project a question names: every distinctive word of its name, the master page's title, is in the question.
+   * None when it names two or more. Its items are counted as the workspace counts them, before any access check.
+   */
+  private namedProject(question: string): Project | undefined {
+    const asked = new Set(terms(question));
+    const docs = [...this.index.documents.values()].filter(doc => !doc.deletedAt);
+    const named = docs.filter(doc => doc.source === "confluence" && doc.metadata.label === "master" && doc.metadata.space)
+      .filter(master => {
+        const words = distinctiveWords(master.title.replace(/\s+master page$/i, ""));
+        return words.length > 0 && words.every(word => asked.has(word));
+      });
+    if (named.length !== 1) return undefined;
+    return projectsFor(docs.map(doc => ({ ...doc, links: doc.links ?? [] }))).find(item => item.masterDocId === named[0].docId);
   }
 
   /** The items one link away, in either direction, that still exist: what this item links to, and what links to it. */
@@ -1048,6 +1075,19 @@ export class Brain {
     if (!connector) throw new Error("Unknown source");
     return connector;
   }
+}
+
+/**
+ * The search hits that cover enough of the question: at least half, rounded up, of the distinctive words the best
+ * eligible hit covers. Only hits the asker may open are passed in, so a denied document can't move the bar. A hit
+ * found by meaning alone stays if it is at least as close as the closest hit that clears the bar.
+ */
+export function coveringHits<T extends SearchCandidate>(hits: T[], eligible: (hit: T) => boolean): T[] {
+  const base = hits.some(eligible) ? hits.filter(eligible) : hits;
+  const required = Math.ceil(Math.max(0, ...base.map(hit => hit.coverage ?? 0)) / 2);
+  const close = base.filter(hit => (hit.coverage ?? 0) >= required && hit.semantic !== undefined).map(hit => hit.semantic!);
+  const closest = close.length ? Math.max(...close) : -Infinity;
+  return hits.filter(hit => (hit.coverage ?? 0) >= required || (hit.semantic !== undefined && hit.semantic >= closest));
 }
 
 // The question's time window: it applies to the platforms the question names, or to every platform when it names none.

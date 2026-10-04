@@ -23,7 +23,7 @@ covers hosting and sign-in, and [worked examples](worked-examples.md) shows each
 | --- | --- | --- |
 | **Heterogeneous sources, without flattening permissions** | Each document keeps its platform's own permission shape: Slack channel members, Jira project and issue viewers, Confluence space and page viewers, Drive owner and shared users. [`nativeAllows`](../packages/connectors/src/index.ts) applies that shape on top of brain grants and the tier. Contractors see only what is shared with them by name. | [Connector tests](../packages/connectors/src/index.test.ts): "applies native permission changes without changing content and reports changes". [FGA tests](../packages/fga-adapter/src/remote.test.ts): "denies when native source or local tier denies, even if remote allows". [Scenario 4](worked-examples.md#scenario-4-access-changes-apply-to-the-next-question). |
 | **Permission-aware retrieval** | Search returns IDs only, and access is decided on document IDs before any text is read (① ②). Each document is checked again at its source before its text enters the context (④). When nothing is allowed, every asker gets the same fixed reply. | [Brain tests](../apps/api/src/brain.test.ts): "never sends denied titles or private channel names to the LLM", "applies a live permission revocation on the next query". [Scenario 3](worked-examples.md#scenario-3-no-hint-that-restricted-content-exists). |
-| **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names. Links the sources make themselves (Jira issue links and attachments, Confluence page links, and issue keys and links in text) bring in a ticket's linked thread, page and files, one hop from the documents the asker may open. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts): scenario 1, and "Context assembly: linked items", such as "never follows links from a document the asker may not open". [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
+| **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names, and a question that names a project the asker can open keeps to its items. Outside a project, a match must cover at least half as many of the question's distinctive words as the best match. Links the sources make themselves (Jira issue links and attachments, Confluence page links, and issue keys and links in text) bring in a ticket's linked thread, page and files, one hop from the documents the asker may open. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts): scenario 1, and "Context assembly: linked items", such as "never follows links from a document the asker may not open". [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
 | **Audit trail: tamper-evident, complete, queryable** | Every step of sync and of each question appends an event to a hash chain (⑤). Merkle batches are sealed on every sync and signed in SSO mode, and Supabase rejects updates and deletes. Compliance search reads plain-English questions and answers "who retrieved this document". | Brain tests: "produces a verifiable Merkle inclusion proof". [Audit tests](../packages/audit/src/index.test.ts). [Scenario 5](worked-examples.md#scenario-5-the-audit-trail-answers-compliance-questions), including the tamper checks. |
 | **LLM safety** | A writer sees only the question and passages the asker may see, freshly checked. The answer checker keeps a line only when a passage it cites backs it: copied word for word, or reworded with the same facts, status, negation and hedging. Lines it leaves out are counted for the asker and recorded, with their text, for compliance. A model runs behind a usage meter, and the built-in writer takes over when it can't answer. | [Checker tests](../packages/retrieval/src/grounding.test.ts): the rule set, one-fact changes to every demo sentence, a held-out set and the known gaps. Brain tests: "removes uncited output", "The answer checker" and the "When the language model can't answer" suite. [Usage meter tests](../apps/api/src/llm-budget.test.ts). |
 
@@ -55,7 +55,7 @@ flowchart TB
   Tomb --> Permissions
 
   subgraph QueryLane["Query"]
-    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms named,<br/>time window"]
+    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms, time<br/>window, project named"]
     Plan --> Search["① Hybrid search over the<br/>whole index: keywords,<br/>vectors and freshness;<br/>returns IDs only"]
     Search --> Check["② Access check on<br/>document IDs only"]
     Check --> Links["Follow links one hop,<br/>from allowed documents<br/>only, then ② again"]
@@ -119,26 +119,39 @@ flowchart TB
 ## The query path
 
 1. **Plan:** the question's platform names and time window shape the search ("Slack last week").
+   - **Project:** a question that names a project keeps to that project's items. Every distinctive word of the master
+     page's title must be in the question, and exactly one project must match.
+   - **Access:** the master page is checked like any document. The scope applies only if the asker may open it, so a
+     hidden project's name changes nothing and never reaches their trace.
 2. **Search:** the local index ranks every chunk. With Supabase and embeddings set, the `hybrid_search` RPC can
    reorder chunks that also pass the local relevance check.
+   - **Words:** a word and its synonyms count once.
+   - **Generic words:** status, update, project, plan, team, issue, task, raised and a few more name no topic. They
+     count a quarter as much, and make no match on their own unless the question has nothing more specific.
 3. **Access check on IDs:** local grants, native rules and the tier decide each candidate document. Contractors are
    denied unless a document is shared with them by name, and remote FGA must agree when it is set. With nothing
    allowed, the API returns the fixed reply.
-4. **Follow links:** links are followed one hop, in either direction, from the allowed documents that clearly match
+4. **Keep what covers the question:** outside a project, a match must cover at least half as many distinctive words,
+   rounded up, as the best allowed match.
+   - **No side channel:** the bar comes from allowed matches only, so a denied document can't move it.
+   - **Meaning:** a match found by meaning alone stays if it is at least as close as the closest match that clears
+     the bar.
+   - **History:** superseded copies don't set the bar unless the question asks for history.
+5. **Follow links:** links are followed one hop, in either direction, from the matches that stay and clearly match
    (at least half the best of them, up to eight).
    - A denied document's links are never followed, so nothing hidden can steer an answer.
    - A linked item scores half the item it came through, keeps to the question's time window and passes the same
      access check.
    - It never takes the places of a platform the question named, nor makes a platform count as clearly relevant.
-5. **Choose passages:** superseded documents are set aside unless the question asks for history ("old",
+6. **Choose passages:** superseded documents are set aside unless the question asks for history ("old",
    "previous"). Platforms with a clearly relevant match take turns.
-6. **Live check:** each passage's document is checked at the source once before its text is used, up to 8 passages.
+7. **Live check:** each passage's document is checked at the source once before its text is used, up to 8 passages.
    A linked item counts only while the item it came through passes too.
-7. **Write and check:** the writer answers from those passages. A line is kept only when a passage it cites backs it,
+8. **Write and check:** the writer answers from those passages. A line is kept only when a passage it cites backs it,
    copied word for word or reworded with the same facts, status, negation and hedging. The asker learns how many lines
    were left out and why; the audit keeps their text.
-8. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
-9. **Answer:** citations carry the title, link, version, edit time and index time, and the item a link came through.
+9. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
+10. **Answer:** citations carry the title, link, version, edit time and index time, and the item a link came through.
    Answers also say which platforms and dates were searched, and which project they kept to.
 
 The fixed reply, "No accessible information was found for this query.", is the same for a denied document and for

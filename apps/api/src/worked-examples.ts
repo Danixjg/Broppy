@@ -120,11 +120,12 @@ function introduction(writer: string, withModel: boolean, search?: string): stri
 
 function readAs(scope?: QueryScope): string {
   if (!scope) return "every platform, any date";
+  const project = scope.project ? `; kept to ${scope.project}` : "";
   const named = scope.sources.map(source => PLATFORMS[source] ?? source).join(", ");
   const range = scope.from && scope.to ? `${date(scope.from)} to ${date(scope.to)}` : undefined;
-  if (named && range) return `${named} first, and ${named} only from ${range}; other platforms at any date`;
-  if (named) return `${named} first; any date`;
-  return range ? `every platform, from ${range}` : "every platform, any date";
+  if (named && range) return `${named} first, and ${named} only from ${range}; other platforms at any date${project}`;
+  if (named) return `${named} first; any date${project}`;
+  return `${range ? `every platform, from ${range}` : "every platform, any date"}${project}`;
 }
 
 function quote(asked: Asked): string[] {
@@ -158,11 +159,15 @@ interface Checks { score?: number; linkedFrom?: string; access?: boolean; live?:
 // Every check each document went through, in ranking order, from a query's full trace.
 function checks(trace: AuditEntry[]): Map<string, Checks> {
   const rows = new Map<string, Checks>();
+  const ranked = new Map<string, number>();
   for (const entry of trace) {
     const docId = entry.data.docId;
     if (typeof docId !== "string") continue;
     const row = rows.get(docId) ?? {};
-    if (entry.type === "candidate_ranked" && typeof entry.data.score === "number") row.score = entry.data.score;
+    if (entry.type === "candidate_ranked" && typeof entry.data.score === "number") {
+      row.score = entry.data.score;
+      if (!ranked.has(docId)) ranked.set(docId, ranked.size);
+    }
     if (entry.type === "candidate_linked" && typeof entry.data.fromDocId === "string") row.linkedFrom = entry.data.fromDocId;
     if (entry.type === "access_decision") row.access = entry.data.allowed === true;
     if (entry.type === "live_access_decision") {
@@ -173,7 +178,10 @@ function checks(trace: AuditEntry[]): Map<string, Checks> {
     if (entry.type === "output_access_decision") row.output = entry.data.allowed === true;
     rows.set(docId, row);
   }
-  return rows;
+  // Searched documents first, then linked ones, then any checked for another reason, such as the master page of the
+  // project a question names, which is checked before the search.
+  const place = (docId: string, row: Checks) => ranked.get(docId) ?? (row.linkedFrom ? 1e6 : 2e6);
+  return new Map([...rows].sort(([a, x], [b, y]) => place(a, x) - place(b, y)));
 }
 
 const verdict = (value?: boolean) => (value === undefined ? "–" : value ? "allowed" : "**denied**");
@@ -424,7 +432,9 @@ async function scenario5(freshBrain: FreshBrain, ask: Ask, at: Clock): Promise<s
   const changed = brain.audit.entries;
   if (answer) changed[answer.sequence - 1].data.answer = "Nothing to report.";
   const deleted = brain.audit.entries;
-  const removed = deleted.splice(Math.floor(deleted.length / 2), 1)[0];
+  // The middle entry, unless that is the answer changed above: the two copies show two different entries.
+  const middle = Math.floor(deleted.length / 2);
+  const removed = deleted.splice(answer && deleted[middle]?.sequence === answer.sequence ? middle + 1 : middle, 1)[0];
 
   return [
     "## Scenario 5: the audit trail answers compliance questions",

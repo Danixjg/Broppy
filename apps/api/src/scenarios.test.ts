@@ -117,7 +117,8 @@ describe("Scenario 1: unified natural-language query", () => {
     const anyTime = await brain.query(brain.user("david")!,
       "What's the status of the database migration project and were there any blockers raised in Slack?");
     expect(sent()).toContain("slack:db-planning");
-    expect(anyTime.scope).toEqual({ sources: ["slack"] });
+    // No time window without "last week"; the project the question names still applies.
+    expect(anyTime.scope).toEqual({ sources: ["slack"], project: "Database migration plan" });
   });
 });
 
@@ -223,6 +224,114 @@ describe("Context assembly: linked items", () => {
     const answer = await brain.query(brain.user("david")!, migrationQuestion);
     expect(cited(answer)).toEqual(["slack:db-migration", "jira:DB-12", "confluence:db-migration-plan", "jira:DB-15"]);
     expect(sent()).toContain("drive:db-wave-checklist");
+  });
+});
+
+describe("Search keeps to what the question is about", () => {
+  const traceOf = (brain: Brain, traceId: string) => brain.audit.entries.filter(entry => entry.data.traceId === traceId);
+  const ranked = (entries: AuditEntry[]) => entries.filter(entry => entry.type === "candidate_ranked").map(entry => entry.data.docId);
+
+  it("keeps a question that names a project the asker can open to that project's items", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    let traceId = "";
+    const answer = await brain.query(brain.user("david")!, migrationQuestion, id => { traceId = id; });
+    expect(answer.scope).toMatchObject({ sources: ["slack"], project: "Database migration plan" });
+    const trace = traceOf(brain, traceId);
+    expect(trace).toContainEqual(expect.objectContaining({ type: "query_planned",
+      data: expect.objectContaining({ project: "Database migration plan" }) }));
+    expect(ranked(trace)).toEqual(expect.arrayContaining(["slack:db-migration", "jira:DB-12", "jira:DB-15"]));
+    // The payment project's master page and SETL-27 share only "migration" with the question.
+    expect(ranked(trace)).not.toContain("confluence:payment-master");
+    expect(ranked(trace)).not.toContain("jira:SETL-27");
+    expect(cited(answer)).toEqual(["slack:db-migration", "jira:DB-12", "confluence:db-migration-plan", "jira:DB-15"]);
+  });
+
+  it("scopes only to a project whose master page the asker may open, and a hidden one leaves no trace", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    let traceId = "";
+    const answer = await brain.query(brain.user("wei")!, migrationQuestion, id => { traceId = id; });
+    expect(answer.text).toBe(NO_RESULT);
+    expect(answer.scope?.project).toBeUndefined();
+    const trace = traceOf(brain, traceId);
+    expect(trace).toContainEqual(expect.objectContaining({ type: "access_decision",
+      data: expect.objectContaining({ docId: "confluence:db-migration-plan", allowed: false }) }));
+    const own = JSON.stringify(actorTrace(trace));
+    expect(own).not.toContain("db-migration-plan");
+    expect(own).not.toContain("Database migration");
+  });
+
+  it("keeps no project scope when the question names two projects", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("david")!, "How do the database migration and the payment migration compare?");
+    expect(answer.scope?.project).toBeUndefined();
+  });
+
+  it("drops a match that covers less than half of what the best match covers: scenario 2 sends the runbook alone", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    const answer = await brain.query(brain.user("david")!, runbookQuestion);
+    // #sec-incident matches only "incident", and #payments-cutover only "runbook".
+    expect(sent()).toEqual(["confluence:payment-service-runbook"]);
+    expect(answer.text).toContain("Step 1: page the payments on-call engineer.");
+  });
+
+  it("sets that bar from what the asker may open, so a denied document can't raise it", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    // The restricted Q3 page covers "q3", "incident" and "milestones"; the steering deck Alex may open covers only
+    // "milestones", and still counts.
+    await brain.query(brain.user("alex")!, "Q3 incident milestones");
+    expect(sent()).toEqual(["drive:steering-deck"]);
+  });
+
+  it("keeps every item of a named project that matches a topic word", async () => {
+    const { llm, sent } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    const thread = (await brain.connectors.slack.fetchDocument("slack:db-migration"))!;
+    brain.connectors.slack.create({ ...structuredClone(thread), docId: "slack:CDBNIGHT1", sourceNativeId: "CDBNIGHT1",
+      title: "#db-nightly", url: "https://slack.example/archives/CDBNIGHT1", metadata: { channel: "db-nightly", project: "DB" },
+      content: "Decided: the backfill job runs only at night." });
+    await brain.syncAll();
+    // Outside a project, a thread that matches only "decided" would fall below the bar.
+    await brain.query(brain.user("david")!, "What was decided about the database migration project?");
+    expect(sent()).toContain("slack:CDBNIGHT1");
+  });
+
+  it("keeps scenarios 1 and 2 on topic when another project adds status, blocker and incident lines", async () => {
+    const { llm, sent, contexts } = recordingLlm();
+    const brain = new Brain(llm);
+    await brain.syncAll();
+    const thread = (await brain.connectors.slack.fetchDocument("slack:db-migration"))!;
+    const issue = (await brain.connectors.jira.fetchDocument("jira:DB-15"))!;
+    const recent = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    brain.connectors.slack.create({ ...structuredClone(thread), docId: "slack:CPLATRUN1", sourceNativeId: "CPLATRUN1",
+      title: "#plat-runners", url: "https://slack.example/archives/CPLATRUN1", updatedAt: recent,
+      metadata: { channel: "plat-runners", project: "PLAT" },
+      content: "Status: the runner migration project is 80% done.\nBlocker raised: PLAT-14 waits on rack capacity.\n" +
+        "Incident review: the build cache filled the disk overnight." });
+    brain.connectors.jira.create({ ...structuredClone(issue), docId: "jira:PLAT-14", sourceNativeId: "PLAT-14",
+      title: "PLAT-14 Add runners to the second rack", url: "https://jira.example/browse/PLAT-14", updatedAt: recent,
+      metadata: { project: "PLAT", status: "blocked" },
+      content: "PLAT-14 adds runners to the second rack. The migration of build jobs waits on it." });
+    await brain.syncAll();
+    const added = ["slack:CPLATRUN1", "jira:PLAT-14"];
+
+    let traceId = "";
+    const first = await brain.query(brain.user("david")!, migrationQuestion, id => { traceId = id; });
+    expect(cited(first)).toEqual(["slack:db-migration", "jira:DB-12", "confluence:db-migration-plan", "jira:DB-15"]);
+    for (const id of added) expect(ranked(traceOf(brain, traceId))).not.toContain(id);
+
+    const before = contexts.length;
+    await brain.query(brain.user("david")!, runbookQuestion);
+    expect(contexts.slice(before).flat().map(item => item.citation.slice(0, item.citation.lastIndexOf(":"))))
+      .toEqual(["confluence:payment-service-runbook"]);
+    for (const id of added) expect(sent()).not.toContain(id);
   });
 });
 

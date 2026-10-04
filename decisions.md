@@ -1030,6 +1030,84 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Screenshots:** six worked-example screenshots and the two README workspace screenshots were re-taken. The audit
   console's didn't change.
 
+## 2026-10-04 — Tighter search
+
+- **Input:** the generated dataset (about 500 items) will be full of status, blocker and project lines from other
+  projects. Measured on the demo data with every test question:
+  - **Scenario 1** sent three tangents to the writer. The payment master page and SETL-27 share only "migration" with
+    the question, and the steering deck only "project".
+  - **Scenario 2** sent two: #sec-incident, which shares only "incident", and #payments-cutover, which shares only
+    "runbook".
+- **How decided:** the user asked to tighten search on 4 Oct. The rules were planned from the measurements and chosen
+  in a planning session. D49 isn't revisited.
+
+### D68 — A question that names a project keeps to it
+- **Options:**
+  - search everything, as before;
+  - scope only through the workspace's catch-up (R9);
+  - scope any question that names a project the asker can open.
+- **Chosen:** any question.
+  - **When a project counts as named:** every distinctive word of its master page's title is in the question, and only
+    one project matches.
+  - **Access:** the master page goes through the normal, audited access check first. A project the asker can't open
+    changes nothing, and its refusal stays out of their own trace.
+- **Why not more:** when two projects are named there's no scope, rather than a guess.
+
+### D69 — A match must cover at least half of what the best match covers
+- **Options:**
+  - drop matches that score under half the best score (planned in R10);
+  - drop matches that cover fewer than half as many distinctive words, rounded up, as the best match;
+  - both.
+- **Chosen:** coverage.
+  - **A score floor fails here:** at half the best score it would keep #sec-incident, at 0.68 of the best, because
+    the score barely rewards matching more of the question.
+  - **The coverage rule works:** it drops both scenario 2 tangents and keeps every required item. DB-15 covers 2 of 3
+    words, the PAY-101 sources 1–2 of 2, and the catch-up's chargeback guide 1 of 2.
+- **Where it applies:** outside a project scope only, and to search matches only. Linked items keep their own rule,
+  and links are followed only from matches that stay. Superseded copies don't set the bar unless the question asks
+  for history, since they're set aside later anyway.
+- **No side channel:** the bar is computed only from matches the asker may open.
+- **Matches by meaning:** one found by meaning alone stays if it is at least as close as the closest match that clears
+  the bar. With no word in common anywhere, meaning decides alone. This isn't measured on real vectors yet, because the
+  sandbox can't reach Cloudflare.
+
+### D70 — Generic work words count less
+- **Chosen:** a fixed list of words that name no topic, with their plurals: status, update, project, plan, team, issue,
+  task, ticket, raised, need, note, progress, work, item, page, doc, document, file, channel, thread, new, first, read,
+  help, info.
+- **What they do:**
+  - never make a match on their own, unless the question has nothing else;
+  - count a quarter as much in the score;
+  - don't count toward coverage.
+- **Synonyms:** a word and its synonyms now count once. Before, "payment" counted as three topics.
+- **Why a fixed list:** word statistics over the whole index would let restricted documents shape what others see
+  (R10).
+- **Trade-off:** the list is a judgment call. "Blocker" stays off it, because "blockers raised in Slack" is a real
+  topic. A noise test guards the effect.
+
+### Implementation details (tighter search)
+- **Retrieval:** `queryConcepts`, `distinctiveWords` and the `GENERIC` list are in `packages/retrieval/src/index.ts`.
+  Each hit reports `coverage` and, when it has one, `semantic`. Supabase results take theirs from the local hit.
+- **Brain:** `namedProject` and `coveringHits` are in `apps/api/src/brain.ts`. Projects are counted the way
+  `projectsFor` counts them, over the index.
+- **Tests:**
+  - **Retrieval:** synonyms count once, a generic word alone makes no match, the weighting, and the reported coverage
+    and semantic score.
+  - **Scenarios:**
+    - the scope;
+    - a hidden project, and two projects named;
+    - scenario 2 sends the runbook alone;
+    - a denied document can't raise the bar;
+    - project items that match one word stay;
+    - a noise test that adds another project's status, blocker and incident lines David can open.
+  - **`coveringHits`:** unit tests. The one for matches by meaning was confirmed by breaking the rule on purpose.
+- **Effects on the worked examples:**
+  - Scenario 1 keeps its four cited lines and reads "kept to Database migration plan".
+  - Scenario 2 cites the runbook alone.
+  - Scenario 4 ends on the wave checklist instead of the payment master page.
+  - Scenario 5 finds fewer entries.
+  - `docs/worked-examples-model.md` was captured before this round.
+
 ---
 
 ## Deferred (not decided yet)

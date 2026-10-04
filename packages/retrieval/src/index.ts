@@ -62,6 +62,40 @@ export function queryTerms(text: string): string[] {
   return [...new Set(terms(text).filter(term => term.length > 1 && !STOPWORDS.has(term)))];
 }
 
+// Words that name no topic: every project's items are full of them. They never make a hit on their own, count a
+// quarter as much as other words, and don't count toward a hit's coverage of the question.
+const GENERIC = new Set([
+  "status", "update", "updates", "project", "projects", "plan", "plans", "team", "teams", "issue", "issues", "task",
+  "tasks", "ticket", "tickets", "raised", "need", "needs", "note", "notes", "progress", "work", "item", "items", "page",
+  "pages", "doc", "docs", "document", "documents", "file", "files", "channel", "channels", "thread", "threads", "new",
+  "first", "read", "help", "info"
+]);
+const GENERIC_WEIGHT = 0.25;
+
+/** One word of a question with its synonyms, so a word counts once however many forms it has. */
+export interface Concept { terms: string[]; generic: boolean }
+
+/** A question's words after the stopwords, each with its synonyms; words that share a form are one concept. */
+export function queryConcepts(text: string): Concept[] {
+  const concepts: Concept[] = [];
+  for (const word of text.toLowerCase().match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? []) {
+    if (word.length < 2 || STOPWORDS.has(word)) continue;
+    const forms = [word, ...(Object.hasOwn(synonyms, word) ? synonyms[word] : [])];
+    const same = concepts.find(concept => forms.some(form => concept.terms.includes(form)));
+    if (same) {
+      same.terms = [...new Set([...same.terms, ...forms])];
+      same.generic &&= GENERIC.has(word);
+    } else concepts.push({ terms: forms, generic: GENERIC.has(word) });
+  }
+  return concepts;
+}
+
+/** The distinctive words of a text: no stopwords, generic words or single characters, and no synonyms added. */
+export function distinctiveWords(text: string): string[] {
+  return [...new Set((text.toLowerCase().match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [])
+    .filter(word => word.length > 1 && !STOPWORDS.has(word) && !GENERIC.has(word)))];
+}
+
 function vectorOf(list: string[]): Record<string, number> {
   const vector: Record<string, number> = {};
   for (const term of list) vector[term] = (Object.hasOwn(vector, term) ? vector[term] : 0) + 1;
@@ -229,30 +263,38 @@ export class HybridIndex {
   }
 
   search(query: string, limit = 20, queryVector?: number[]): SearchCandidate[] {
-    const topics = queryTerms(query);
-    const sparseQueryVector = vectorOf(topics);
+    const concepts = queryConcepts(query);
+    // A hit must match a word that names the topic; generic words do only when the question has nothing else.
+    const gate = concepts.some(concept => !concept.generic) ? concepts.filter(concept => !concept.generic) : concepts;
+    const weight = (concept: Concept) => concept.generic ? GENERIC_WEIGHT : 1;
+    const totalWeight = concepts.reduce((sum, concept) => sum + weight(concept), 0);
+    const sparseQueryVector: Record<string, number> = {};
+    for (const concept of concepts) {
+      for (const term of concept.terms) sparseQueryVector[term] = Math.max(sparseQueryVector[term] ?? 0, weight(concept));
+    }
     const semanticQueryVector = validSemanticVector(queryVector) ? queryVector : undefined;
     const results: SearchCandidate[] = [];
     for (const doc of this.documents.values()) {
       if (doc.deletedAt) continue;
       for (const item of doc.chunks) {
         // Chunk terms include the title, so whole-word matching covers both.
-        const keyword = topics.length
-          ? topics.filter(term => mentions(item.embedding, term)).length / topics.length
-          : 0;
+        const matched = concepts.filter(concept => concept.terms.some(term => mentions(item.embedding, term)));
+        const keyword = totalWeight ? matched.reduce((sum, concept) => sum + weight(concept), 0) / totalWeight : 0;
         const semanticVector = semanticQueryVector ? this.semanticVectors.get(doc.docId)?.get(item.chunkId) : undefined;
         const semantic = semanticQueryVector && semanticVector
           ? semanticCosine(semanticQueryVector, semanticVector)
           : undefined;
-        // Relevant means a shared topic term, or strong semantic similarity.
-        if (keyword === 0 && (semantic === undefined || semantic < SEMANTIC_MIN)) continue;
+        // Relevant means a shared topic word, or strong semantic similarity.
+        if (!matched.some(concept => gate.includes(concept)) && (semantic === undefined || semantic < SEMANTIC_MIN)) continue;
         const vector = semantic ?? cosine(sparseQueryVector, item.embedding);
         const ageDays = Math.max(0, (Date.now() - Date.parse(doc.updatedAt)) / 86_400_000);
         const freshness = 1 / (1 + ageDays / 30);
         results.push({
           docId: doc.docId,
           chunkId: item.chunkId,
-          score: 0.65 * vector + 0.25 * keyword + 0.10 * freshness
+          score: 0.65 * vector + 0.25 * keyword + 0.10 * freshness,
+          coverage: matched.filter(concept => !concept.generic).length,
+          ...(semantic === undefined ? {} : { semantic })
         });
       }
     }

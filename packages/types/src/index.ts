@@ -84,6 +84,11 @@ export interface SearchCandidate {
   docId: string;
   chunkId: string;
   score: number;
+  /** How many of the question's distinctive words the chunk matches: a word and its synonyms count once, and generic
+   * work words not at all. */
+  coverage?: number;
+  /** The chunk's semantic similarity to the question, when both have vectors. */
+  semantic?: number;
 }
 
 export interface AccessDecision {
