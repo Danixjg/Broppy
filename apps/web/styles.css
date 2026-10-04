@@ -509,9 +509,10 @@ h3 {
   font-weight:700;
   padding:0
 }
+/* --muted-foreground comes from src/theme.css. connectors.html loads this file on its own, hence the fallbacks. */
 .sort-label {
   font-size:.72rem;
-  color:#697b88
+  color:var(--muted-foreground, #61717f)
 }
 .sort-label select {
   width:auto;
@@ -632,6 +633,22 @@ h3 {
 .cite:hover {
   background:#dde9f2
 }
+.reworded-tag {
+  display:inline-block;
+  padding:0 .35rem;
+  border:1px solid #cfdbe2;
+  border-radius:999px;
+  color:#576c7a;
+  font-size:.68rem;
+  font-weight:650;
+  line-height:1.35;
+  vertical-align:.1rem
+}
+.checker-note {
+  margin:.4rem 0 0;
+  color:#576c7a;
+  font-size:.78rem
+}
 .source-list {
   margin:0;
   padding-left:1.25rem;
@@ -667,10 +684,6 @@ h3 {
 .demo-note {
   display:inline-block;
   font-size:.76rem
-}
-/* Darker than the shared .muted grey, which falls short of 4.5:1 on the panels' tints. */
-.muted.demo-note {
-  color:#576c7a
 }
 .audit-hint {
   display:grid;
@@ -985,7 +998,7 @@ td button {
   font-size:.8rem
 }
 .empty {
-  color:#738390;
+  color:var(--muted-foreground, #61717f);
   font-size:.8rem;
   font-style:italic
 }
@@ -1148,7 +1161,7 @@ td button {
   font-size:.85rem;
 }
 .architecture-grid p {
-  color:#657884;
+  color:var(--muted-foreground, #61717f);
   font-size:.75rem;
   line-height:1.45;
   margin:.3rem 0 0;
@@ -1187,6 +1200,6 @@ td button {
   font-size:.78rem;
 }
 .trace-time {
-  color:#687f8a;
+  color:var(--muted-foreground, #61717f);
   font-size:.7rem;
 }

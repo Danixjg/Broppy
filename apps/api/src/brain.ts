@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
-import { groundedOutput, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
+import { checkAnswer, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
 import type {
   Citation,
   ConnectorState,
@@ -519,12 +519,19 @@ export class Brain {
       generated = await this.fallbackLlm.generate(context, trimmed);
       fromModel = false;
     }
-    let answer = groundedOutput(generated, citationMap, evidence);
-    // Nothing the model wrote was copied word for word from the sources: answer as if no model were set.
-    if (fromModel && answer.text === NO_RESULT) {
+    // Each line must say only what a passage it cites says (packages/retrieval/src/grounding.ts).
+    let checked = checkAnswer(generated, citationMap, evidence);
+    const leftOut = checked.report.removed;
+    let fellBack = false;
+    // Nothing the model wrote is backed by the sources: answer as if no model were set.
+    if (fromModel && checked.answer.text === NO_RESULT) {
       audit("llm_fallback", { reason: "ungrounded" });
-      answer = groundedOutput(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+      checked = checkAnswer(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+      fellBack = true;
     }
+    // After a fallback the asker isn't told about the model's lines, which would say which writer answered (D57).
+    const answer = fellBack && checked.answer.check
+      ? { ...checked.answer, check: { ...checked.answer.check, removed: [] } } : checked.answer;
     let outputUser = user;
     if (revalidateUser) {
       try {
@@ -551,7 +558,11 @@ export class Brain {
       answer: answer.text,
       documents: answer.citations.map(citation => this.auditDocument(citation.docId)),
       citationIds: answer.citations.map(citation => citation.chunkId),
-      empty: answer.text === NO_RESULT
+      empty: answer.text === NO_RESULT,
+      // What the checker kept, and what it left out with the text and the reason, for compliance (D63).
+      ...(checked.report.lines.length || leftOut.length ? { check: {
+        lines: checked.report.lines.map(line => line.kind), removed: leftOut, ...(fellBack ? { fallback: true } : {})
+      } } : {})
     });
     return scope ? { ...answer, scope } : answer;
   }

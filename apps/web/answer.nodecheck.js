@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerLines, auditSummary, isDemoAddress, isRoutineSync, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const documents = JSON.parse(readFileSync(new URL("../../data/mock/documents.json", import.meta.url), "utf8"));
 const content = docId => documents.find(doc => doc.docId === docId).content;
@@ -30,6 +30,34 @@ test("turns each line's markers into source numbers and keeps the fixed reply as
   ]);
   assert.deepEqual(answerLines(NO_RESULT, []), [{ text: NO_RESULT, refs: [] }]);
   assert.deepEqual(answerLines("", []), []);
+});
+
+test("gives each line the checker's verdict and the source sentences that back it, when the check lines up", () => {
+  const sources = numberSources([citation("jira:DB-12", 0, "DB-12")]);
+  const check = { lines: [{ kind: "quoted", support: ["DB-12 (in progress) tracks the ledger database migration project."] },
+    { kind: "reworded", support: ["Waves one and two are complete, and wave three waits on DB-15."] }], removed: [] };
+  const lines = answerLines("DB-12 (in progress) tracks the ledger database migration project. [jira:DB-12:0]\n" +
+    "Waves 1 and 2 are done. [jira:DB-12:0]", sources, check);
+  assert.deepEqual(lines.map(line => [line.kind, line.support]), [
+    ["quoted", ["DB-12 (in progress) tracks the ledger database migration project."]],
+    ["reworded", ["Waves one and two are complete, and wave three waits on DB-15."]]
+  ]);
+  // A check that doesn't line up with the answer is ignored, rather than pinned to the wrong lines.
+  assert.deepEqual(answerLines("Waves 1 and 2 are done. [jira:DB-12:0]", sources, check), [{ text: "Waves 1 and 2 are done.", refs: [1] }]);
+});
+
+test("says in one sentence why lines were left out, without saying what they were", () => {
+  assert.equal(leftOutNote(undefined), "");
+  assert.equal(leftOutNote({ lines: [], removed: [] }), "");
+  assert.equal(leftOutNote({ removed: [{ reason: "new_fact" }] }), "1 line left out: it had a name, number or date the source doesn't.");
+  assert.equal(leftOutNote({ removed: [{ reason: "changed_meaning" }, { reason: "changed_meaning" }] }),
+    "2 lines left out: they changed what the source says.");
+  assert.equal(leftOutNote({ removed: [{ reason: "new_words" }] }), "1 line left out: it said more than the source.");
+  assert.equal(leftOutNote({ removed: [{ reason: "wrong_source" }] }), "1 line left out: it cited the wrong source.");
+  assert.equal(leftOutNote({ removed: [{ reason: "no_citation" }, { reason: "unknown_citation" }] }),
+    "2 lines left out: they had no valid citation.");
+  assert.equal(leftOutNote({ removed: [{ reason: "new_words" }, { reason: "wrong_source" }] }),
+    "2 lines left out because the sources don't back them.");
 });
 
 test("finds a quoted line in its document, including the two forms that add a Jira status", () => {
@@ -103,6 +131,9 @@ test("summarises audit events in plain words, without internal references", () =
     [entry("answer_returned", { answer: NO_RESULT, citationIds: [], empty: true }), "Answered with the fixed no-result reply"],
     [entry("answer_returned", { answer: "DB-12 (in progress) tracks the project. [jira:DB-12:0]\nThe [draft] plan is blocked. [jira:DB-15:0]", citationIds: ["jira:DB-12:0", "jira:DB-15:0"], empty: false }),
       "Answered with 2 citations: \"DB-12 (in progress) tracks the project. The [draft] plan is blocked.\""],
+    [entry("answer_returned", { answer: "Waves 1 and 2 are done. [jira:DB-12:0]", citationIds: ["jira:DB-12:0"], empty: false,
+      check: { lines: ["reworded"], removed: [{ text: "Waves one and three are complete.", reason: "new_fact", detail: "x", citations: [] }] } }),
+      "Answered with 1 citation, 1 reworded, 1 left out: \"Waves 1 and 2 are done.\""],
     [entry("document_synced", { docId: "slack:db-migration", contentChanged: false, permissionChanged: false }), "Synced slack:db-migration: no change"],
     [entry("document_synced", { docId: "slack:db-migration", contentChanged: false, permissionChanged: true }), "Synced slack:db-migration: permissions changed"],
     [entry("import_completed", { source: "slack", found: 5, indexed: 4, skipped: 1, failed: 0 }), "Finished importing Slack: 4 items indexed, 1 skipped"],

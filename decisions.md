@@ -902,6 +902,134 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Screenshots:** the seven worked-example screenshots and the two README workspace screenshots were re-taken. Answers
   now show chips, and demo documents no longer show a link.
 
+## 2026-10-04 — The answer checker
+
+- **Input:**
+  - **The brief:** "Mitigate hallucination and the model 'filling in' content it wasn't given."
+  - **The MVP must-haves:** "an output checker for hallucination".
+  - **The 2 Oct review:** the old check kept only lines copied word for word. Faithful rewording was lost, the
+    model's instructions had to forbid it, and a removed line left no trace for the asker or the audit.
+- **How decided:** planned with its validation tests, then chosen explicitly in a planning session.
+
+### D62 — Rules, not a second model, judge a reworded line
+- **Options:**
+  - **Rules:** every clause must be backed by one sentence of a passage the line cites.
+  - **Rules plus a second model call:** a model judges each line the rules pass.
+- **Chosen:** rules only.
+  - **What a second model call would cost:** several seconds on answers that already take about 15, the free
+    allowance used twice, and no verdict a test can pin down.
+  - **What the rules give:** they are explainable and tested line by line, and each removal says what was wrong.
+- **What a kept line must keep:** the numbers, next to the same words; the names, keys, dates and quantities; and the
+  same status, order (before or after), comparison, negation and hedging. It may add no other word that carries
+  meaning. Word forms and a short list of synonyms count as the same word.
+- **Measured** (4 Oct, on the 26 demo passages):
+  - **The rule set:** 54 lines, all right. The word lists and limits were set against these.
+  - **Generated changes:** every sentence of every passage is kept as written, and each of 58 one-fact changes
+    (number, key, name, negation, status, before or after) is left out.
+  - **A held-out set:** 32 lines written before any tuning. Of 15 lines to remove, the checker keeps one (B15, two
+    steps in the opposite order). Of 17 lines to keep, it removes three:
+    - B5: "final wave" for "wave three";
+    - B16: "every morning" for "each morning";
+    - B23: "leave … out" for "do not include".
+  - **One more line, B22,** found a hole in the old word-for-word rule: a copied part of a sentence could drop the
+    "not" in front of it ("Include this channel" from "Do not include this channel"). That was fixed, so B22 no longer
+    counts as unseen.
+- **Known gaps:** each is a failing test (`it.fails`) that turns red once fixed.
+  - who did what, swapped within one sentence;
+  - cause and effect turned around;
+  - a requirement read as done ("Complete SEC-44 …" becoming "SEC-44 is complete");
+  - two steps in the opposite order;
+  - a faithful line that uses a word the passage doesn't (the cost of strictness).
+
+### D63 — The asker sees a count and a reason; the audit keeps the text
+- **Options:** a count and a reason; the removed text too, struck through; or nothing.
+- **Chosen:** a count and a reason, such as "2 lines left out: they had a name, number or date the source doesn't".
+  The text, the reason and what was wrong go into the audit's `answer_returned` entry for compliance.
+- **Why:** a removed line is model text that no source backs, so it never appears in an answer, even marked as
+  removed.
+- **After a fallback (D29):** the model's removed lines go to the audit only. Telling the asker about them would say
+  which writer answered, which D57 left for later.
+
+### D64 — The model may reword lightly
+- **Options:** keep copy-exactly, or allow light rewording now that it's checked.
+- **Chosen:** light rewording. The model may shorten a sentence or join two from one passage, keeping every name,
+  number, date, issue key and status word exactly, and adding nothing.
+- **Trade-off:** more lines may be left out, and so more answers may fall back. `pnpm llm:check` measures this on the
+  real model, and the instruction can be reverted on its own.
+
+### D65 — A branch of its own, on top of the UI fixes
+- **Chosen:** `feat/answer-checker`, stacked on `fix/workspace-ui`. Both are pushed, and the UI one is merged first.
+
+### Implementation details (the answer checker)
+- **Where:** `checkAnswer` in `packages/retrieval/src/grounding.ts`. `groundedOutput` now wraps it, so every writer's
+  reply goes through it, the built-in writer's included (all its lines are copied).
+- **Each line:**
+  1. Every citation marker must name a passage the writer was given.
+  2. Each sentence is checked on its own, and a marker that backs nothing is dropped from the line.
+  3. A sentence copied from a cited passage is kept as copied, if it means what its whole sentence means.
+  4. Otherwise the sentence is split into clauses at commas, semicolons, colons and joining words. Each clause must be
+     backed by one sentence of a cited passage.
+- **Issue status:** a clause that only gives an issue's status ("DB-12 is blocked") must match the label the brain
+  writes into that issue's text, or a status word next to the key.
+- **The answer:** `QueryAnswer.check` gives each line its kind and the source sentences that back it, and only the
+  reasons for what was left out. A no-result answer carries no check, so scenario 3's reply is unchanged.
+- **The workspace:**
+  - a reworded line carries a "reworded" tag, and its chip highlights the sentences that back it;
+  - a note under the answer and the asker's trace give the count and the reason;
+  - the audit console's line counts reworded and left-out lines.
+- **Tests:** written first and seen failing, in `grounding.test.ts`, `brain.test.ts`, `llm-check.test.ts` and the
+  web node checks.
+- **Checked in the browser** with a stand-in model that mixes copied, reworded and invented lines:
+  - the tag, the highlight and the note;
+  - David's trace, without the removed text;
+  - Nur's raw entry, with it;
+  - no new axe violations.
+- **`pnpm llm:check`:** prints the verdict on every line of a real model's replies, for the team to label.
+
+## 2026-10-04 — Contrast and the workspace build
+
+- **Input:** the two items left under Deferred by UI round 1, measured on 4 Oct.
+  - **Contrast:** axe found 379 colour-contrast failures, all "serious", on 12 of 14 workspace screens. The earlier
+    runs covered 7 screens; this one added Sync health, Admin, the connectors page, the asker's trace, the catch-up,
+    the merge preview, and the empty lists a contractor and an intern see.
+  - **The build:** three builds in a row left three nested copies, each adding 8 files, 354 KB and 10 characters to
+    the longest path.
+- **How decided:** the measurements and a before-and-after screenshot were laid out, and the user chose to fix both
+  now, before the demo video.
+
+### D66 — Secondary text uses the theme's muted grey
+- **Options:**
+  - darken each failing grey just enough, keeping eleven shades;
+  - use the theme's own `--muted-foreground` (#61717f) wherever secondary text appears;
+  - leave it.
+- **Chosen:** the theme's grey, at 4.6–5.0:1 on every background the app uses. One shade replaces eleven, so a new
+  rule is less likely to pick a faint one. The green section labels darken from #388065 to #33775d.
+- **Trade-off:** secondary text is a little darker, so it recedes a little less. Size, weight and spacing still set
+  it apart.
+
+### D67 — The workspace build doesn't copy `public/`
+- **Options:** `publicDir: false`; a separate folder for the workspace's own static files; or leave it.
+- **Chosen:** `publicDir: false`. `public/` holds no tracked files, only the published workspace, so the copy only
+  ever duplicated the last build.
+
+### Implementation details (contrast and the workspace build)
+- **The rules changed:**
+  - in `apps/web/src/ui.css`: the brand subtitle, the project and persona labels, the search placeholder and shortcut
+    key, the header's context label, the section labels, item and detail metadata, `.muted`, and the breadcrumb;
+  - in `apps/web/styles.css`: the landing-view label, empty lists, Sync health's architecture notes, and the trace's
+    times.
+- **`styles.css` carries the grey as a fallback** (`var(--muted-foreground, #61717f)`), because `connectors.html`
+  loads that file without `theme.css`.
+- **The demo note's own darker grey,** added in UI round 1, is gone: the shared grey now passes on the panels' tints.
+- **Checked in the browser:**
+  - axe (WCAG 2.0 and 2.1, A and AA) finds no contrast failures, and no other violations, on the 14 screens;
+  - the search placeholder, which axe doesn't check, goes from 2.83:1 to 4.68:1;
+  - the UI fixes' 66 browser checks and R9's 24 still pass.
+- **The build:** three builds in a row leave the one bundle, file for file the same as before. The first build after
+  the change also clears the copies already there, because `scripts/publish-workspace.mjs` empties the folder first.
+- **Screenshots:** six worked-example screenshots and the two README workspace screenshots were re-taken. The audit
+  console's didn't change.
+
 ---
 
 ## Deferred (not decided yet)
@@ -921,12 +1049,8 @@ These are open. Pick them up in a later round and record the decision here.
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
 - **UI round 1's "not now":** a label for which writer answered, and "Show more" for long lists (D57).
-- **Colour contrast:** axe finds 26 failures on `main`'s workspace screen, in the header, the lists and the panels.
-  - **Most of them:** one shared grey, `#73818b` in `apps/web/src/ui.css`, at 3.8–4:1 against the 4.5:1 minimum.
-  - **The worst:** the header's context label, at 2.46:1.
-- **Workspace build:** `vite build` copies Next's `public/` folder, which holds the last published bundle. So each
-  `build:workspace`, and each `pnpm --dir apps/web dev`, nests the previous bundle one level deeper under
-  `public/workspace/`. Setting Vite's `publicDir: false` would stop it.
+- **Colour contrast:** settled: secondary text uses the theme's muted grey (D66).
+- **Workspace build:** settled: the build no longer copies `public/` (D67).
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,
   source-specific FGA types, and webhooks. The snapshot write runs after every successful response, `/health`
   included, which matters once the SSO API is reachable from the internet.

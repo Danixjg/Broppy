@@ -23,7 +23,7 @@ flowchart TB
     Links --> Live["④ Live check at the source:<br/>permission and version"]
     Live --> Context["Context: up to 8 passages,<br/>platforms take turns"]
     Context --> Writer["Writer: built-in,<br/>or a metered model"]
-    Writer --> Ground["Grounding: only lines<br/>copied word for word"]
+    Writer --> Ground["Checker: every line must<br/>say only what its<br/>cited passage says"]
     Ground --> Recheck["④ Recheck the person<br/>and every cited source"]
     Recheck --> Answer["Answer with citations"]
     Check -->|"nothing allowed"| Fixed["Fixed reply: no<br/>accessible information"]

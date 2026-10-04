@@ -5,6 +5,7 @@ import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
 import { Brain } from "./brain.js";
 import { ModelUnavailable } from "./llm.js";
+import { actorTrace } from "./server.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
 
 describe("Internal Brain security and sync", () => {
@@ -461,6 +462,60 @@ describe("Internal Brain security and sync", () => {
   });
 });
 
+describe("The answer checker", () => {
+  const scenario1 = "What's the status of the database migration project and were there any blockers raised in Slack last week?";
+  const oncall = "On-call blocker raised overnight: the database migration hit lock timeouts on the settlements table.";
+
+  it("keeps the lines the passages back, reworded or not, and tells the asker only why the rest were left out", async () => {
+    let sent: string[] = [];
+    const brain = new Brain({ generate: async context => {
+      sent = context.map(item => item.citation);
+      const migration = context.find(item => item.citation === "slack:db-migration:0")!;
+      return [
+        `${migration.text.split(/(?<=[.!?])\s+/)[0]} [slack:db-migration:0]`,
+        "Waves 1 and 2 are done, and wave 3 is waiting on DB-15. [jira:DB-12:0]",
+        "Waves one and three are complete. [jira:DB-12:0]",
+        // Text from #db-oncall, which David can't see and the model was never sent.
+        `${oncall} [jira:DB-12:0]`
+      ].join("\n");
+    } });
+    await brain.syncAll();
+    let traceId = "";
+    const answer = await brain.query(brain.user("david")!, scenario1, id => { traceId = id; });
+    expect(sent).toContain("jira:DB-12:0");
+    expect(sent).not.toContain("slack:db-oncall:0");
+    expect(answer.text.split("\n")).toEqual([
+      "Database migration project standup: waves one and two of the ledger move are complete. [slack:db-migration:0]",
+      "Waves 1 and 2 are done, and wave 3 is waiting on DB-15. [jira:DB-12:0]"
+    ]);
+    expect(answer.check?.lines.map(line => line.kind)).toEqual(["quoted", "reworded"]);
+    expect(answer.check?.removed).toEqual([{ reason: "new_fact" }, { reason: expect.any(String) }]);
+    expect(answer.citations.map(citation => citation.chunkId)).toEqual(["slack:db-migration:0", "jira:DB-12:0"]);
+    expect(JSON.stringify(answer)).not.toMatch(/Waves one and three|lock timeouts/);
+    expect(brain.audit.entries.some(entry => entry.type === "llm_fallback")).toBe(false);
+
+    // Compliance sees what was left out and why; the asker's own trace shows only the reasons.
+    const own = brain.audit.entries.filter(entry => entry.data.traceId === traceId);
+    expect(own.find(entry => entry.type === "answer_returned")!.data.check).toEqual({ lines: ["quoted", "reworded"], removed: [
+      { text: "Waves one and three are complete.", reason: "new_fact", detail: expect.any(String), citations: ["jira:DB-12:0"] },
+      { text: oncall, reason: expect.any(String), detail: expect.any(String), citations: ["jira:DB-12:0"] }
+    ] });
+    const trace = actorTrace(own);
+    expect(trace.find(entry => entry.type === "answer_returned")!.data.check)
+      .toEqual({ lines: ["quoted", "reworded"], removed: [{ reason: "new_fact" }, { reason: expect.any(String) }] });
+    expect(JSON.stringify(trace)).not.toMatch(/Waves one and three|lock timeouts/);
+  });
+
+  it("gives the fixed reply no check, whatever the model would have written", async () => {
+    const generate = vi.fn(async () => "Restricted Q3 incident report and internal security findings. [confluence:q3-incident:0]");
+    const brain = new Brain({ generate });
+    await brain.syncAll();
+    expect(await brain.query(brain.user("wei")!, "Show me the security incident report from the Q3 breach"))
+      .toEqual({ text: NO_RESULT, citations: [] });
+    expect(generate).not.toHaveBeenCalled();
+  });
+});
+
 describe("When the language model can't answer", () => {
   const question = "What does PAY-101 need before cutover?";
 
@@ -493,6 +548,15 @@ describe("When the language model can't answer", () => {
     expect(answer.citations.map(citation => citation.chunkId)).toEqual(expected.citations.map(citation => citation.chunkId));
     expect(brain.audit.entries.filter(entry => entry.type === "llm_fallback").map(entry => entry.data.reason))
       .toEqual(["ungrounded"]);
+    // The asker isn't told about the model's lines, which would say which writer answered (D57); the audit keeps them.
+    expect(answer.check?.removed).toEqual([]);
+    const returned = brain.audit.entries.filter(entry => entry.type === "answer_returned").at(-1)!;
+    expect(returned.data.check).toMatchObject({ fallback: true,
+      removed: [{ text: "PAY-101 just needs the SEC-44 drill done first.", reason: expect.any(String) }] });
+    const own = actorTrace(brain.audit.entries.filter(entry => entry.data.traceId === returned.data.traceId))
+      .find(entry => entry.type === "answer_returned")!;
+    expect(own.data.check).toEqual({ lines: expect.any(Array), removed: [] });
+    expect(JSON.stringify(own)).not.toContain("just needs");
   });
 
   it("keeps a model's lines that are copied word for word and drops the rest, without falling back", async () => {

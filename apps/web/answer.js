@@ -20,11 +20,15 @@ export function numberSources(citations) {
   return sources;
 }
 
-/** The answer's lines, each with the numbers of the sources its markers name. A marker naming no source stays as text. */
-export function answerLines(answer, sources) {
+/**
+ * The answer's lines, each with the numbers of the sources its markers name. A marker naming no source stays as text.
+ * With the checker's verdict (`check`, one entry per line), each line also says whether it was copied or reworded, and
+ * which source sentences back it.
+ */
+export function answerLines(answer, sources, check) {
   const numbers = new Map();
   for (const source of Array.isArray(sources) ? sources : []) for (const id of source.chunkIds) numbers.set(id, source.number);
-  return text(answer).split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
+  const lines = text(answer).split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
     const refs = [];
     const rest = line.replace(/\s*\[([^\]]+)\]/g, (marker, id) => {
       const number = numbers.get(id);
@@ -34,6 +38,28 @@ export function answerLines(answer, sources) {
     }).trim();
     return { text: rest, refs };
   });
+  const verdicts = Array.isArray(check?.lines) && check.lines.length === lines.length ? check.lines : undefined;
+  return verdicts ? lines.map((line, index) => ({ ...line, kind: verdicts[index]?.kind === "reworded" ? "reworded" : "quoted",
+    support: Array.isArray(verdicts[index]?.support) ? verdicts[index].support.filter(item => typeof item === "string") : [] })) : lines;
+}
+
+// Why the checker left lines out, in the asker's words. The lines themselves never reach the answer (D63).
+const LEFT_OUT = {
+  new_fact: "had a name, number or date the source doesn't",
+  changed_meaning: "changed what the source says",
+  new_words: "said more than the source",
+  wrong_source: "cited the wrong source",
+  no_citation: "had no valid citation",
+  unknown_citation: "had no valid citation"
+};
+/** One sentence on the lines the checker left out of an answer, or nothing when it left none out. */
+export function leftOutNote(check) {
+  const removed = Array.isArray(check?.removed) ? check.removed : [];
+  if (!removed.length) return "";
+  const phrases = [...new Set(removed.map(item => LEFT_OUT[item?.reason] ?? "wasn't backed by the sources"))];
+  const lines = `${removed.length} line${removed.length === 1 ? "" : "s"} left out`;
+  if (phrases.length > 1) return `${lines} because the sources don't back them.`;
+  return `${lines}: ${removed.length === 1 ? "it" : "they"} ${phrases[0]}.`;
 }
 
 // Answers show a Jira issue's status inside the quoted text: after the key when the text starts with it, "DB-12
@@ -161,7 +187,10 @@ export function auditSummary(entry) {
     case "answer_returned": {
       if (data.empty === true) return "Answered with the fixed no-result reply";
       const cited = Array.isArray(data.citationIds) ? data.citationIds.length : 0;
-      return `Answered with ${plural(cited, "citation")}: "${short(text(data.answer).replace(CITATION, ""))}"`;
+      const reworded = Array.isArray(data.check?.lines) ? data.check.lines.filter(kind => kind === "reworded").length : 0;
+      const removed = Array.isArray(data.check?.removed) ? data.check.removed.length : 0;
+      const checked = `${reworded ? `, ${reworded} reworded` : ""}${removed ? `, ${removed} left out` : ""}`;
+      return `Answered with ${plural(cited, "citation")}${checked}: "${short(text(data.answer).replace(CITATION, ""))}"`;
     }
     case "document_synced": {
       const changed = data.contentChanged && data.permissionChanged ? "content and permissions changed"

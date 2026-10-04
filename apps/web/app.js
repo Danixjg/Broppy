@@ -1,5 +1,5 @@
 import { narrowerPermissionError } from "./permissions.js";
-import { answerLines, auditSummary, isDemoAddress, isRoutineSync, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
@@ -504,7 +504,7 @@ function renderCitations(parent, sources, lines) {
     const label = `${safeText(source.title)} · v${source.version} · edited ${fmtDate(source.updatedAt)}${via}`;
     const item = node("li", "");
     if (docById(source.docId)) {
-      const quotes = lines.filter(line => line.refs.includes(source.number)).map(line => line.text);
+      const quotes = lines.filter(line => line.refs.includes(source.number)).flatMap(quotesOf);
       const button = node("button", "source-button", label); button.type = "button";
       button.addEventListener("click", () => openSource(source, quotes));
       item.append(button);
@@ -524,25 +524,34 @@ function scopeText(scope) {
   return [project, searched].filter(Boolean).join(" ");
 }
 // One line per claim, each followed by numbered chips for the sources it was copied from.
+// What to highlight in a line's source: a copied line's own words, or the sentences that back a reworded one.
+const quotesOf = line => line.kind === "reworded" && line.support?.length ? line.support : [line.text];
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
   const sources = numberSources(result.citations);
-  const lines = answerLines(safeText(result.text) || "No answer returned.", sources);
+  const lines = answerLines(safeText(result.text) || "No answer returned.", sources, result.check);
   const body = node("div", "answer-lines");
   for (const line of lines) {
     const row = node("p", "answer-line", line.text);
+    if (line.kind === "reworded") {
+      const tag = node("span", "reworded-tag", "reworded");
+      tag.title = "In the writer's words. Open its source to see the sentence it's based on.";
+      row.append(" ", tag);
+    }
     for (const number of line.refs) {
       const source = sources[number - 1];
       const chip = node("button", "cite", String(number)); chip.type = "button";
       chip.title = safeText(source.title);
       chip.setAttribute("aria-label", `Source ${number}: ${safeText(source.title)}`);
-      chip.addEventListener("click", () => openSource(source, [line.text]));
+      chip.addEventListener("click", () => openSource(source, quotesOf(line)));
       row.append(" ", chip);
     }
     body.append(row);
   }
   target.append(body);
+  const note = leftOutNote(result.check);
+  if (note) appendText(target, "p", "checker-note", note);
   const scope = scopeText(result.scope);
   if (scope) appendText(target, "p", "muted", scope);
   renderCitations(target, sources, lines);
@@ -733,7 +742,7 @@ function traceDetails(entry, rank) {
     case "access_decision": return ["FGA and tier check", `${data.allowed ? "Allowed" : "Denied"}${ref} · reason ${safeText(data.reason) || "unspecified"}`];
     case "live_access_decision": return ["Live source check", `${data.allowed ? "Allowed" : "Denied"}${ref}${data.sourceVersion ? ` · source v${data.sourceVersion}` : ""}${data.refreshed === true ? " · refreshed" : data.refreshed === false ? " · version current" : ""}`];
     case "context_sent": return ["Context sent to LLM", `${Array.isArray(data.chunkIds) ? data.chunkIds.length : 0} authorized fresh chunks passed${Array.isArray(data.chunkIds) && data.chunkIds.length ? ` · ${data.chunkIds.join(", ")}` : ""}.`];
-    case "answer_returned": return ["Answer returned", data.empty ? "Fixed no-result response." : `${Array.isArray(data.citationIds) ? data.citationIds.length : 0} citations returned after output check${Array.isArray(data.citationIds) && data.citationIds.length ? ` · ${data.citationIds.join(", ")}` : ""}.`];
+    case "answer_returned": return ["Answer returned", data.empty ? "Fixed no-result response." : `${Array.isArray(data.citationIds) ? data.citationIds.length : 0} citations returned after output check${Array.isArray(data.citationIds) && data.citationIds.length ? ` · ${data.citationIds.join(", ")}` : ""}.${leftOutNote(data.check) ? ` ${leftOutNote(data.check)}` : ""}`];
     default: return [entry.type.replaceAll("_", " "), eventSummary(entry) || "Recorded in audit log."];
   }
 }

@@ -25,7 +25,7 @@ covers hosting and sign-in, and [worked examples](worked-examples.md) shows each
 | **Permission-aware retrieval** | Search returns IDs only, and access is decided on document IDs before any text is read (① ②). Each document is checked again at its source before its text enters the context (④). When nothing is allowed, every asker gets the same fixed reply. | [Brain tests](../apps/api/src/brain.test.ts): "never sends denied titles or private channel names to the LLM", "applies a live permission revocation on the next query". [Scenario 3](worked-examples.md#scenario-3-no-hint-that-restricted-content-exists). |
 | **Context across platforms** | The [query plan](../apps/api/src/query-plan.ts) reads the platforms and time window a question names. Links the sources make themselves (Jira issue links and attachments, Confluence page links, and issue keys and links in text) bring in a ticket's linked thread, page and files, one hop from the documents the asker may open. Platforms with a clearly relevant match take turns, Jira passages state the issue status, and the context holds up to 8 passages. | [Scenario tests](../apps/api/src/scenarios.test.ts): scenario 1, and "Context assembly: linked items", such as "never follows links from a document the asker may not open". [Query plan tests](../apps/api/src/query-plan.test.ts). [Scenario 1](worked-examples.md#scenario-1-one-question-across-platforms). |
 | **Audit trail: tamper-evident, complete, queryable** | Every step of sync and of each question appends an event to a hash chain (⑤). Merkle batches are sealed on every sync and signed in SSO mode, and Supabase rejects updates and deletes. Compliance search reads plain-English questions and answers "who retrieved this document". | Brain tests: "produces a verifiable Merkle inclusion proof". [Audit tests](../packages/audit/src/index.test.ts). [Scenario 5](worked-examples.md#scenario-5-the-audit-trail-answers-compliance-questions), including the tamper checks. |
-| **LLM safety** | A writer sees only the question and passages the asker may see, freshly checked. Every answer line must be copied word for word from a passage it cites. A model runs behind a usage meter, and the built-in writer takes over when it can't answer. | Brain tests: "removes uncited output" and the "When the language model can't answer" suite. [Usage meter tests](../apps/api/src/llm-budget.test.ts). |
+| **LLM safety** | A writer sees only the question and passages the asker may see, freshly checked. The answer checker keeps a line only when a passage it cites backs it: copied word for word, or reworded with the same facts, status, negation and hedging. Lines it leaves out are counted for the asker and recorded, with their text, for compliance. A model runs behind a usage meter, and the built-in writer takes over when it can't answer. | [Checker tests](../packages/retrieval/src/grounding.test.ts): the rule set, one-fact changes to every demo sentence, a held-out set and the known gaps. Brain tests: "removes uncited output", "The answer checker" and the "When the language model can't answer" suite. [Usage meter tests](../apps/api/src/llm-budget.test.ts). |
 
 Freshness, the brief's scenario 2, comes from the same live check: a document whose version changed at the source is
 refreshed before it is used ([scenario 2](worked-examples.md#scenario-2-fresh-content)).
@@ -62,7 +62,7 @@ flowchart TB
     Links --> Live["④ Live check at the source:<br/>permission and version"]
     Live --> Context["Context: up to 8 passages,<br/>platforms take turns"]
     Context --> Writer["Writer: built-in,<br/>or a metered model"]
-    Writer --> Ground["Grounding: only lines<br/>copied word for word"]
+    Writer --> Ground["Checker: every line must<br/>say only what its<br/>cited passage says"]
     Ground --> Recheck["④ Recheck the person<br/>and every cited source"]
     Recheck --> Answer["Answer with citations"]
     Check -->|"nothing allowed"| Fixed["Fixed reply: no<br/>accessible information"]
@@ -134,8 +134,9 @@ flowchart TB
    "previous"). Platforms with a clearly relevant match take turns.
 6. **Live check:** each passage's document is checked at the source once before its text is used, up to 8 passages.
    A linked item counts only while the item it came through passes too.
-7. **Write and ground:** the writer answers from those passages, and only lines copied word for word, each with its
-   citation, are kept.
+7. **Write and check:** the writer answers from those passages. A line is kept only when a passage it cites backs it,
+   copied word for word or reworded with the same facts, status, negation and hedging. The asker learns how many lines
+   were left out and why; the audit keeps their text.
 8. **Recheck:** the person and every cited document are checked again. Any change returns the fixed reply.
 9. **Answer:** citations carry the title, link, version, edit time and index time, and the item a link came through.
    Answers also say which platforms and dates were searched, and which project they kept to.
@@ -183,11 +184,13 @@ person may also open.
     allowance, room held for calls still running, and a 60-second timeout.
   - A model receives the question and the authorized passages with their citation IDs, and nothing else.
   - Its instructions ask it to answer every part of the question from every passage that helps, and to keep status
-    labels and steps. Each sentence must be copied exactly, with its citation; a line that isn't is dropped.
-    Lookalike characters (a non-breaking hyphen, curly quotes, special spaces) don't count as differences, and the
-    answer shows the source's own text.
-- **Fallbacks:** the built-in writer answers when the model is over a limit, rate limited or failing, or when none of
-  its lines are copied word for word. The audit records `llm_fallback` with the reason. See decisions D27 to D31, D54
+    labels and steps. It may copy sentences or reword them lightly, keeping every fact, with one citation-marked
+    sentence per line (D64).
+  - [`grounding.ts`](../packages/retrieval/src/grounding.ts) checks each line against the passage it cites and keeps
+    only what that passage backs (D62). Lookalike characters (a non-breaking hyphen, curly quotes, special spaces)
+    don't count as differences, and a copied line shows the source's own text.
+- **Fallbacks:** the built-in writer answers when the model is over a limit, rate limited or failing, or when the
+  checker keeps none of its lines. The audit records `llm_fallback` with the reason. See decisions D27 to D31, D54
   and D55.
 
 ## Audit

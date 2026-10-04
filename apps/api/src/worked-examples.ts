@@ -131,6 +131,15 @@ function quote(asked: Asked): string[] {
   const lines = asked.answer.text.split("\n").map(line => `> ${line}`);
   const fallback = asked.trace.find(entry => entry.type === "llm_fallback")?.data.reason;
   if (typeof fallback === "string") lines.push("", `*Written by the built-in writer instead of the model (${fallback}).*`);
+  // What the checker did to a model's reply. Every line the built-in writer writes is copied, so its page has no such note.
+  const check = asked.trace.find(entry => entry.type === "answer_returned")?.data.check as
+    { lines?: string[]; removed?: Array<{ text: string; reason: string }> } | undefined;
+  const reworded = check?.lines?.filter(kind => kind === "reworded").length ?? 0;
+  const removed = check?.removed ?? [];
+  if (reworded || removed.length) {
+    lines.push("", `*Checked: ${(check?.lines?.length ?? 0) - reworded} copied, ${reworded} reworded, ${removed.length} left out` +
+      `${removed.length ? `: ${removed.map(item => `"${item.text}" (${item.reason})`).join("; ")}` : ""}.*`);
+  }
   return lines;
 }
 

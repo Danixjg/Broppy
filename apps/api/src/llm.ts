@@ -40,14 +40,15 @@ const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unkn
   groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
 };
 
-// The model only chooses and orders sentences: a line not copied exactly from a passage is dropped after it answers
-// (groundedOutput). With only that rule, a run on 3 Oct answered half of scenario 1 (the Slack blocker, not the Jira
-// status), so the rules below ask it to cover the whole question.
+// The model may reword lightly (D64): the answer checker (packages/retrieval/src/grounding.ts) keeps a line only when
+// the passage it cites backs every fact in it. A run on 3 Oct answered half of scenario 1 (the Slack blocker, not the
+// Jira status), so the rules below also ask it to cover the whole question.
 const SYSTEM = [
   "You answer a question about a company's work using only the context passages supplied, which the asker may see.",
   "Rules:",
-  "1. Write only sentences copied exactly from the passages, one sentence per line, each followed by its passage's " +
-    "citation in square brackets.",
+  "1. Copy sentences from the passages where you can. You may shorten a sentence or join two from one passage, but " +
+    "keep every name, number, date, issue key and status word exactly as written, and add nothing the passages don't " +
+    "say. Write one sentence per line, each followed by its passage's citation in square brackets.",
   "2. Answer every part of the question. If it asks about several things, such as a project's status and its " +
     "blockers, include sentences for each.",
   "3. Use every passage that helps answer the question, not just the first. Leave out passages unrelated to it.",

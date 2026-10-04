@@ -98,6 +98,11 @@ export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "seque
   return visible.map((entry, index) => {
     const data = { ...entry.data };
     delete data.traceId;
+    // The asker learns why lines were left out, never what they said (D63), and nothing of a model reply set aside.
+    if (entry.type === "answer_returned" && data.check && typeof data.check === "object") {
+      const check = data.check as { lines?: unknown; removed?: Array<{ reason?: unknown }>; fallback?: unknown };
+      data.check = { lines: check.lines, removed: check.fallback ? [] : (check.removed ?? []).map(item => ({ reason: item.reason })) };
+    }
     return { sequence: index + 1, timestamp: entry.timestamp, type: entry.type, data };
   });
 }

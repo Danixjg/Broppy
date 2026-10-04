@@ -86,8 +86,8 @@ export function formatUsageReport(report: UsageReport, provider?: string): strin
   });
   const modelCalls = report.calls.filter(call => call.usage || call.fallback).length;
   const answered = report.calls.filter(call => call.usage && !call.fallback).length;
-  const reasons = "\"ungrounded\" means the model didn't copy sentences word for word, and an answer cut off at " +
-    "LLM_MAX_TOKENS needs a higher limit.";
+  const reasons = "\"ungrounded\" means no line the model wrote was backed by the passages it was given (pnpm " +
+    "llm:check shows why), and an answer cut off at LLM_MAX_TOKENS needs a higher limit.";
   if (!answered) {
     lines.push("", `No model answers were measured. ${reasons} Otherwise, check the provider, key and model settings.`);
     return lines.join("\n");
