@@ -33,17 +33,16 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 | Document | Match | Access check | Live check at the source | Sent to the writer | Rechecked after writing | Cited |
 | --- | --- | --- | --- | --- | --- | --- |
-| `slack:db-migration` | 0.45 | allowed | allowed, v1 | yes | allowed | yes |
-| `jira:DB-12` | 0.41 | allowed | allowed, v4 | yes | allowed | yes |
-| `slack:db-oncall` | 0.40 | **denied** | – | no | – | no |
-| `confluence:db-migration-plan` | 0.28 | allowed | allowed, v3 | yes | allowed | yes |
-| `jira:DB-15` | 0.24 | allowed | allowed, v2 | yes | allowed | yes |
-| `confluence:payment-master` | 0.17 | allowed | allowed, v4 | yes | allowed | no |
-| `jira:SETL-27` | 0.17 | allowed | allowed, v1 | yes | allowed | no |
-| `drive:steering-deck` | 0.17 | allowed | allowed, v1 | yes | allowed | no |
+| `slack:db-migration` | 0.50 | allowed | allowed, v1 | yes | allowed | yes |
+| `jira:DB-12` | 0.48 | allowed | allowed, v4 | yes | allowed | yes |
+| `slack:db-oncall` | 0.48 | **denied** | – | no | – | no |
+| `confluence:db-migration-plan` | 0.38 | allowed | allowed, v3 | yes | allowed | yes |
+| `jira:DB-15` | 0.32 | allowed | allowed, v2 | yes | allowed | yes |
+| `confluence:payment-master` | 0.22 | allowed | allowed, v4 | yes | allowed | no |
+| `jira:SETL-27` | 0.21 | allowed | allowed, v1 | yes | allowed | no |
 | `drive:db-wave-checklist` | link from `jira:DB-12` | allowed | allowed, v2 | yes | allowed | no |
 
-- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 27 events and mentions it: no.
+- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 24 events and mentions it: no.
 - `slack:db-planning`, three weeks old, is outside "last week". Asked without "last week", it reaches the writer: yes.
 
 ### Ravi asks the same question

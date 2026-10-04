@@ -174,6 +174,41 @@ describe("HybridIndex relevance", () => {
     index.upsert(document("thread", "Blocker raised: the backfill keeps timing out."));
     expect(index.search("any blockers?").map(result => result.docId)).toEqual(["thread"]);
   });
+
+  it("counts a word and its synonyms once, and reports how many of the question's words a hit covers", () => {
+    const index = new HybridIndex();
+    index.upsert(document("gateway", "Payment gateway operations and settlement health."));
+    index.upsert(document("sheet", "Payment reconciliation sheet for the partner."));
+    const coverage = Object.fromEntries(index.search("payment gateway operations").map(result => [result.docId, result.coverage]));
+    // "payment" also counts as "pay" and "payments", but it is one word of the question.
+    expect(coverage).toEqual({ gateway: 3, sheet: 1 });
+  });
+
+  it("makes no hit from generic work words alone, unless the question has nothing else", () => {
+    const index = new HybridIndex();
+    index.upsert(document("weekly", "Weekly status update for the project team."));
+    index.upsert(document("runners", "Runner pool status: 62 of 80 jobs moved."));
+    expect(index.search("What's the status of the runner pool?").map(result => result.docId)).toEqual(["runners"]);
+    expect(index.search("Any status update on the project?").map(result => result.docId).sort()).toEqual(["runners", "weekly"]);
+    expect(index.search("What's the status of the runner pool?")[0].coverage).toBe(2);
+  });
+
+  it("weighs generic work words less than the words that name the topic", () => {
+    const index = new HybridIndex();
+    index.upsert(document("capacity", "Runner capacity is short in the second rack."));
+    index.upsert(document("checks", "Status update: runner checks passed."));
+    expect(index.search("runner capacity status update").map(result => result.docId)).toEqual(["capacity", "checks"]);
+  });
+
+  it("reports a hit's semantic similarity when it has one", async () => {
+    const index = new HybridIndex();
+    index.upsert(document("invoices", "Reimbursement procedure"));
+    await index.refreshSemantic("invoices", { embed: async () => vector(0) });
+    const [hit] = index.search("payment", 20, vector(0));
+    expect(hit.semantic).toBeCloseTo(1);
+    expect(hit.coverage).toBe(0);
+    expect(index.search("reimbursement")[0].semantic).toBeUndefined();
+  });
 });
 
 describe("LocalGroundedLlm", () => {
