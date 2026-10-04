@@ -16,7 +16,7 @@ flowchart TB
   Tomb --> Permissions
 
   subgraph QueryLane["Query"]
-    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms named,<br/>time window"]
+    Question["Question from a<br/>signed-in person"] --> Plan["Plan: platforms, time<br/>window, project named"]
     Plan --> Search["① Hybrid search over the<br/>whole index: keywords,<br/>vectors and freshness;<br/>returns IDs only"]
     Search --> Check["② Access check on<br/>document IDs only"]
     Check --> Links["Follow links one hop,<br/>from allowed documents<br/>only, then ② again"]
