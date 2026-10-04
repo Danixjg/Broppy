@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Citation, IndexedDocument, QueryAnswer, SearchCandidate, SourceChunk, SourceDocument } from "@brain/types";
+import { checkAnswer } from "./grounding.js";
 export { SupabaseIndex } from "./supabase.js";
+export { checkAnswer, NO_RESULT, type CheckReport } from "./grounding.js";
 
 /** Object keys are sorted first, so a copy whose keys came back reordered hashes the same: Postgres jsonb, which holds
  * the saved state, returns keys shortest first. Without this, every document read as a permission change after a
@@ -284,48 +286,11 @@ export class LocalGroundedLlm implements LlmClient {
   }
 }
 
-export const NO_RESULT = "No accessible information was found for this query.";
-
-// A model may copy a sentence with lookalike characters: a non-breaking hyphen, curly quotes or special spaces. Both
-// sides are folded before they are compared, so those don't drop a faithful copy; the words must still match.
-function fold(text: string): string {
-  return text.normalize("NFKC").toLowerCase()
-    .replace(/[\u2010-\u2015\u2212]/g, "-")
-    .replace(/[\u2018\u2019\u201a\u201b\u2032]/g, "'")
-    .replace(/[\u201c\u201d\u201e\u201f\u2033]/g, "\"")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** The source's own sentence, when the claim copies one whole, so the answer shows the source's characters. */
-function sourceSentence(evidence: string | undefined, claim: string): string | undefined {
-  return evidence?.split(/(?<=[.!?])\s+/).map(sentence => sentence.replace(/\s+/g, " ").trim())
-    .find(sentence => fold(sentence) === claim);
-}
-
+/** The checked answer: only the lines of a writer's reply that the passages it cites back (see grounding.ts). */
 export function groundedOutput(
   output: string,
   allowed: Map<string, Citation>,
   evidence: Map<string, string>
 ): QueryAnswer {
-  const lines = output.split(/\n+/).map(line => line.trim()).filter(Boolean);
-  const kept: string[] = [];
-  const citations = new Map<string, Citation>();
-  for (const line of lines) {
-    const allMarkers = [...line.matchAll(/\[([^\]]+)\]/g)].map(match => match[1]);
-    const cited = allMarkers.filter(id => allowed.has(id));
-    if (!cited.length || cited.length !== allMarkers.length) continue;
-    const claims = line.replace(/\[[^\]]+\]/g, "").split(/(?<=[.!?])\s+/).filter(Boolean);
-    if (claims.length > 1) continue;
-    const claim = fold(claims[0] ?? "");
-    if (!claim || !cited.some(id => fold(evidence.get(id) ?? "").includes(claim))) continue;
-    const original = cited.map(id => sourceSentence(evidence.get(id), claim)).find(Boolean);
-    kept.push(original ? `${original} ${allMarkers.map(id => `[${id}]`).join(" ")}`
-      : line.normalize("NFKC").replace(/[\u2010\u2011]/g, "-"));
-    for (const id of cited) citations.set(id, allowed.get(id)!);
-  }
-  return {
-    text: kept.join("\n") || NO_RESULT,
-    citations: [...citations.values()]
-  };
+  return checkAnswer(output, allowed, evidence).answer;
 }

@@ -228,7 +228,7 @@ describe("LocalGroundedLlm", () => {
       "Don't skip the drill. [runbook:0]",
       "Step 2: freeze deploys. [runbook:0]"
     ]);
-    // The words must still match: a reworded sentence is dropped.
+    // A word the passage doesn't have still drops the line: "call" for "page" (grounding.test.ts covers rewording).
     expect(groundedOutput("Step 1: call the payments on-call engineer. [runbook:0]", allowed, evidence).text)
       .toBe(NO_RESULT);
   });
