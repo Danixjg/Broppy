@@ -632,6 +632,22 @@ h3 {
 .cite:hover {
   background:#dde9f2
 }
+.reworded-tag {
+  display:inline-block;
+  padding:0 .35rem;
+  border:1px solid #cfdbe2;
+  border-radius:999px;
+  color:#576c7a;
+  font-size:.68rem;
+  font-weight:650;
+  line-height:1.35;
+  vertical-align:.1rem
+}
+.checker-note {
+  margin:.4rem 0 0;
+  color:#576c7a;
+  font-size:.78rem
+}
 .source-list {
   margin:0;
   padding-left:1.25rem;
