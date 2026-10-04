@@ -986,6 +986,50 @@ Each entry records the options that were considered, what was chosen, and the tr
   - no new axe violations.
 - **`pnpm llm:check`:** prints the verdict on every line of a real model's replies, for the team to label.
 
+## 2026-10-04 — Contrast and the workspace build
+
+- **Input:** the two items left under Deferred by UI round 1, measured on 4 Oct.
+  - **Contrast:** axe found 379 colour-contrast failures, all "serious", on 12 of 14 workspace screens. The earlier
+    runs covered 7 screens; this one added Sync health, Admin, the connectors page, the asker's trace, the catch-up,
+    the merge preview, and the empty lists a contractor and an intern see.
+  - **The build:** three builds in a row left three nested copies, each adding 8 files, 354 KB and 10 characters to
+    the longest path.
+- **How decided:** the measurements and a before-and-after screenshot were laid out, and the user chose to fix both
+  now, before the demo video.
+
+### D66 — Secondary text uses the theme's muted grey
+- **Options:**
+  - darken each failing grey just enough, keeping eleven shades;
+  - use the theme's own `--muted-foreground` (#61717f) wherever secondary text appears;
+  - leave it.
+- **Chosen:** the theme's grey, at 4.6–5.0:1 on every background the app uses. One shade replaces eleven, so a new
+  rule is less likely to pick a faint one. The green section labels darken from #388065 to #33775d.
+- **Trade-off:** secondary text is a little darker, so it recedes a little less. Size, weight and spacing still set
+  it apart.
+
+### D67 — The workspace build doesn't copy `public/`
+- **Options:** `publicDir: false`; a separate folder for the workspace's own static files; or leave it.
+- **Chosen:** `publicDir: false`. `public/` holds no tracked files, only the published workspace, so the copy only
+  ever duplicated the last build.
+
+### Implementation details (contrast and the workspace build)
+- **The rules changed:**
+  - in `apps/web/src/ui.css`: the brand subtitle, the project and persona labels, the search placeholder and shortcut
+    key, the header's context label, the section labels, item and detail metadata, `.muted`, and the breadcrumb;
+  - in `apps/web/styles.css`: the landing-view label, empty lists, Sync health's architecture notes, and the trace's
+    times.
+- **`styles.css` carries the grey as a fallback** (`var(--muted-foreground, #61717f)`), because `connectors.html`
+  loads that file without `theme.css`.
+- **The demo note's own darker grey,** added in UI round 1, is gone: the shared grey now passes on the panels' tints.
+- **Checked in the browser:**
+  - axe (WCAG 2.0 and 2.1, A and AA) finds no contrast failures, and no other violations, on the 14 screens;
+  - the search placeholder, which axe doesn't check, goes from 2.83:1 to 4.68:1;
+  - the UI fixes' 66 browser checks and R9's 24 still pass.
+- **The build:** three builds in a row leave the one bundle, file for file the same as before. The first build after
+  the change also clears the copies already there, because `scripts/publish-workspace.mjs` empties the folder first.
+- **Screenshots:** six worked-example screenshots and the two README workspace screenshots were re-taken. The audit
+  console's didn't change.
+
 ---
 
 ## Deferred (not decided yet)
@@ -1005,12 +1049,8 @@ These are open. Pick them up in a later round and record the decision here.
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
 - **UI round 1's "not now":** a label for which writer answered, and "Show more" for long lists (D57).
-- **Colour contrast:** axe finds 26 failures on `main`'s workspace screen, in the header, the lists and the panels.
-  - **Most of them:** one shared grey, `#73818b` in `apps/web/src/ui.css`, at 3.8–4:1 against the 4.5:1 minimum.
-  - **The worst:** the header's context label, at 2.46:1.
-- **Workspace build:** `vite build` copies Next's `public/` folder, which holds the last published bundle. So each
-  `build:workspace`, and each `pnpm --dir apps/web dev`, nests the previous bundle one level deeper under
-  `public/workspace/`. Setting Vite's `publicDir: false` would stop it.
+- **Colour contrast:** settled: secondary text uses the theme's muted grey (D66).
+- **Workspace build:** settled: the build no longer copies `public/` (D67).
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,
   source-specific FGA types, and webhooks. The snapshot write runs after every successful response, `/health`
   included, which matters once the SSO API is reachable from the internet.
