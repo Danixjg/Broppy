@@ -1,9 +1,10 @@
 import { narrowerPermissionError } from "./permissions.js";
+import { answerLines, auditSummary, isDemoAddress, isRoutineSync, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
-const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
@@ -21,7 +22,7 @@ const node = (tag, className, text) => {
   return element;
 };
 const clear = element => element.replaceChildren();
-const reveal = element => element?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+const reveal = (element, block = "nearest") => element?.scrollIntoView({ block, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
 const appendText = (parent, tag, className, text) => parent.append(node(tag, className, text));
 const setMessage = (element, message) => { element.textContent = message; };
 const sourceName = source => ({ slack: "Slack", jira: "Jira", confluence: "Confluence", drive: "Drive" })[source] || "Source";
@@ -37,6 +38,22 @@ function externalLink(url, text) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   return link;
+}
+// A document's own page at its platform. The demo's documents have placeholder addresses that no browser can open.
+function sourceLink(url, source) {
+  if (isDemoAddress(url)) return node("span", "muted demo-note", `Demo document: there's no live ${sourceName(source)} page.`);
+  return externalLink(url, `Open in ${sourceName(source)} ↗`);
+}
+// The document's text with the lines an answer quoted from it marked.
+function highlighted(content, quotes) {
+  const paragraph = node("p", "document-text");
+  let position = 0;
+  for (const [start, end] of quotedRanges(content, quotes)) {
+    paragraph.append(content.slice(position, start), node("mark", "", content.slice(start, end)));
+    position = end;
+  }
+  paragraph.append(content.slice(position));
+  return paragraph;
 }
 function statusBadge(doc) {
   const status = documentStatus(doc);
@@ -68,7 +85,8 @@ async function call(path, options = {}) {
 }
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
 function role() { return state.authMode === "demo" ? roles[$("user").value] || "member" : state.me?.role || "member"; }
-function setView(view) {
+// load: whether opening Compliance loads the whole audit; a caller about to search it passes false.
+function setView(view, { load = true } = {}) {
   if (view === "admin" && role() !== "admin") view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
   state.view = view;
@@ -78,16 +96,17 @@ function setView(view) {
     button.classList.toggle("active", name === view);
     if (name === view) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   }
-  if (view === "compliance") loadAudit();
+  if (view === "compliance" && load) loadAudit();
   if (view === "operations") loadHealth();
 }
 function resetIdentity() {
   state.identity++;
-  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
-  for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
+  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
   for (const id of ["question", "adminContent", "auditSearch", "memberGroup", "memberChannelDoc"]) $(id).value = "";
+  $("hideRoutine").checked = true;
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
   $("adminTab").hidden = role() !== "admin";
@@ -145,21 +164,32 @@ function filteredDocs(source) {
   const term = $("search").value.trim().toLocaleLowerCase();
   return state.docs.filter(doc => (!source || doc.source === source) && inProject(doc.docId) && (!term || `${doc.title} ${doc.source} ${safeText(doc.content)} ${safeText(doc.metadata?.status)} ${safeText(doc.metadata?.project)}`.toLocaleLowerCase().includes(term)));
 }
-function selectDoc(doc) {
+// quotes: the lines an answer took from this document, marked in its text. focus: opened from an answer, so the
+// panel takes the keyboard focus.
+function selectDoc(doc, quotes = [], { focus = false } = {}) {
   if (!state.docs.some(item => item.docId === doc.docId)) return;
-  state.selected = doc.docId;
+  state.selected = doc.docId; state.selectedQuotes = quotes;
   const box = $("selectedDetail"); clear(box); box.hidden = false;
   appendText(box, "p", "eyebrow", `${sourceName(doc.source)} · ${documentStatus(doc)}`);
-  appendText(box, "h3", "", doc.title);
+  const heading = node("h3", "", doc.title); heading.tabIndex = -1; box.append(heading);
   appendText(box, "p", "detail-meta", `Version ${doc.version} · Edited ${fmtDate(doc.updatedAt)} · Tier ${doc.tier}`);
   if (doc.lastIndexedAt) appendText(box, "p", "detail-meta", `Indexed ${fmtDate(doc.lastIndexedAt)}`);
   if (doc.lastPermissionSyncAt) appendText(box, "p", "detail-meta", `Permissions synced ${fmtDate(doc.lastPermissionSyncAt)}`);
   appendText(box, "p", "detail-meta", `Access tier ${doc.tier} narrows source access; native source permissions still apply.`);
-  if (doc.content) appendText(box, "p", "", doc.content);
+  if (doc.content) box.append(highlighted(doc.content, quotes));
   else appendText(box, "p", "muted", "Preview is loading from the workspace API. Open the source or ask the Brain for a cited summary.");
-  box.append(externalLink(doc.url, "Open source ↗"));
+  box.append(sourceLink(doc.url, doc.source));
   renderLinked(box, doc);
-  reveal(box);
+  if (focus) heading.focus({ preventScroll: true });
+  // A marked line is centred, so the reader sees it with the text around it.
+  const mark = box.querySelector("mark");
+  if (mark) reveal(mark, "center"); else reveal(box);
+}
+// A document an answer cited, opened here with the answer's lines from it marked. Every cited document is one this
+// person may open, so the workspace lists it.
+function openSource(source, quotes) {
+  const doc = docById(source.docId);
+  if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, quotes, { focus: true });
 }
 // Items linked to this one that this person may also open: the API never lists any others.
 function linkedDocs(doc) { return (Array.isArray(doc.links) ? doc.links : []).map(docById).filter(Boolean); }
@@ -182,8 +212,8 @@ function activityButton(doc, source) {
 }
 const sentencesOf = text => safeText(text).split(/\n|(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
 // A Jira task with the section of its linked page or file that names it, and Mark done.
-function openTask(doc) {
-  selectDoc(doc);
+function openTask(doc, quotes = [], options = {}) {
+  selectDoc(doc, quotes, options);
   const box = $("selectedDetail");
   const key = doc.docId.split(":")[1] || "";
   const work = linkedDocs(doc).filter(item => ["confluence", "drive"].includes(item.source));
@@ -191,8 +221,12 @@ function openTask(doc) {
   const wrap = node("div", "answer-block");
   if (target) {
     appendText(wrap, "strong", "", `Working doc: ${target.title}`);
-    appendText(wrap, "p", "", sentencesOf(target.content).find(sentence => sentence.includes(key)) || sentencesOf(target.content)[0] || "");
-    wrap.append(externalLink(target.url, `Open ${target.title} ↗`));
+    const sentence = sentencesOf(target.content).find(item => item.includes(key)) || sentencesOf(target.content)[0] || "";
+    appendText(wrap, "p", "", sentence);
+    const open = node("button", "text-button", `Open ${target.title}`); open.type = "button";
+    open.addEventListener("click", () => selectDoc(target, sentence ? [sentence] : [], { focus: true }));
+    wrap.append(open);
+    if (!isDemoAddress(target.url)) wrap.append(" ", sourceLink(target.url, target.source));
   } else appendText(wrap, "p", "muted", "No linked page or file that you can open.");
   if (documentStatus(doc) === "done") appendText(wrap, "p", "muted", "This task is done.");
   else {
@@ -286,7 +320,7 @@ function renderMaster() {
   if (master.content) appendText($("masterContent"), "p", "", master.content);
   else appendText($("masterContent"), "p", "muted", "Master content will appear when the workspace API provides it.");
   const meta = node("p", "detail-meta", `Version ${master.version} · Edited ${fmtDate(master.updatedAt)}`);
-  $("masterContent").append(meta, externalLink(master.url, "Open Confluence master ↗"));
+  $("masterContent").append(meta, sourceLink(master.url, master.source));
   const conclusions = sentencesOf(master.content);
   if (conclusions.length) for (const text of conclusions) appendText($("conclusions"), "div", "conclusion", text);
   else appendText($("conclusions"), "p", "empty", "Conclusions will appear with authorized master content.");
@@ -451,7 +485,7 @@ async function loadWorkspace() {
     if (role() === "admin") await loadNativePermissions();
     if (generation !== state.identity) return;
     $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.`;
-    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; } }
+    if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, state.selectedQuotes); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; state.selectedQuotes = []; } }
     applyLandingPreference();
     if (!state.landingApplied) {
       state.landingApplied = true;
@@ -460,14 +494,24 @@ async function loadWorkspace() {
     return true;
   } catch (error) { if (generation === state.identity) $("workspaceNotice").textContent = `Workspace unavailable: ${error.message}`; return false; }
 }
-function renderCitations(parent, citations) {
-  if (!Array.isArray(citations) || !citations.length) return;
+// The answer's sources, numbered as its lines cite them. Each opens in the workspace with its quoted lines marked.
+function renderCitations(parent, sources, lines) {
+  if (!sources.length) return;
   const list = node("div", "citation-list"); appendText(list, "strong", "", "Sources");
-  for (const citation of citations) {
-    if (!citation || !safeUrl(citation.url)) continue;
-    const via = typeof citation.linkedFrom === "string" ? ` · linked from ${docById(citation.linkedFrom)?.title || citation.linkedFrom}` : "";
-    list.append(externalLink(citation.url, `${safeText(citation.title)} · v${citation.version} · edited ${fmtDate(citation.updatedAt)}${via}`));
+  const items = node("ol", "source-list");
+  for (const source of sources) {
+    const via = typeof source.linkedFrom === "string" ? ` · linked from ${docById(source.linkedFrom)?.title || source.linkedFrom}` : "";
+    const label = `${safeText(source.title)} · v${source.version} · edited ${fmtDate(source.updatedAt)}${via}`;
+    const item = node("li", "");
+    if (docById(source.docId)) {
+      const quotes = lines.filter(line => line.refs.includes(source.number)).map(line => line.text);
+      const button = node("button", "source-button", label); button.type = "button";
+      button.addEventListener("click", () => openSource(source, quotes));
+      item.append(button);
+    } else item.append(isDemoAddress(source.url) || !safeUrl(source.url) ? node("span", "", label) : externalLink(source.url, label));
+    items.append(item);
   }
+  list.append(items);
   parent.append(list);
 }
 // Where the answer looked first and the dates it kept to, when the question named them, and the project it kept to.
@@ -479,22 +523,66 @@ function scopeText(scope) {
     names ? `Searched ${names} first, then the other sources.` : dates ? `Searched everything from ${dates}.` : "";
   return [project, searched].filter(Boolean).join(" ");
 }
+// One line per claim, each followed by numbered chips for the sources it was copied from.
 function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
-  appendText(target, "div", "", safeText(result.text) || "No answer returned.");
+  const sources = numberSources(result.citations);
+  const lines = answerLines(safeText(result.text) || "No answer returned.", sources);
+  const body = node("div", "answer-lines");
+  for (const line of lines) {
+    const row = node("p", "answer-line", line.text);
+    for (const number of line.refs) {
+      const source = sources[number - 1];
+      const chip = node("button", "cite", String(number)); chip.type = "button";
+      chip.title = safeText(source.title);
+      chip.setAttribute("aria-label", `Source ${number}: ${safeText(source.title)}`);
+      chip.addEventListener("click", () => openSource(source, [line.text]));
+      row.append(" ", chip);
+    }
+    body.append(row);
+  }
+  target.append(body);
   const scope = scopeText(result.scope);
   if (scope) appendText(target, "p", "muted", scope);
-  renderCitations(target, result.citations);
+  renderCitations(target, sources, lines);
   if (result.traceId) {
     const button = node("button", "text-button", "Why this result? View trace ↗"); button.type = "button";
     button.addEventListener("click", () => showTrace(result.traceId)); target.append(button);
   }
 }
+// The chat searches documents, so an audit question typed there finds nothing. Compliance staff are offered the audit
+// log instead; nobody else sees a difference.
+function appendAuditHint(target, question) {
+  const hint = node("div", "audit-hint");
+  appendText(hint, "p", "", "This looks like a question for the audit log, which records who asked and opened what.");
+  const button = node("button", "secondary-button", "Search the audit log"); button.type = "button";
+  button.addEventListener("click", () => {
+    setView("compliance", { load: false });
+    $("auditSearch").value = question;
+    searchAudit(question);
+  });
+  hint.append(button);
+  target.append(hint);
+}
+// While an answer is on its way: a spinner and the seconds so far, so a long wait doesn't look frozen. The chat is a
+// live region, so the counter is hidden from screen readers, which hear the label once.
+function showPending(target, label) {
+  clear(target); target.hidden = false;
+  const line = node("p", "pending");
+  const spinner = node("span", "spinner"); spinner.setAttribute("aria-hidden", "true");
+  const seconds = node("span", "pending-seconds"); seconds.setAttribute("aria-hidden", "true");
+  line.append(spinner, label, seconds);
+  target.append(line);
+  const started = Date.now();
+  const timer = setInterval(() => { seconds.textContent = `${Math.round((Date.now() - started) / 1000)} s`; }, 1000);
+  return () => clearInterval(timer);
+}
 async function ask(question, target, displayQuestion = false) {
   const generation = state.identity;
-  target.hidden = false; setMessage(target, "Checking accessible sources…");
-  const result = await post("/v1/query", { question });
+  const stop = showPending(target, "Checking permissions and sources…");
+  let result;
+  try { result = await post("/v1/query", { question }); } finally { stop(); }
   if (generation !== state.identity) return null;
   renderAnswer(target, result, displayQuestion ? question : "");
   if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
@@ -539,19 +627,31 @@ function localAuditSearch(entries, query) {
   const normalized = terms.map(term => ({ denied: "false", allowed: "true", permission: "permission", access: "access" })[term] || term);
   return entries.filter(entry => normalized.every(term => `${entry.type} ${entry.actor} ${eventSummary(entry)}`.toLowerCase().includes(term)));
 }
+// The list on screen may leave out routine sync checks; state.auditEntries, the search and the CSV export keep every entry.
 function renderAudit(entries) {
   state.auditEntries = entries; clear($("auditRows"));
-  for (const entry of entries) {
+  const shown = $("hideRoutine").checked ? entries.filter(entry => !isRoutineSync(entry)) : entries;
+  const hidden = entries.length - shown.length;
+  $("routineHidden").textContent = hidden ? `${hidden} hidden` : "";
+  for (const entry of shown) {
     const row = node("tr", "");
     appendText(row, "td", "", `#${entry.sequence} · ${fmtDate(entry.timestamp)}`);
     appendText(row, "td", "", entry.type);
     appendText(row, "td", "", entry.actor);
-    appendText(row, "td", "", eventSummary(entry));
+    const details = node("td", ""); appendText(details, "p", "audit-line", auditSummary(entry));
+    // The full entry is written out only when someone opens it, so a long log stays light.
+    const raw = node("details", "raw-data"); appendText(raw, "summary", "", "Raw data");
+    raw.addEventListener("toggle", () => { if (raw.open && !raw.querySelector("pre")) appendText(raw, "pre", "", JSON.stringify(entry, null, 2)); });
+    details.append(raw); row.append(details);
     const cell = node("td", ""); const button = node("button", "", "Inspect proof"); button.type = "button";
     button.addEventListener("click", () => inspectProof(entry.sequence)); cell.append(button); row.append(cell);
     $("auditRows").append(row);
   }
-  if (!entries.length) { const row = node("tr", ""); const cell = node("td", "empty", "No matching audit events."); cell.colSpan = 5; row.append(cell); $("auditRows").append(row); }
+  if (!shown.length) {
+    const row = node("tr", "");
+    const cell = node("td", "empty", hidden ? "Only routine sync checks match. Untick “Hide routine sync checks” to see them." : "No matching audit events.");
+    cell.colSpan = 5; row.append(cell); $("auditRows").append(row);
+  }
 }
 async function loadAudit() {
   if (role() !== "compliance") return;
@@ -571,12 +671,12 @@ async function searchAudit(query) {
     const result = await call(`/v1/audit/search?${new URLSearchParams({ q: query, ...($("auditFrom").value ? { from: $("auditFrom").value } : {}), ...($("auditTo").value ? { to: $("auditTo").value } : {}) })}`);
     if (generation !== state.identity || role() !== "compliance") return;
     const entries = Array.isArray(result.entries) ? result.entries : Array.isArray(result) ? result : [];
-    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching events`;
+    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching event${entries.length === 1 ? "" : "s"}`;
   } catch (error) {
     if (generation !== state.identity || role() !== "compliance") return;
     if (error.status !== 404) { $("auditStatus").textContent = error.message; return; }
     const entries = localAuditSearch(state.audit.entries || [], query);
-    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching events · local search`;
+    renderAudit(entries); $("auditStatus").textContent = `${entries.length} matching event${entries.length === 1 ? "" : "s"} · local search`;
   }
 }
 async function inspectProof(sequence) {
@@ -688,18 +788,24 @@ $("queryForm").addEventListener("submit", async event => {
   event.preventDefault(); const question = $("question").value.trim(); if (!question) return;
   const generation = state.identity; const history = $("chatHistory");
   appendText(history, "div", "message question", question);
-  const response = node("div", "message answer", "Checking accessible sources…"); history.append(response);
+  const response = node("div", "message answer"); history.append(response);
   $("askButton").disabled = true; $("queryStatus").textContent = "Checking permissions and source versions…";
-  try { const result = await ask(question, response); if (generation !== state.identity) return; $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = ""; }
+  history.scrollTop = history.scrollHeight;
+  try {
+    const result = await ask(question, response); if (generation !== state.identity) return;
+    if (role() === "compliance" && looksLikeAuditQuestion(question)) appendAuditHint(response, question);
+    $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = "";
+  }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
 });
 // A catch-up chosen by the API from this person's role and groups, kept to the chosen project.
 $("catchUp").addEventListener("click", async () => {
   const target = $("catchUpResult"); const generation = state.identity;
-  target.hidden = false; setMessage(target, "Preparing your catch-up…");
+  const stop = showPending(target, "Preparing your catch-up…");
   try {
     const result = await post("/v1/catch-up", state.project ? { project: state.project } : {});
+    stop();
     if (generation !== state.identity) return;
     if (result.kind === "audit") {
       clear(target); appendText(target, "strong", "", "Audit trail, last 7 days");
@@ -707,6 +813,7 @@ $("catchUp").addEventListener("click", async () => {
       target.append(list);
     } else renderAnswer(target, { ...result.answer, traceId: result.traceId }, `Asked: ${safeText(result.question)}`);
   } catch (error) { if (generation === state.identity) target.textContent = error.message; }
+  finally { stop(); }
 });
 $("projectSelect").addEventListener("change", () => {
   state.project = $("projectSelect").value;
@@ -750,6 +857,7 @@ $("auditSearchForm").addEventListener("submit", event => { event.preventDefault(
 $("refreshAudit").addEventListener("click", loadAudit);
 $("sealAudit").addEventListener("click", async () => { const generation = state.identity; try { const result = await post("/v1/audit/seal", {}); if (generation !== state.identity || role() !== "compliance") return; await loadAudit(); $("auditStatus").textContent = result.batch ? "Audit batch sealed." : "No new events to seal."; } catch (error) { if (generation === state.identity && role() === "compliance") $("auditStatus").textContent = error.message; } });
 $("exportAudit").addEventListener("click", exportAudit);
+$("hideRoutine").addEventListener("change", () => renderAudit(state.auditEntries));
 $("refreshHealth").addEventListener("click", loadHealth);
 $("retrySync").addEventListener("click", async () => {
   const generation = state.identity; $("healthStatus").textContent = "Running connector sync…";

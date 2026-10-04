@@ -85,6 +85,20 @@ Saving starts the import. Narrowing, or choosing nothing, removes what is no lon
 What each person sees beside the chat is built only from what they may open: their projects, links, files and
 suggestions.
 
+- **Answers and their sources:** each line ends in numbered chips, and the Sources list under the answer uses the same
+  numbers.
+  - A chip or a source opens the document in the workspace, with the quoted lines highlighted.
+  - The demo's documents live at placeholder addresses, so they say "Demo document" instead of linking out. Real
+    sources keep their "Open in Slack ↗" (or Jira, Confluence, Drive) link.
+- **While an answer is on its way:** a spinner and a seconds counter show. The spinner holds still when the system
+  asks for reduced motion.
+- **Compliance:**
+  - An audit question typed into the chat, such as "Show me everything user 'ravi' accessed in the last 30 days",
+    offers **Search the audit log**, which runs it in the audit console.
+  - The console says what each event did in plain words ("Denied slack:db-oncall (no permission)"), with the full
+    entry under **Raw data**.
+  - Routine sync checks, which found nothing changed, are hidden behind a toggle. The search, the proofs and the CSV
+    export still use every entry.
 - **Projects:** choose one in the header. Its Confluence master page, threads, tasks and files follow. A project is
   listed only to people who can open its master page.
 - **Links:** a document lists the linked items the person may also open. Answers bring in a ticket's linked thread,
