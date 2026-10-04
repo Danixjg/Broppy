@@ -13,7 +13,7 @@ The challenge brief's five scenarios, run end to end on the demo data. `pnpm sce
 
 ### David asks
 
-Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platforms at any date.
+Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platforms at any date; kept to Database migration plan.
 
 > Database migration project standup: waves one and two of the ledger move are complete. [slack:db-migration:0]
 > Blocker raised: the backfill job keeps timing out on the ledger database, so the final migration wave is on hold until DB-15 is fixed. [slack:db-migration:0]
@@ -38,11 +38,9 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 | `slack:db-oncall` | 0.48 | **denied** | – | no | – | no |
 | `confluence:db-migration-plan` | 0.38 | allowed | allowed, v3 | yes | allowed | yes |
 | `jira:DB-15` | 0.32 | allowed | allowed, v2 | yes | allowed | yes |
-| `confluence:payment-master` | 0.22 | allowed | allowed, v4 | yes | allowed | no |
-| `jira:SETL-27` | 0.21 | allowed | allowed, v1 | yes | allowed | no |
 | `drive:db-wave-checklist` | link from `jira:DB-12` | allowed | allowed, v2 | yes | allowed | no |
 
-- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 24 events and mentions it: no.
+- `slack:db-oncall` is a private channel David isn't in. It was denied before anything reached the writer. David's own trace has 19 events and mentions it: no.
 - `slack:db-planning`, three weeks old, is outside "last week". Asked without "last week", it reaches the writer: yes.
 
 ### Ravi asks the same question
@@ -67,14 +65,10 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 > Step 2: freeze deploys to the payment service. [confluence:payment-service-runbook:0]
 > Step 3: check gateway error rates and authorization latency. [confluence:payment-service-runbook:0]
 > Step 4: if errors persist for ten minutes, fail over payment traffic to the standby region. [confluence:payment-service-runbook:0]
-> Security incident triage: restrict incident evidence to responders. [slack:sec-incident:0]
-> Use the approved runbook before switching traffic. [slack:payments-cutover:0]
 
 | Cited | Title | Version | Last edited |
 | --- | --- | --- | --- |
 | `confluence:payment-service-runbook` | Payment-service incident runbook | 4 | 15 Oct 2026, 13:00 UTC |
-| `slack:sec-incident` | #sec-incident | 1 | 14 Oct 2026, 10:00 UTC |
-| `slack:payments-cutover` | #payments-cutover | 1 | 11 Oct 2026, 10:00 UTC |
 
 - Step 4 is in the answer: yes. The runbook is cited as version 4, edited 15 Oct 2026, 13:00 UTC.
 - Before anything reaches the writer, the Brain checks each document's version and permissions at the source. It refreshed the runbook then: yes.
@@ -112,7 +106,7 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 > Waves one and two are complete, and wave three waits on DB-15. [jira:DB-12:0]
 > Move the ledger database to Postgres 16 in three waves. [confluence:db-migration-plan:0]
 > DB-15 (blocked): Replica lag stays above five minutes during the backfill, so the final wave of the database migration cannot start. [jira:DB-15:0]
-> Source of truth: PAY-101 cutover follows SEC-44 failover verification. [confluence:payment-master:0]
+> Wave three checklist: pause ledger writes, verify backfill row counts, then move reads to the Postgres 16 cluster. [drive:db-wave-checklist:0]
 
 ### Maya restricts the runbook page
 
@@ -138,11 +132,11 @@ Earlier that day, Ravi asks "Payment gateway operations" at 09:30 and "PAY-101 c
 
 > Show me everything user 'ravi' accessed related to the 'payment-gateway' Confluence space in the last 30 days
 
-Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 2026, 00:00 UTC to 15 Oct 2026, 16:00 UTC. It finds 49 entries, grouped here by question; the workspace's Compliance tab lists each one.
+Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 2026, 00:00 UTC to 15 Oct 2026, 16:00 UTC. It finds 37 entries, grouped here by question; the workspace's Compliance tab lists each one.
 
 | Entries | Time | Question | Documents checked | Refused | Sent to the writer | Answer |
 | --- | --- | --- | --- | --- | --- | --- |
-| 35–83 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 8 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
+| 35–71 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 2 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
 
 - From the `payment-gateway` space, `confluence:gateway-operations`. Access check: allowed; live check at the source: allowed, v1; sent to the writer: yes; rechecked after writing: allowed.
 
@@ -155,9 +149,9 @@ Read as: document `confluence:gateway-operations`. Retrieved for: Ravi.
 ### Tamper evidence
 
 - Every entry carries the hash of the one before it. The chain verifies: yes.
-- Nur seals the log into a Merkle batch of entries 1 to 153. The proof for Ravi's answer, entry 83, verifies against it: yes.
-- A copy of the log with that answer changed is refused ("Invalid stored audit log: entry 83 does not match its hash chain").
-- A copy with entry 77 deleted is refused ("Invalid stored audit log: entry 77 does not match its hash chain").
+- Nur seals the log into a Merkle batch of entries 1 to 141. The proof for Ravi's answer, entry 71, verifies against it: yes.
+- A copy of the log with that answer changed is refused ("Invalid stored audit log: entry 71 does not match its hash chain").
+- A copy with entry 72 deleted is refused ("Invalid stored audit log: entry 72 does not match its hash chain").
 
 ![Nur's audit search](images/s5-nur.png)
 

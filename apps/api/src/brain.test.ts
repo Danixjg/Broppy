@@ -3,7 +3,7 @@ import { AuditLog } from "@brain/audit";
 import type { RemoteFgaAdapter } from "@brain/fga-adapter";
 import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
-import { Brain } from "./brain.js";
+import { Brain, coveringHits } from "./brain.js";
 import { ModelUnavailable } from "./llm.js";
 import { actorTrace } from "./server.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
@@ -579,5 +579,30 @@ describe("When the language model can't answer", () => {
     const answer = await brain.query(brain.user("ravi")!, question);
     expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
     expect(embed).not.toHaveBeenCalled();
+  });
+});
+
+describe("coveringHits", () => {
+  const hit = (docId: string, coverage: number, semantic?: number) =>
+    ({ docId, chunkId: `${docId}:0`, score: 0.5, coverage, ...(semantic === undefined ? {} : { semantic }) });
+  const ids = (hits: Array<{ docId: string }>) => hits.map(item => item.docId);
+  const every = () => true;
+
+  it("keeps hits that cover at least half, rounded up, of what the best hit covers", () => {
+    expect(ids(coveringHits([hit("a", 3), hit("b", 2), hit("c", 1)], every))).toEqual(["a", "b"]);
+    expect(ids(coveringHits([hit("a", 2), hit("b", 1)], every))).toEqual(["a", "b"]);
+  });
+
+  it("sets the bar from eligible hits only, and still passes the others through", () => {
+    // A superseded copy that covers more doesn't raise the bar for the current documents.
+    const hits = [hit("old", 3), hit("a", 2), hit("b", 1)];
+    expect(ids(coveringHits(hits, item => item.docId !== "old"))).toEqual(["old", "a", "b"]);
+  });
+
+  it("keeps a hit found by meaning alone only if it is as close as the closest hit that clears the bar", () => {
+    const hits = [hit("words", 2, 0.7), hit("close", 0, 0.8), hit("far", 0, 0.6)];
+    expect(ids(coveringHits(hits, every))).toEqual(["words", "close"]);
+    // With no word in common anywhere, meaning decides alone.
+    expect(ids(coveringHits([hit("x", 0, 0.6), hit("y", 0, 0.55)], every))).toEqual(["x", "y"]);
   });
 });
