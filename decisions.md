@@ -902,6 +902,90 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Screenshots:** the seven worked-example screenshots and the two README workspace screenshots were re-taken. Answers
   now show chips, and demo documents no longer show a link.
 
+## 2026-10-04 — The answer checker
+
+- **Input:**
+  - **The brief:** "Mitigate hallucination and the model 'filling in' content it wasn't given."
+  - **The MVP must-haves:** "an output checker for hallucination".
+  - **The 2 Oct review:** the old check kept only lines copied word for word. Faithful rewording was lost, the
+    model's instructions had to forbid it, and a removed line left no trace for the asker or the audit.
+- **How decided:** planned with its validation tests, then chosen explicitly in a planning session.
+
+### D62 — Rules, not a second model, judge a reworded line
+- **Options:**
+  - **Rules:** every clause must be backed by one sentence of a passage the line cites.
+  - **Rules plus a second model call:** a model judges each line the rules pass.
+- **Chosen:** rules only.
+  - **What a second model call would cost:** several seconds on answers that already take about 15, the free
+    allowance used twice, and no verdict a test can pin down.
+  - **What the rules give:** they are explainable and tested line by line, and each removal says what was wrong.
+- **What a kept line must keep:** the numbers, next to the same words; the names, keys, dates and quantities; and the
+  same status, order (before or after), comparison, negation and hedging. It may add no other word that carries
+  meaning. Word forms and a short list of synonyms count as the same word.
+- **Measured** (4 Oct, on the 26 demo passages):
+  - **The rule set:** 54 lines, all right. The word lists and limits were set against these.
+  - **Generated changes:** every sentence of every passage is kept as written, and each of 58 one-fact changes
+    (number, key, name, negation, status, before or after) is left out.
+  - **A held-out set:** 32 lines written before any tuning. Of 15 lines to remove, the checker keeps one (B15, two
+    steps in the opposite order). Of 17 lines to keep, it removes three:
+    - B5: "final wave" for "wave three";
+    - B16: "every morning" for "each morning";
+    - B23: "leave … out" for "do not include".
+  - **One more line, B22,** found a hole in the old word-for-word rule: a copied part of a sentence could drop the
+    "not" in front of it ("Include this channel" from "Do not include this channel"). That was fixed, so B22 no longer
+    counts as unseen.
+- **Known gaps:** each is a failing test (`it.fails`) that turns red once fixed.
+  - who did what, swapped within one sentence;
+  - cause and effect turned around;
+  - a requirement read as done ("Complete SEC-44 …" becoming "SEC-44 is complete");
+  - two steps in the opposite order;
+  - a faithful line that uses a word the passage doesn't (the cost of strictness).
+
+### D63 — The asker sees a count and a reason; the audit keeps the text
+- **Options:** a count and a reason; the removed text too, struck through; or nothing.
+- **Chosen:** a count and a reason, such as "2 lines left out: they had a name, number or date the source doesn't".
+  The text, the reason and what was wrong go into the audit's `answer_returned` entry for compliance.
+- **Why:** a removed line is model text that no source backs, so it never appears in an answer, even marked as
+  removed.
+- **After a fallback (D29):** the model's removed lines go to the audit only. Telling the asker about them would say
+  which writer answered, which D57 left for later.
+
+### D64 — The model may reword lightly
+- **Options:** keep copy-exactly, or allow light rewording now that it's checked.
+- **Chosen:** light rewording. The model may shorten a sentence or join two from one passage, keeping every name,
+  number, date, issue key and status word exactly, and adding nothing.
+- **Trade-off:** more lines may be left out, and so more answers may fall back. `pnpm llm:check` measures this on the
+  real model, and the instruction can be reverted on its own.
+
+### D65 — A branch of its own, on top of the UI fixes
+- **Chosen:** `feat/answer-checker`, stacked on `fix/workspace-ui`. Both are pushed, and the UI one is merged first.
+
+### Implementation details (the answer checker)
+- **Where:** `checkAnswer` in `packages/retrieval/src/grounding.ts`. `groundedOutput` now wraps it, so every writer's
+  reply goes through it, the built-in writer's included (all its lines are copied).
+- **Each line:**
+  1. Every citation marker must name a passage the writer was given.
+  2. Each sentence is checked on its own, and a marker that backs nothing is dropped from the line.
+  3. A sentence copied from a cited passage is kept as copied, if it means what its whole sentence means.
+  4. Otherwise the sentence is split into clauses at commas, semicolons, colons and joining words. Each clause must be
+     backed by one sentence of a cited passage.
+- **Issue status:** a clause that only gives an issue's status ("DB-12 is blocked") must match the label the brain
+  writes into that issue's text, or a status word next to the key.
+- **The answer:** `QueryAnswer.check` gives each line its kind and the source sentences that back it, and only the
+  reasons for what was left out. A no-result answer carries no check, so scenario 3's reply is unchanged.
+- **The workspace:**
+  - a reworded line carries a "reworded" tag, and its chip highlights the sentences that back it;
+  - a note under the answer and the asker's trace give the count and the reason;
+  - the audit console's line counts reworded and left-out lines.
+- **Tests:** written first and seen failing, in `grounding.test.ts`, `brain.test.ts`, `llm-check.test.ts` and the
+  web node checks.
+- **Checked in the browser** with a stand-in model that mixes copied, reworded and invented lines:
+  - the tag, the highlight and the note;
+  - David's trace, without the removed text;
+  - Nur's raw entry, with it;
+  - no new axe violations.
+- **`pnpm llm:check`:** prints the verdict on every line of a real model's replies, for the team to label.
+
 ---
 
 ## Deferred (not decided yet)

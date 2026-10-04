@@ -90,6 +90,8 @@ suggestions.
   - A chip or a source opens the document in the workspace, with the quoted lines highlighted.
   - The demo's documents live at placeholder addresses, so they say "Demo document" instead of linking out. Real
     sources keep their "Open in Slack ↗" (or Jira, Confluence, Drive) link.
+  - A line in the writer's own words is tagged "reworded", and its source highlights the sentence behind it. A note
+    under the answer says how many lines the checker left out, and why.
 - **While an answer is on its way:** a spinner and a seconds counter show. The spinner holds still when the system
   asks for reduced motion.
 - **Compliance:**
@@ -119,7 +121,7 @@ suggestions.
 
 ## Language model (optional, free only)
 
-Without a model, the built-in writer answers: it quotes the most relevant source in full and the best sentence of the next three. A model can only choose and order sentences better. Every answer, from either, keeps only lines copied word for word from the sources the asker may see, each with its citation.
+Without a model, the built-in writer answers: it quotes the most relevant source in full and the best sentence of the next three. A model can write more naturally, and may reword lightly. Every answer, from either, goes through the answer checker: each line must say only what a source it cites says (below).
 
 The project pays for no model use (`decisions.md`, D27, D28 and D55):
 
@@ -132,15 +134,31 @@ The project pays for no model use (`decisions.md`, D27, D28 and D55):
     presets as tested options. They only start with a usage file and token budgets below the free tokens, and Tencent
     bills only if post-paid billing is turned on.
 - **Its instructions** ([`llm.ts`](apps/api/src/llm.ts)) tell the model to:
-  - copy sentences exactly, one per line, each with its citation;
+  - copy sentences where it can, or shorten one or join two from one passage, keeping every name, number, date, issue
+    key and status word and adding nothing, one sentence per line, each with its citation;
   - answer every part of the question, using every passage that helps and leaving out unrelated ones;
   - keep status labels such as "DB-15 (blocked):" and every step of a procedure;
   - put the direct answer first, in at most eight sentences.
 
-  Any line that isn't copied exactly is dropped afterwards, so the model can only choose and order sentences.
-  Lookalike characters, such as a non-breaking hyphen, curly quotes or special spaces, don't count as differences,
-  and the answer shows the source's own text.
-- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or no line of its reply is copied word for word, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
+- **The answer checker** ([`grounding.ts`](packages/retrieval/src/grounding.ts), D62–D64) reads every line of the
+  reply against the passages the writer was given:
+  - **Copied:** a line found word for word in a passage it cites is kept, in the source's own text. Lookalike
+    characters, such as a non-breaking hyphen, curly quotes or special spaces, don't count as differences. A copied
+    part of a sentence must still mean what the whole does, so "Include this channel" from "Do not include this
+    channel" is left out.
+  - **Reworded:** a line is kept only when each of its clauses is backed by one sentence of a passage it cites. The
+    numbers must match and sit next to the same words, and so must the names, keys, dates and quantities. Status,
+    order, comparison, negation and hedging must agree, and no other word that carries meaning may be added.
+  - **Left out:** anything else. The asker sees how many lines and why; the text goes to the audit (D63).
+  - **Measured on the demo passages:**
+    - 54 rule lines, all right;
+    - 58 generated one-fact changes, all left out;
+    - a held-out set of 32 lines written before tuning: one hallucination kept, three faithful lines left out (D62).
+  - **Known gaps:** who did what within one sentence, cause and effect reversed, a requirement read as done, and two
+    steps in the opposite order.
+  - **`pnpm llm:check`** asks the usage questions through the configured model and prints the verdict on every line,
+    for a person to judge.
+- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or the checker keeps no line of its reply, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
   - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
   - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
 - **One Groq account:** its free plan limits requests and tokens per minute and per day, and every key in the account
