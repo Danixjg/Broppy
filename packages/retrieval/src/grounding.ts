@@ -230,6 +230,8 @@ function checkClause({ words, facts, statuses, plain }: Clause, sentence: Senten
       [sentence.facts[at - 1], sentence.facts[at + 1]].some(near => near && neighbours.some(mine => matches(mine, near)))));
     if (bound) { matched++; usedSentence = true; return; }
     const present = sentence.facts.some(other => numberValue(other.word) === value);
+    // Half credit, so the reason given comes from the sentence that has the number, tied to other words.
+    if (present) matched += 0.5;
     fail({ reason: "new_fact", detail: present ? `${quote(item.raw)} isn't tied to the same words in the passage` : `the passage doesn't have ${quote(item.raw)}` });
   });
 

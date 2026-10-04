@@ -174,6 +174,9 @@ describe("How the checker treats a whole line", () => {
     expect(JSON.stringify(answer)).not.toContain("DB-15 is done");
     expect(report.removed).toEqual([{ text: "DB-15 is done.", reason: "changed_meaning", detail: expect.stringContaining("done"),
       citations: ["jira:DB-15:0"] }]);
+    // The detail names what's wrong: here the number is in the passage, but tied to other words.
+    expect(checkAnswer("Waves one and three are complete. [jira:DB-12:0]", allowed, evidence).report.removed[0].detail)
+      .toBe("\"three\" isn't tied to the same words in the passage");
   });
 
   it("returns the fixed reply, with no check, when nothing is backed", () => {
