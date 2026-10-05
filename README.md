@@ -79,7 +79,7 @@ With an embedding provider (Cloudflare Workers AI's `bge-m3`, D56), sync embeds 
 - **Realistic mess:** superseded copies, near-copies, blocked issues, and agreements in Slack, some tracked by an issue and some not.
 - **What it never says:** the hand-written story's words, so it doesn't change the scenarios' answers; months, dates or quarters, which the demo's date shift can't move; and, in what the intern and the contractor can open, anything about items hidden from them, not even a name.
 
-`pnpm dataset` writes the three files again and prints the counts and how many items each person can open; `pnpm test` fails when the files no longer match the generator. `pnpm dataset --scale brief` builds and checks the brief's scale in memory: about 20,000 items in 30 projects, with 600 colleagues. The demo doesn't load the generated data yet.
+`pnpm dataset` writes the three files again and prints the counts and how many items each person can open. A file whose content hasn't changed is left alone, even if Git for Windows checked it out with different line endings, so Git doesn't list it as changed. `pnpm test` fails when the files no longer match the generator. `pnpm dataset --scale brief` builds and checks the brief's scale in memory: about 20,000 items in 30 projects, with 600 colleagues. The demo doesn't load the generated data yet.
 
 ## Choosing what a company includes
 
