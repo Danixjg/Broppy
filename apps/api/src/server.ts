@@ -146,6 +146,13 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   }
   const brain = options.brain ?? new Brain(models.llm,
     { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
+  // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
+  const applySite = async (source: Source) => {
+    const connector = connectors?.[source];
+    const site = oauth && connector instanceof LiveConnector ? await oauth.orgSite(source) : undefined;
+    if (site) (connector as LiveConnector).useSite(site);
+  };
+  for (const source of ["jira", "confluence"] as Source[]) await applySite(source);
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
@@ -175,6 +182,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
         const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
+        await applySite(source);
         // Nothing is imported until the admin chooses what to include.
         brain.connections.set(source, { source, status: "Connected", scope: { mode: "none" }, connectedBy: actor.id, connectedAt: new Date().toISOString() });
         brain.audit.append("connection_created", actor.id, { source });

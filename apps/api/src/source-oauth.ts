@@ -3,7 +3,8 @@ import type { Source, User } from "@brain/types";
 import type { Persistence } from "./persistence.js";
 
 type ProviderConfig = { clientId: string; clientSecret: string; scopes: string[]; baseUrl?: string; cloudId?: string };
-type Tokens = { access_token: string; refresh_token?: string; expires_at: number; userId: string };
+type Site = { baseUrl: string; cloudId: string };
+type Tokens = { access_token: string; refresh_token?: string; expires_at: number; userId: string; site?: Site };
 const endpoints = {
   slack: { authorize: "https://slack.com/oauth/v2/authorize", token: "https://slack.com/api/oauth.v2.access" },
   jira: { authorize: "https://auth.atlassian.com/authorize", token: "https://auth.atlassian.com/oauth/token" },
@@ -67,11 +68,53 @@ export class SourceOAuth {
       email.toLowerCase() !== user.platformIdentities?.[source]?.toLowerCase()) throw new Error("Source identity could not be matched");
     const tokens: Tokens = { access_token: result.access_token, refresh_token: result.refresh_token,
       expires_at: result.expires_in ? Date.now() + Number(result.expires_in) * 1000 : Number.MAX_SAFE_INTEGER, userId: user.id };
+    if (source === "jira" || source === "confluence") {
+      const sites = await this.accessibleSites(result.access_token);
+      if (mode === "org") tokens.site = this.chooseSite(source, sites);
+      else {
+        // A person's own connection must reach the site the organization is connected to.
+        const org = await this.orgSite(source);
+        if (org && !sites.some(site => site.cloudId === org.cloudId)) throw new Error("This account has no access to the connected Atlassian site");
+      }
+    }
     if (mode === "org") await this.persistence.request("rpc/store_source_token", "POST", { organization: this.persistence.orgId, provider: source, token: tokens, actor: user.id });
     else await this.persistence.request("rpc/store_user_source_token", "POST", { organization: this.persistence.orgId, person: user.id, provider: source, token: tokens });
     this.cache.set(this.key(source, mode === "user" ? user.id : undefined), tokens);
     return user;
   }
+  /** Atlassian sites an access token can reach, from Atlassian itself, so nobody types a cloud ID. */
+  private async accessibleSites(accessToken: string): Promise<Site[]> {
+    const response = await this.transport("https://api.atlassian.com/oauth/token/accessible-resources",
+      { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error("Atlassian sites could not be listed");
+    const list = await response.json();
+    if (!Array.isArray(list)) throw new Error("Atlassian sites could not be listed");
+    return list.flatMap((item: any) => {
+      if (typeof item?.id !== "string" || typeof item?.url !== "string") return [];
+      try { const url = new URL(item.url); return url.protocol === "https:" ? [{ baseUrl: url.origin, cloudId: item.id }] : []; } catch { return []; }
+    });
+  }
+  /** Configuration may pin a site (cloudId or baseUrl); otherwise the only reachable site is used. */
+  private chooseSite(source: Source, sites: Site[]): Site {
+    const config = this.configs[source];
+    const pinned = config?.cloudId ? sites.filter(site => site.cloudId === config.cloudId) :
+      config?.baseUrl ? sites.filter(site => site.baseUrl === new URL(config.baseUrl!).origin) : sites;
+    if (pinned.length === 1) return pinned[0];
+    if (!pinned.length) throw new Error("This account has no access to an Atlassian site that matches the configuration");
+    throw new Error("Several Atlassian sites are available; set baseUrl or cloudId in the source configuration to choose one");
+  }
+  /** The organization's Atlassian site: found at connect time, or pinned by configuration. */
+  async orgSite(source: Source): Promise<Site | undefined> {
+    if (source !== "jira" && source !== "confluence") return undefined;
+    let tokens = this.cache.get(source);
+    if (!tokens) tokens = await this.persistence.request("rpc/read_source_token", "POST", { organization: this.persistence.orgId, provider: source }) ?? undefined;
+    if (tokens?.site) return tokens.site;
+    const config = this.configs[source];
+    return config?.baseUrl && config.cloudId ? { baseUrl: new URL(config.baseUrl).origin, cloudId: config.cloudId } : undefined;
+  }
+  /** Same lookup for other services (for example the Slack app) that call Atlassian with a person's token. */
+  siteFor(source: Source): Promise<Site | undefined> { return this.orgSite(source); }
+
   /**
    * Authorization header for a source. With a user ID, that person's own connection is preferred, then the org
    * connection when the same person made it. Without one, only the org connection (used for imports).

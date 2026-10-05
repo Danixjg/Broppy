@@ -33,12 +33,12 @@ The admin view links to `/connectors.html`. It shows connection status, counts, 
   "jira": {
     "clientId": "ATLASSIAN_CLIENT_ID",
     "clientSecret": "SERVER_SECRET",
-    "baseUrl": "https://company.atlassian.net",
-    "cloudId": "ATLASSIAN_CLOUD_ID",
-    "scopes": ["read:jira-work", "read:me", "offline_access"]
+    "scopes": ["read:jira-work", "write:jira-work", "read:me", "offline_access"]
   }
 }
 ```
+
+Atlassian sites are found at sign-in: after the admin connects Jira or Confluence, Broppy asks Atlassian which sites the account can reach and stores the site (base URL and cloud ID) with the token. If exactly one site is reachable it is used automatically. If several are, set `cloudId` (or `baseUrl`) in that source's configuration to choose one; a person-level picker is not built yet. Configuration values also still work and take effect when no site was discovered. People connecting their own Atlassian account must be able to reach the organization's site.
 
 Register `${API_ORIGIN}/v1/admin/connections/SOURCE/callback` with each provider. Confluence uses an Atlassian app with Confluence read scopes and its `cloudId`. Slack uses a Slack OAuth v2 app and **user** read scopes for conversations, history, replies and `users:read.email`; only channels visible to that credential are imported. The callback verifies the connected account email against the administrator's directory identity. Tokens and refresh tokens are stored in Supabase Vault; API responses and state snapshots contain no tokens. Source OAuth state expires after ten minutes and is single use; restarting the API cancels pending authorization flows. Google uses PKCE. Tokens with no refresh capability require reconnecting when expired.
 
