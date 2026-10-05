@@ -164,7 +164,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
     (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
       ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
-      authorization: userId => oauth.authorization(source, userId)
+      authorization: oauth.provider(source)
     }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
   if (connectors && !hasAuth0) {
     throw new Error("Live sources require Auth0 sign-in");
@@ -256,7 +256,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (mine) {
         if (!oauth) return await reply(response, 404, { error: "Source OAuth is not configured" });
         const source = mine[1] as Source;
-        if (mine[2] === "authorize" && request.method === "POST") return await reply(response, 200, { url: oauth.begin(source, user, "user") });
+        if (mine[2] === "authorize" && request.method === "POST") return await reply(response, 200, { url: await oauth.begin(source, user, "user") });
         if (!mine[2] && request.method === "DELETE") {
           await oauth.removeUser(source, user.id);
           brain.audit.append("user_connection_removed", user.id, { source });
@@ -327,7 +327,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!match) return await reply(response, 404, { error: "Not found" });
         const source = match[1] as Source;
         if (match[2] === "authorize" && request.method === "POST") {
-          if (oauth) return await reply(response, 200, { url: oauth.begin(source, user) });
+          if (oauth) return await reply(response, 200, { url: await oauth.begin(source, user) });
           await brain.connect(user, source); return await reply(response, 200, { connected: true });
         }
         if (match[2] === "containers" && request.method === "GET") return await reply(response, 200, { containers: await brain.listContainers(user, source) });
