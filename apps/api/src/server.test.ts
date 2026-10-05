@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
-import handler, { createApiServer, startupMessage } from "./server.js";
+import handler, { corpusFromEnv, createApiServer, startupMessage } from "./server.js";
 
 const openServers: Server[] = [];
 
@@ -9,9 +9,10 @@ afterEach(async () => {
   await Promise.all(openServers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))));
 });
 
+// These tests are about the 26 hand-written items; the generated company has its own tests below.
 async function start() {
   process.env.ALLOW_DEMO_AUTH = "true";
-  const api = await createApiServer({ startOrchestrator: false });
+  const api = await createApiServer({ startOrchestrator: false, corpus: "curated" });
   openServers.push(api.server);
   await new Promise<void>(resolve => api.server.listen(0, "127.0.0.1", resolve));
   const address = api.server.address();
@@ -246,12 +247,47 @@ describe("serverless entry", () => {
 });
 
 describe("startup message", () => {
-  it("says the API is ready, where, and how it signs people in", () => {
+  it("says the API is ready, where, how it signs people in, and whether it serves the generated company", () => {
     expect(startupMessage("127.0.0.1", 3000, { AUTH0_ISSUER: "https://tenant.example/" }))
       .toBe("API ready at http://127.0.0.1:3000 with Auth0 sign-in. Leave this window open; Ctrl+C stops it.");
     expect(startupMessage("127.0.0.1", 3000, { ALLOW_DEMO_AUTH: "true" }))
-      .toBe("API ready at http://127.0.0.1:3000 in demo mode (x-demo-user). Leave this window open; Ctrl+C stops it.");
+      .toBe("API ready at http://127.0.0.1:3000 in demo mode (x-demo-user), with the generated company. Leave this window open; Ctrl+C stops it.");
     expect(startupMessage("0.0.0.0", 8080, { PUBLIC_DEMO: "true" }))
-      .toBe("API ready at http://0.0.0.0:8080 as the public demo, on mock data only. Leave this window open; Ctrl+C stops it.");
+      .toBe("API ready at http://0.0.0.0:8080 as the public demo, on mock data only, with the generated company. Leave this window open; Ctrl+C stops it.");
+    expect(startupMessage("127.0.0.1", 3000, { ALLOW_DEMO_AUTH: "true", MOCK_DATA: "curated" }))
+      .toBe("API ready at http://127.0.0.1:3000 in demo mode (x-demo-user). Leave this window open; Ctrl+C stops it.");
+  });
+});
+
+describe("mock data", () => {
+  it("serves the generated company on the demo API and the hand-written items on the SSO API, unless MOCK_DATA says", () => {
+    expect(corpusFromEnv({})).toBe("demo");
+    expect(corpusFromEnv({ ALLOW_DEMO_AUTH: "true" })).toBe("demo");
+    expect(corpusFromEnv({ PUBLIC_DEMO: "true" })).toBe("demo");
+    expect(corpusFromEnv({ PUBLIC_DEMO: "true", MOCK_DATA: "" })).toBe("demo");
+    expect(corpusFromEnv({ ALLOW_DEMO_AUTH: "true", MOCK_DATA: "curated" })).toBe("curated");
+    expect(corpusFromEnv({ AUTH0_ISSUER: "https://tenant.example/" })).toBe("curated");
+    expect(corpusFromEnv({ AUTH0_ORG_ID: "org_1", MOCK_DATA: "curated" })).toBe("curated");
+    expect(() => corpusFromEnv({ MOCK_DATA: "all" })).toThrow("MOCK_DATA must be curated or demo");
+    expect(() => corpusFromEnv({ AUTH0_ISSUER: "https://tenant.example/", MOCK_DATA: "demo" }))
+      .toThrow("MOCK_DATA=demo is for the demo API");
+  });
+
+  it("gives each person the generated company's items they may open, on top of the hand-written ones", async () => {
+    process.env.ALLOW_DEMO_AUTH = "true";
+    const workspaceOf = async (corpus?: "curated") => {
+      const api = await createApiServer({ startOrchestrator: false, corpus });
+      openServers.push(api.server);
+      await new Promise<void>(resolve => api.server.listen(0, "127.0.0.1", resolve));
+      const address = api.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP address");
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/workspace`, { headers: { "x-demo-user": "david" } });
+      return (await response.json()) as { documents: unknown[]; projects: Array<{ key: string }> };
+    };
+    const handWritten = await workspaceOf("curated");
+    const both = await workspaceOf();
+    expect(handWritten.projects.map(project => project.key).sort()).toEqual(["DB", "PAY"]);
+    expect(both.projects.map(project => project.key).sort()).toEqual(["DATA", "DB", "PAY", "PLAT", "VEND"]);
+    expect(both.documents.length).toBeGreaterThan(handWritten.documents.length + 200);
   });
 });

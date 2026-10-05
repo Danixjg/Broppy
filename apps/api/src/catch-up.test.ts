@@ -10,6 +10,42 @@ async function brainWith() {
 }
 const cited = (answer: { citations: Array<{ docId: string }> }) => answer.citations.map(citation => citation.docId);
 
+describe("catch-up with the generated company", () => {
+  const demo = async () => {
+    const brain = new Brain(undefined, { corpus: "demo" });
+    await brain.syncAll();
+    return brain;
+  };
+
+  it("points the intern to the intern overview, and Wei Ming to what is shared with Wei Ming", async () => {
+    const brain = await demo();
+    const titles = (answer: { citations: Array<{ docId: string }> }) =>
+      answer.citations.map(citation => brain.index.documents.get(citation.docId)?.title);
+    const intern = await brain.catchUp(brain.user("alex")!);
+    if (intern.kind !== "question") throw new Error("Expected a question");
+    expect(titles(intern.answer)).toContain("Intern overview: read first");
+    const wei = brain.user("wei")!;
+    const shared = await brain.catchUp(wei);
+    if (shared.kind !== "question") throw new Error("Expected a question");
+    expect(shared.answer.text).toContain("shared with Wei Ming");
+    expect(shared.answer.text).toContain("Wei Ming will own");
+    for (const docId of cited(shared.answer)) expect(brain.fga.check(wei, docId).allowed).toBe(true);
+  });
+
+  it("keeps a generated project's catch-up to that project, with its status and what is blocked", async () => {
+    const brain = await demo();
+    const david = brain.user("david")!;
+    const result = await brain.catchUp(david, "PLAT");
+    if (result.kind !== "question") throw new Error("Expected a question");
+    const project = (await brain.workspace(david)).projects.find(item => item.key === "PLAT")!;
+    expect(cited(result.answer).length).toBeGreaterThan(0);
+    for (const docId of cited(result.answer)) expect(project.docIds).toContain(docId);
+    expect(result.answer.text).toContain("Status: 62 of 80 build jobs now run on the new runner pool.");
+    expect(result.answer.text).toContain("PLAT-1 is blocked because it waits on finance approval for the host order.");
+    expect(result.answer.scope).toMatchObject({ project: "Build pipeline upgrade" });
+  });
+});
+
 describe("catch-up by role and groups", () => {
   it("gives an intern an onboarding overview", async () => {
     const brain = await brainWith();

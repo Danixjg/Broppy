@@ -77,7 +77,8 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
   const at: Clock = hhmm => options.at(`${DAY}T${hhmm}:00.000Z`);
   const freshBrain: FreshBrain = async hhmm => {
     at(hhmm);
-    const brain = new Brain(options.llm, { embedding: options.embedding });
+    // The demo API's data: the hand-written items the scenarios are about, with the generated company beside them.
+    const brain = new Brain(options.llm, { embedding: options.embedding, corpus: "demo" });
     await brain.syncAll();
     return brain;
   };
@@ -108,6 +109,8 @@ function introduction(writer: string, withModel: boolean, search?: string): stri
         "below is real output.",
     "",
     "- **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so \"last week\" finds it.",
+    "- **Data:** what the demo API serves: the 26 hand-written items the scenarios are about, and the generated company " +
+      "of 500 more beside them (`pnpm dataset`), with six other projects that compete for every answer.",
     `- **Writer:** ${writer}`,
     ...(search ? [`- **Search:** ${search}`] : []),
     "- **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in " +

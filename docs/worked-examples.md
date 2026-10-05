@@ -3,6 +3,7 @@
 The challenge brief's five scenarios, run end to end on the demo data. `pnpm scenarios` writes this file, and `pnpm test` fails when it no longer matches what the code does, so every answer, citation and audit entry below is real output.
 
 - **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so "last week" finds it.
+- **Data:** what the demo API serves: the 26 hand-written items the scenarios are about, and the generated company of 500 more beside them (`pnpm dataset`), with six other projects that compete for every answer.
 - **Writer:** the built-in writer, which quotes the most relevant source in full and the best sentence of the next three. `pnpm scenarios:model` runs the same steps with the chosen language model and writes `worked-examples-model.md`.
 - **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in compliance, Alex is an intern and Wei Ming is a contractor.
 - **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose link brought a document in. The person asking sees only their own trace, which never names what they couldn't see.
@@ -132,11 +133,11 @@ Earlier that day, Ravi asks "Payment gateway operations" at 09:30 and "PAY-101 c
 
 > Show me everything user 'ravi' accessed related to the 'payment-gateway' Confluence space in the last 30 days
 
-Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 2026, 00:00 UTC to 15 Oct 2026, 16:00 UTC. It finds 37 entries, grouped here by question; the workspace's Compliance tab lists each one.
+Read as: user `ravi`, source `confluence`, space `payment-gateway`, from 15 Sep 2026, 00:00 UTC to 15 Oct 2026, 16:00 UTC. It finds 41 entries, grouped here by question; the workspace's Compliance tab lists each one.
 
 | Entries | Time | Question | Documents checked | Refused | Sent to the writer | Answer |
 | --- | --- | --- | --- | --- | --- | --- |
-| 35–71 | 09:30 | "Payment gateway operations" | 14 | `confluence:q3-incident` | 2 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
+| 535–575 | 09:30 | "Payment gateway operations" | 16 | `confluence:q3-incident`, `confluence:100124` | 2 documents | "Payment gateway operations: inspect authorization latency and settlement health each mo…" |
 
 - From the `payment-gateway` space, `confluence:gateway-operations`. Access check: allowed; live check at the source: allowed, v1; sent to the writer: yes; rechecked after writing: allowed.
 
@@ -149,9 +150,9 @@ Read as: document `confluence:gateway-operations`. Retrieved for: Ravi.
 ### Tamper evidence
 
 - Every entry carries the hash of the one before it. The chain verifies: yes.
-- Nur seals the log into a Merkle batch of entries 1 to 141. The proof for Ravi's answer, entry 71, verifies against it: yes.
-- A copy of the log with that answer changed is refused ("Invalid stored audit log: entry 71 does not match its hash chain").
-- A copy with entry 72 deleted is refused ("Invalid stored audit log: entry 72 does not match its hash chain").
+- Nur seals the log into a Merkle batch of entries 1 to 655. The proof for Ravi's answer, entry 575, verifies against it: yes.
+- A copy of the log with that answer changed is refused ("Invalid stored audit log: entry 575 does not match its hash chain").
+- A copy with entry 328 deleted is refused ("Invalid stored audit log: entry 328 does not match its hash chain").
 
 ![Nur's audit search](images/s5-nur.png)
 

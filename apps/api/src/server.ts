@@ -4,7 +4,7 @@ import { searchAudit } from "./audit-search.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { Brain } from "./brain.js";
+import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
@@ -25,6 +25,8 @@ export interface ApiServer {
 interface ApiServerOptions {
   brain?: Brain;
   startOrchestrator?: boolean;
+  /** The mock data, in place of the one the settings choose (`corpusFromEnv`). */
+  corpus?: Corpus;
 }
 
 function send(response: ServerResponse, status: number, data: unknown): void {
@@ -56,6 +58,21 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
   "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
   "FGA_CLIENT_SECRET"];
+
+/**
+ * The mock data the API serves. The demo API serves the hand-written items and the generated company; the SSO API keeps
+ * the hand-written items, because its people come from the directory, which doesn't have the generated company's groups.
+ * MOCK_DATA=curated or demo chooses on the demo API.
+ */
+export function corpusFromEnv(env: NodeJS.ProcessEnv = process.env): Corpus {
+  const sso = Boolean(env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID);
+  const value = env.MOCK_DATA || undefined;
+  if (value !== undefined && value !== "curated" && value !== "demo") throw new Error("MOCK_DATA must be curated or demo");
+  if (sso && value === "demo") {
+    throw new Error("MOCK_DATA=demo is for the demo API; the SSO directory's people don't have the generated company's groups");
+  }
+  return value ?? (sso ? "curated" : "demo");
+}
 
 // PUBLIC_DEMO lets anyone pick a demo persona, so it only ever serves the fictional mock corpus.
 function publicDemo(): boolean {
@@ -123,6 +140,7 @@ async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
   const demoOnly = publicDemo();
+  const corpus = options.corpus ?? corpusFromEnv();
   const hasAuth0 = Boolean(process.env.AUTH0_ISSUER || process.env.AUTH0_AUDIENCE || process.env.AUTH0_ORG_ID);
   const directory = UserDirectory.fromEnv();
   if (hasAuth0 && !directory) throw new Error("Auth0 requires the Supabase user directory");
@@ -150,7 +168,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     throw new Error("Live sources require Auth0 sign-in");
   }
   const brain = options.brain ?? new Brain(models.llm,
-    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
+    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors, corpus });
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
@@ -470,7 +488,8 @@ function isMainModule(): boolean {
 export function startupMessage(host: string, port: number, env: NodeJS.ProcessEnv = process.env): string {
   const signIn = env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID ? "with Auth0 sign-in"
     : env.PUBLIC_DEMO === "true" ? "as the public demo, on mock data only" : "in demo mode (x-demo-user)";
-  return `API ready at http://${host}:${port} ${signIn}. Leave this window open; Ctrl+C stops it.`;
+  const data = corpusFromEnv(env) === "demo" ? ", with the generated company" : "";
+  return `API ready at http://${host}:${port} ${signIn}${data}. Leave this window open; Ctrl+C stops it.`;
 }
 
 if (isMainModule()) {
