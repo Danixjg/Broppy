@@ -1,10 +1,11 @@
 import { narrowerPermissionError } from "./permissions.js";
 import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { chosenProject } from "./projects.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
-const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
@@ -101,7 +102,7 @@ function setView(view, { load = true } = {}) {
 }
 function resetIdentity() {
   state.identity++;
-  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  state.docs = []; state.workspace = emptyWorkspace(); state.project = null; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
   for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
@@ -296,12 +297,11 @@ function renderProjects() {
   select.value = state.project;
   select.disabled = !state.workspace.projects.length;
 }
-// The project this person last chose, if they may still open it, else their first.
+// The project on screen, or the one this person last chose, if they may still open it, else their first.
 function chooseProject() {
-  let saved = "";
-  try { saved = localStorage.getItem("brain-project") || ""; } catch { saved = ""; }
-  const keys = state.workspace.projects.map(project => project.key);
-  state.project = keys.includes(state.project) ? state.project : keys.includes(saved) ? saved : keys[0] || "";
+  let saved = null;
+  try { saved = localStorage.getItem("brain-project"); } catch { saved = null; }
+  state.project = chosenProject(state.project, saved, state.workspace.projects.map(project => project.key));
 }
 function renderMaster() {
   const project = currentProject();
