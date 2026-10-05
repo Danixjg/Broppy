@@ -1108,6 +1108,88 @@ Each entry records the options that were considered, what was chosen, and the tr
   - Scenario 5 finds fewer entries.
   - `docs/worked-examples-model.md` was captured before this round.
 
+## 2026-10-04 — The generated dataset
+
+- **Input:** the 26 hand-written items can't show search, permissions or the workspace at a realistic size, and the
+  brief describes a company with 50 spaces, about 12,000 pages and 600 colleagues. A CodeBuddy session was tried first
+  and stopped after it went outside its task, so this set was built without it and doesn't count as CodeBuddy
+  evidence.
+- **How decided:** the specification was written and reviewed in planning sessions. On 4 Oct the user chose the dataset
+  alone for this branch, with loading it into the demo next, and chose to skip the repeated-sentence limit at the
+  brief's scale.
+
+### D71 — A seeded generator, checked by the app's own rules
+- **Chosen:** `data/generate.ts` builds the set from hand-written content banks with one seeded random generator.
+  `validateCorpus` judges it with the app's own code, imported rather than copied: the access check (`FgaAdapter`),
+  the link reader (`linksIn`, `linkFromUrl`), the search words (`terms`, `queryTerms`) and the workspace functions
+  (`projectsFor`, `duplicatesFor`, `agreementSummary`, `tracked`).
+- **Why:** rules written down in prose drift from the code; a validator that calls the code can't. If the app changes
+  how it reads links, agreements or duplicates, `pnpm test` names the generated items that no longer fit.
+- **Reproducible:** the same seed gives the same bytes on any machine. Lists are sorted by code unit, never by locale;
+  nothing reads the clock or the time zone; dates are whole hours before 30 Sep 2026, as the hand-written fixtures are.
+- **The test:** the committed files equal a fresh run (with CRLF read as LF), the validator finds nothing at either
+  scale, and five deliberate breaks are caught.
+
+### D72 — Six projects, five company areas, and who can open what
+- **Sizes, demo scale:** 500 items: 149 Confluence pages, 140 Jira issues, 60 Slack channels and 151 Drive files (70
+  Docs, 40 Sheets, 30 Slides and 11 PDFs).
+- **Projects:** build pipeline upgrade (PLAT), mobile app 4.0 (MOB), customer data warehouse (DATA), KYC review
+  automation (KYC), corporate card rewards (CARD) and partner API integration (VEND). Each has a master page, a Jira
+  project, channels, and Drive files reached from the master page or an issue, so the workspace counts them. The other
+  areas have no master page: engineering, legal, people, company and interns.
+- **People:** the six personas, whose extra groups (platform, sre, mobile, data, eng-leads, risk and legal) come only
+  from `persona-groups.json`; 55 colleagues in teams by fixed quotas, four of them interns and two of them mentors; and
+  five contractors.
+- **Contractors are in no team:** they reach an item only when it names them, so no team's list ever carries a
+  contractor. The validator checks that a contractor appears only where named, and never on a restricted item.
+- **Access:** native lists hold the granted teams' members plus the people named. Company items and the ten HR
+  policies are public. Legal, pay and eight KYC audit items are restricted to legal, people-ops or risk. The examples:
+  #plat-leads is private without David, a DATA page is restricted to risk, a VEND page is for eng-leads only, and
+  #mob-war-room is private with Maya.
+- **What each persona can open:** Ravi 194, Maya 283, Alex 39, David 267, Nur 107 and Wei Ming 17, all within the
+  planned ranges.
+
+### D73 — What the set never says
+- **The hand-written story's words**, and the words search treats as them (switch, launch, outage, recovery), so no
+  generated item enters a scenario's answer. They are checked with `terms()`, including each part of a hyphenated
+  word. With both sets indexed, no generated item survives the search rules for any scenario question.
+- **Months, dates, years and quarters**, because loading moves `updatedAt` to the demo day but can't move a date in
+  the text.
+- **A speaker's name at the start of a Slack line**, because agreements count only at the start of a sentence.
+- **For Alex and Wei Ming:** none of the scenario 3 words (security, incident, report, breach, Q3, onboarding,
+  notes), and no title, key, channel or project name of anything they can't open.
+- **Statuses that disagree:** "KEY is ...", and lines starting Blocker, Done, In review, Planned and the like, must
+  match the issue.
+- **Repetition:** no sentence of six or more words appears in more than three items, apart from copies and the
+  agreements issues quote. Plain sentences come first; openers such as "In practice," only once a plain sentence is
+  used up, and never twice in one item. A thread quotes each colleague once.
+
+### D74 — The brief's scale, in memory
+- **Chosen:** `pnpm dataset --scale brief` adds 24 generated projects and 15 team spaces, for 19,703 items (11,999
+  pages, 4,508 issues, 195 channels and 3,001 Drive files) and 600 colleagues. It is checked in memory and never
+  written.
+- **Checks at this scale:** everything except the persona ranges, the leak check, the pairwise duplicate check and the
+  repeated-sentence limit. The user chose to skip the last one: the generated projects share sentence patterns, and
+  holding the limit at this size would need 24 more hand-written banks.
+- **Time:** about six seconds on the development machine. `pnpm test` runs it.
+
+### Implementation details (the generated dataset)
+- **Layout:** `data/dataset/` holds `random.ts` (mulberry32 and code-unit sorting), `rules.ts` (the fixed rules and
+  word lists), `people.ts`, `types.ts`, `banks/` (one file per area), `write.ts` (ways to say a fact, and the repeat
+  limit), `build.ts`, `generic.ts` (the brief's extra projects) and `validate.ts`. The plan had one file; it was split
+  so each part can be reviewed alone.
+- **Two passes:** every item's id, readers, date and links are planned before any text is written, so an item names
+  another only when everyone who can read the first can read the second.
+- **Duplicates on purpose only:** a superseded copy changes named facts, and a near-copy rewrites its first sentence.
+  Drive files on one topic spread over its facts before reusing one, so no other pair reaches the workspace's 60%
+  overlap.
+- **Found while reading samples:**
+  - Some facts said a change was made while its issue was still in progress, the analyst training guide existed while
+    the issue to write it was open, and the mobile status had both platforms in store review while Android was rolling
+    out. The banks were corrected so statuses agree in prose too.
+  - Status lines that stated a rule rather than progress were replaced by a written status for each project channel.
+  - A fact that repeats a decision, a step, a fixed sentence or a quoted agreement in the same item is left out.
+
 ---
 
 ## Deferred (not decided yet)
@@ -1122,7 +1204,9 @@ These are open. Pick them up in a later round and record the decision here.
 - **Brain as an MCP server:** not started; to be written in Rust after submission.
 - **Anchor repository:** not created yet; the tool is built (D50).
 - **CodeBuddy/WorkBuddy evidence:** must be captured by someone using those products. The project isn't scored
-  without it.
+  without it. The generated dataset was built without it.
+- **The generated set in the demo:** loading it beside the hand-written items, the scenario tests on both, "Show
+  more" for long lists, batched imports and a benchmark.
 - **Directory caching:** `UserDirectory.bySub` re-reads the whole directory on every request, and every proxied
   workspace call now triggers it.
 - **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
