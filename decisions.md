@@ -728,7 +728,7 @@ Each entry records the options that were considered, what was chosen, and the tr
   - **Header:** it now names the search as well as the writer.
 - **Answers vary from run to run** (*added 3 Oct, corrected 4 Oct*).
   - **What showed it:** on the team's real sign-in, Ravi's scenario 1 answer was three lines. It left out DB-12's
-    status and his #db-oncall blocker, although both were sent to the model, and the captured run had included them.
+    status and the #db-oncall blocker, although both were sent to the model, and the captured run had included them.
     The same question then got fuller answers on later runs.
   - **Tried:** a fixed seed on Groq requests (3 Oct). On the team's machine, the same question asked twice still got
     two different answers, so the seed was removed (4 Oct). Both of those answers were complete.
@@ -1190,6 +1190,103 @@ Each entry records the options that were considered, what was chosen, and the tr
   - Status lines that stated a rule rather than progress were replaced by a written status for each project channel.
   - A fact that repeats a decision, a step, a fixed sentence or a quoted agreement in the same item is left out.
 
+## 2026-10-05 — The generated company in the demo
+
+- **Input:** PR #26 merged the generated company, but the demo still ran on the 26 hand-written items. Measured on
+  5 Oct with both sets in one app: the 526 items index in 0.27 seconds; David can open 287 items, Ravi 219, Maya 305,
+  Alex 41, Nur 128 and Wei Ming 18; the brief's five scenarios cite the same documents on both sets; and generic
+  questions such as "what should a new hire read first" now find generated items, as intended.
+- **How decided:** planned on 5 Oct. The user chose D75 to D78. D79 was found while running the scenarios on both sets,
+  and the user kept it.
+
+### D75 — The demo API serves both sets; the SSO API keeps the hand-written items
+- **Chosen:** `pnpm dev` and the public demo load the hand-written items and the generated company together.
+  `MOCK_DATA=curated` gives the demo API the hand-written items alone. Any other value stops the API from starting, and
+  so does `MOCK_DATA=demo` with Auth0 sign-in, each with a message saying why.
+- **Why the SSO API waits:** its people come from the Supabase directory, which doesn't have the generated company's
+  groups; a saved state replaces the loaded mock items when it is restored; and each imported item rewrites the whole
+  saved state, about 2 seconds an item with Supabase.
+- **Tests:** every scenario test runs on both sets, with the same cited documents. Where a count differs, the test
+  says why.
+
+### D76 — Partial matches for people who can open little stay, and a test pins what they use
+- **The case:** Wei Ming, asking David's database migration question, gets partial matches from the partner
+  integration (#vend-sandbox, VEND-3) instead of the fixed reply. Nothing hidden is used: the bar a match must clear
+  comes from what the asker may open (D69).
+- **Fixes tried on a copy and rejected:** a minimum share of the question's words broke 9 tests (both role catch-ups,
+  the partial-match security tests and the worked examples); counting "blocker" as a generic word dropped the Slack
+  blocker from David's project catch-up.
+- **The tests:** on the demo data, Wei Ming's question about a hidden project cites only items Wei Ming may open and
+  names nothing of that project. A leak test asks about all eight projects, by name and by key, as each of the six
+  people: nothing they can't open reaches the writer, and their own trace names no hidden title, key, channel or
+  project.
+- **Measured since, with `pnpm bench`:** of its 20 questions, Wei Ming got 12 answers and Alex 10, at both scales.
+  Read by hand at the brief's scale, 2 of Wei Ming's and 3 of Alex's were on topic. The rest came from unrelated items
+  they may open that share a word such as "blocked", "guide" or "release". Still nothing hidden, but the fixed reply
+  would serve them better, so the question is open again (Deferred).
+
+### D77 — The worked examples run on both sets
+- **Chosen:** `pnpm scenarios` builds its `Brain` on the demo data, so the page shows what the demo API does.
+  Scenarios 1 to 4 keep every answer and citation. Scenario 5 changed only in its counts: 41 entries instead of 37, and
+  Ravi's question checks 16 documents and refuses one more, a restricted pay page from the generated company.
+- **Screenshots:** the seven were taken again from the demo API on the fixed clock. David's show the Database migration
+  plan page, chosen in the header, since David now lands on another project first.
+- **The model page,** `docs/worked-examples-model.md`, was captured on 3 Oct, before tighter search and the generated
+  company, and now says so. `pnpm scenarios:model` captures it again.
+
+### D78 — Show more and `pnpm bench` join this round; batched saves don't
+- **Show more:** the Slack, Jira, Drive and source lists show eight items and a button naming the rest ("Show 72 more
+  tasks"), which shows them and moves the focus to the first. A list starts again from eight when the search, the
+  project or the person changes, and stays open when an action reloads the workspace.
+- **`pnpm bench`:** builds the brief's scale in memory beside the hand-written items (19,729 items in 32 projects),
+  indexes it with the same `Brain` the demo API runs, and has each person ask the same 20 questions. It reports the
+  generation and indexing times, memory, each person's median and 95th percentile, the documents the access check
+  decided on and refused, and the audit entries per question. A test runs it at the demo's scale.
+- **Three runs on the development container** (4 logical processors, 16 GB, Node 22): indexing took 8 to 11 seconds,
+  the heap grew by 585 MB, a question took 83 to 108 ms at the median and 470 to 640 ms at the 95th percentile, and
+  the access check decided on about 1,000 to 1,350 documents a question, refusing 56% to 68% of them for the engineers
+  and over 99% for Wei Ming and Alex. Times varied by about a third between runs; the counts didn't vary.
+- **Not in this round:** batching the saves of imported items, so the SSO API keeps the hand-written items (D75).
+
+### D79 — A question that names an issue keeps to the matches that name it
+- **What showed it:** on both sets, "Why is DB-15 blocked?" lost #db-oncall from Ravi's answer. Six generated master
+  pages that say another issue "is blocked because ..." covered "blocked" as well as the thread did and filled the
+  context.
+- **Chosen:** outside a project, once a match the asker may open names the issue key the question names, only the
+  matches that name it stay, with any match that covers two or more of the question's distinctive words.
+- **No side channel:** like the coverage floor (D69), it reads only matches the asker may open.
+- **Effect:** every scenario answer is the same on both sets, and nothing changed on the hand-written set alone.
+- **How decided:** found while building; the user kept it on 5 Oct.
+
+### Implementation details (the generated company in the demo)
+- **Loading:** `loadMockCorpus(now, { generated })` takes `true` for the committed files, or a company generated in
+  memory, as `pnpm bench` passes. A generated item with a hand-written item's id stops it. Generated dates move by the
+  same whole days as the hand-written ones, and the six people's generated groups are added to theirs. `Brain` takes
+  `corpus: "curated" | "demo"` or such a company; `corpusFromEnv` reads `MOCK_DATA`, and the startup line says "with
+  the generated company".
+- **Line endings:** `pnpm dataset` writes a file only when its content differs, reading CRLF as LF, so a Windows
+  checkout doesn't show the generated files as changed.
+- **What counts as a hidden name in the leak test:** a hidden item's title, issue key and channel, and a hidden
+  project's name and key. A name that also appears in something the person may open doesn't count: a visible issue can
+  name SEC-44, and a restricted page's address shows its space. Nor does a name the question itself uses.
+- **Defence in depth, seen while making the leak test fail on purpose:** breaking the batch access check alone, or
+  together with the source's own check, leaked nothing, because the access check repeated for each passage still
+  refused it. Only breaking all three made the test fail, naming the document sent.
+- **All sources:** reloading the workspace after an action moved anyone viewing All sources to their first project,
+  and someone who last chose All sources landed on their first project. All sources now counts as a choice
+  (`apps/web/projects.js`). The choice is remembered per browser, so the demo's six people share it.
+- **Show more, found while checking it:** the Slack and Jira lists had been live regions since the first version, so
+  opening one would have had a screen reader read every new item. They no longer are, and the focus moves instead.
+  Each button names its list (threads, tasks, files, sources), since someone moving from button to button hears it
+  without the heading. axe finds no violations on the 14 screens it checks, nor on the buttons.
+- **The landing project:** with five projects, David lands on the first by name, Build pipeline upgrade, rather than
+  Database migration plan. The personal home (a must-have) is where that rule changes.
+- **The bench:** it counts each question's audit entries with a subclass of the audit log, since reading the log's
+  entries copies all of them. Percentiles are by nearest rank, and `pnpm bench` runs Node with `--expose-gc`, so the
+  heap figures follow a collection.
+- **Wording:** the generated worked examples no longer give the six people pronouns. The same sentences were changed
+  on the model page, whose answers are untouched.
+
 ---
 
 ## Deferred (not decided yet)
@@ -1205,12 +1302,21 @@ These are open. Pick them up in a later round and record the decision here.
 - **Anchor repository:** not created yet; the tool is built (D50).
 - **CodeBuddy/WorkBuddy evidence:** must be captured by someone using those products. The project isn't scored
   without it. The generated dataset was built without it.
-- **The generated set in the demo:** loading it beside the hand-written items, the scenario tests on both, "Show
-  more" for long lists, batched imports and a benchmark.
+- **The generated set over SSO:** the SSO API keeps the hand-written items until the directory has the generated
+  groups, a restored state keeps the loaded mock items, and imports save in batches (D75, D78).
+- **Partial matches for people who can open little:** at the brief's scale, most answers Wei Ming and Alex get are
+  built from unrelated items that share a word with the question (D76). Nothing hidden is used; a better bar, one that
+  hidden documents still can't move, isn't found yet.
+- **Audit volume at scale:** every ranked candidate gets an audit entry, and so does each access decision. At the
+  brief's scale a broad question writes up to about 25,000 entries, which would be as many rows in Supabase. Writing
+  them is about 60% of such a question's time: the slowest took 1.0 seconds, and 0.4 without them. Recording them in
+  fewer entries would keep the trail complete; not decided.
+- **Landing project:** each person lands on their first project by name, so David now lands on Build pipeline upgrade.
+  The personal home is where that changes.
 - **Directory caching:** `UserDirectory.bySub` re-reads the whole directory on every request, and every proxied
   workspace call now triggers it.
-- **Ravi persona:** the README says "Head of payments", but the demo script has him as a junior engineer.
-- **UI round 1's "not now":** a label for which writer answered, and "Show more" for long lists (D57).
+- **Ravi persona:** the README says "Head of payments", but the demo script has Ravi as a junior engineer.
+- **UI round 1's "not now":** a label for which writer answered (D57). "Show more" came in D78.
 - **Colour contrast:** settled: secondary text uses the theme's muted grey (D66).
 - **Workspace build:** settled: the build no longer copies `public/` (D67).
 - The other P1 items are also still open: whole-brain JSONB snapshot writes, independent Merkle root anchoring,

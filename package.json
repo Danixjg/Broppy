@@ -7,6 +7,7 @@
     "dev": "ALLOW_DEMO_AUTH=true tsx apps/api/src/server.ts",
     "dev:sso": "tsx --env-file=.env.local apps/api/src/server.ts",
     "dataset": "tsx data/generate.ts",
+    "bench": "tsx --expose-gc apps/api/src/bench.ts",
     "doctor:sso": "tsx --env-file=.env.local apps/api/src/doctor.ts",
     "llm:usage": "tsx --env-file=.env.local apps/api/src/llm-usage.ts",
     "llm:check": "tsx --env-file=.env.local apps/api/src/llm-check.ts",

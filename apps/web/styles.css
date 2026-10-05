@@ -342,6 +342,12 @@ h3 {
   padding:0;
   text-align:left
 }
+/* A long list's "Show N more": a 24 px target, like the citation chips. */
+.show-more {
+  min-height:24px;
+  padding:.3rem 0;
+  margin-top:.15rem
+}
 .breadcrumb {
   display:flex;
   gap:.5rem;

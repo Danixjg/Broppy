@@ -1,11 +1,15 @@
 import { narrowerPermissionError } from "./permissions.js";
 import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { showMoreLabel, visibleItems } from "./lists.js";
+import { chosenProject } from "./projects.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
-const state = { docs: [], workspace: emptyWorkspace(), project: "", selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
+// The lists opened in full since the last search, project or person change.
+const expandedLists = new Set();
 const safeText = value => typeof value === "string" ? value : "";
 const fmtDate = value => {
   const date = new Date(value);
@@ -101,7 +105,7 @@ function setView(view, { load = true } = {}) {
 }
 function resetIdentity() {
   state.identity++;
-  state.docs = []; state.workspace = emptyWorkspace(); state.project = ""; state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  state.docs = []; state.workspace = emptyWorkspace(); state.project = null; expandedLists.clear(); state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
   for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
@@ -204,6 +208,20 @@ function renderLinked(box, doc) {
   }
   box.append(wrap);
 }
+// Appends the first items, and a "Show N more" button that appends the rest and moves the focus to the first of them.
+function appendLimited(box, items, noun, render) {
+  const { shown, hidden } = visibleItems(items, expandedLists.has(box.id));
+  for (const item of shown) box.append(render(item));
+  if (!hidden) return;
+  const more = node("button", "text-button show-more", showMoreLabel(hidden, noun)); more.type = "button";
+  more.addEventListener("click", () => {
+    expandedLists.add(box.id);
+    const rest = items.slice(shown.length).map(render);
+    more.replaceWith(...rest);
+    rest[0]?.focus();
+  });
+  box.append(more);
+}
 function activityButton(doc, source) {
   const button = node("button", "activity-item"); button.type = "button";
   button.append(node("span", "item-title", doc.title), node("span", "item-meta", `${sourceName(source)} · ${documentStatus(doc)} · ${fmtDate(doc.updatedAt)}`));
@@ -280,8 +298,8 @@ async function createTask(item, button) {
 function renderActivity() {
   const slack = filteredDocs("slack"); const jira = filteredDocs("jira");
   clear($("slackList")); clear($("jiraList"));
-  for (const doc of slack) $("slackList").append(activityButton(doc, "slack"));
-  for (const doc of jira) $("jiraList").append(activityButton(doc, "jira"));
+  appendLimited($("slackList"), slack, "thread", doc => activityButton(doc, "slack"));
+  appendLimited($("jiraList"), jira, "task", doc => activityButton(doc, "jira"));
   if (!slack.length) appendText($("slackList"), "p", "empty", "No accessible Slack threads match.");
   if (!jira.length) appendText($("jiraList"), "p", "empty", "No accessible Jira tasks match.");
   $("activityCount").textContent = `${slack.length + jira.length}`;
@@ -296,12 +314,11 @@ function renderProjects() {
   select.value = state.project;
   select.disabled = !state.workspace.projects.length;
 }
-// The project this person last chose, if they may still open it, else their first.
+// The project on screen, or the one this person last chose, if they may still open it, else their first.
 function chooseProject() {
-  let saved = "";
-  try { saved = localStorage.getItem("brain-project") || ""; } catch { saved = ""; }
-  const keys = state.workspace.projects.map(project => project.key);
-  state.project = keys.includes(state.project) ? state.project : keys.includes(saved) ? saved : keys[0] || "";
+  let saved = null;
+  try { saved = localStorage.getItem("brain-project"); } catch { saved = null; }
+  state.project = chosenProject(state.project, saved, state.workspace.projects.map(project => project.key));
 }
 function renderMaster() {
   const project = currentProject();
@@ -367,14 +384,15 @@ function renderDrive() {
     const list = node("ul", ""); for (const reason of latest.reasons) appendText(list, "li", "", reason); why.append(list);
     $("latestExplanation").append(why);
   }
-  for (const doc of docs) {
+  appendLimited($("driveList"), docs, "file", doc => {
     const button = node("button", "file-row"); button.type = "button";
     button.append(node("span", "file-icon", "D"));
     const main = node("span", "file-main"); main.append(node("span", "item-title", doc.title), node("span", "item-meta", `Edited ${fmtDate(doc.updatedAt)} · v${doc.version}`));
     button.append(main, statusBadge(doc));
     if (latest?.docId === doc.docId) button.append(node("span", "badge", "Latest"));
-    button.addEventListener("click", () => selectDoc(doc)); $("driveList").append(button);
-  }
+    button.addEventListener("click", () => selectDoc(doc));
+    return button;
+  });
   if (!docs.length) appendText($("driveList"), "p", "empty", "No accessible Drive documents match.");
   const shown = new Set(docs.map(doc => doc.docId));
   for (const pair of state.workspace.duplicates.filter(item => (shown.has(item.keep) || shown.has(item.other)) && docById(item.keep) && docById(item.other))) {
@@ -388,11 +406,12 @@ function renderDrive() {
 }
 function renderSources() {
   clear($("allSources")); const docs = filteredDocs();
-  for (const doc of docs) {
+  appendLimited($("allSources"), docs, "source", doc => {
     const button = node("button", "source-item"); button.type = "button";
     button.append(node("span", "item-title", doc.title), node("span", "item-meta", `${sourceName(doc.source)} · ${documentStatus(doc)}`));
-    button.addEventListener("click", () => selectDoc(doc)); $("allSources").append(button);
-  }
+    button.addEventListener("click", () => selectDoc(doc));
+    return button;
+  });
   if (!docs.length) appendText($("allSources"), "p", "empty", "No accessible sources match your search.");
   const selectedAdminDoc = $("adminDoc").value;
   clear($("adminDoc"));
@@ -480,7 +499,10 @@ async function loadWorkspace() {
       duplicates: list(result.duplicates).filter(item => typeof item.keep === "string" && typeof item.other === "string" && Array.isArray(item.reasons) && Array.isArray(item.onlyInKeep) && Array.isArray(item.onlyInOther)),
       suggestions: list(result.suggestions).filter(item => typeof item.threadDocId === "string" && typeof item.sentence === "string" && typeof item.project === "string")
     };
+    const onScreen = state.project;
     chooseProject();
+    // A reload after an action leaves the lists as the person had them, unless their project is gone.
+    if (state.project !== onScreen) expandedLists.clear();
     renderWorkspace();
     if (role() === "admin") await loadNativePermissions();
     if (generation !== state.identity) return;
@@ -784,7 +806,7 @@ function exportAudit() {
 }
 for (const button of document.querySelectorAll("[data-view]")) button.addEventListener("click", () => setView(button.dataset.view));
 $("user").addEventListener("change", resetIdentity);
-$("search").addEventListener("input", () => { renderActivity(); renderDrive(); renderSources(); });
+$("search").addEventListener("input", () => { expandedLists.clear(); renderActivity(); renderDrive(); renderSources(); });
 $("landingPreference").addEventListener("change", () => { localStorage.setItem("brain-landing", $("landingPreference").value); focusLanding(); });
 $("minimizeChat").addEventListener("click", () => {
   const collapsed = $("chatPanel").classList.toggle("minimized");
@@ -828,6 +850,7 @@ $("projectSelect").addEventListener("change", () => {
   state.project = $("projectSelect").value;
   try { localStorage.setItem("brain-project", state.project); } catch { /* The choice is only remembered when storage works. */ }
   clear($("catchUpResult")); $("catchUpResult").hidden = true;
+  expandedLists.clear();
   renderWorkspace();
 });
 $("contentForm").addEventListener("submit", event => { event.preventDefault(); adminAction("/v1/admin/content", { docId: $("adminDoc").value, content: $("adminContent").value }, "Content updated and synced."); });

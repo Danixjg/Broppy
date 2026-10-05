@@ -8,8 +8,8 @@ import { verifySignature } from "./slack.js";
 const SECRET = "shh";
 const NOW = new Date("2026-10-05T10:22:30Z");
 
-function setup() {
-  const calls = { ephemeral: [] as any[], messages: [] as any[], responses: [] as any[], created: [] as any[], comments: [] as any[], asks: [] as any[] };
+function setup(linked = false) {
+  const calls = { ephemeral: [] as any[], messages: [] as any[], responses: [] as any[], created: [] as any[], asUser: [] as any[], asUserComments: [] as any[], comments: [] as any[], asks: [] as any[] };
   const deferred: Promise<unknown>[] = [];
   const deps: Deps = {
     signingSecret: SECRET,
@@ -24,7 +24,10 @@ function setup() {
       createIssue: async input => { calls.created.push(input); return { key: `DB-${15 + calls.created.length}`, url: `https://x.atlassian.net/browse/DB-${15 + calls.created.length}` }; },
       addComment: async (key, text) => { calls.comments.push({ key, text }); }
     },
-    broppy: { ask: async (user, q) => { calls.asks.push({ user, q }); return { text: "Wave three starts after DB-15 is resolved.", citations: [{ title: "Migration plan", url: "https://b/p" }] }; } },
+    broppy: {
+      createIssue: async (email, issue) => { calls.asUser.push({ email, issue }); return linked ? { key: "DB-77", url: "https://x.atlassian.net/browse/DB-77" } : undefined; },
+      comment: async (email, key, text) => { calls.asUserComments.push({ email, key, text }); return linked; },
+      ask: async (user, q) => { calls.asks.push({ user, q }); return { text: "Wave three starts after DB-15 is resolved.", citations: [{ title: "Migration plan", url: "https://b/p" }] }; } },
     store: new MemoryTaskStore(),
     people: [{ slackId: "UMAYA", name: "Maya", jiraAccountId: "acc-maya" }, { slackId: "UDAVID", name: "David" }],
     channelProjects: { CDB: "DB" }, defaultProject: "OPS", threshold: 0.6, webUrl: "https://broppy.test",
@@ -137,6 +140,30 @@ describe("Track in Jira", () => {
     const ctx = setup();
     await click(ctx, buttonValue(await suggestion(ctx), "dismiss_task"), "UMAYA", "dismiss_task");
     expect(ctx.calls.responses.at(-1)).toEqual({ delete_original: true });
+    expect(ctx.calls.created).toHaveLength(0);
+  });
+});
+
+describe("Jira as the confirming user", () => {
+  it("creates the issue with their own connection when they have one, not the shared account", async () => {
+    const ctx = setup(true);
+    await click(ctx, buttonValue(await suggestion(ctx), "track_task"), "UMAYA");
+    expect(ctx.calls.asUser[0]).toMatchObject({ email: "maya@x.test", issue: { project: "DB", summary: "Raise replica storage quota" } });
+    expect(ctx.calls.created).toHaveLength(0);
+    expect(ctx.calls.messages[0].text).toContain("DB-77");
+  });
+  it("comments as them on a repeat", async () => {
+    const ctx = setup(true);
+    await click(ctx, buttonValue(await suggestion(ctx), "track_task"), "UMAYA");
+    const again = await suggestion(ctx, "Agreed: Maya will raise the replica storage quota again by Fri 16 Oct.", "1791199999.000200");
+    await click(ctx, buttonValue(again, "track_task"), "UMAYA");
+    expect(ctx.calls.asUserComments[0]).toMatchObject({ email: "maya@x.test", key: "DB-77" });
+    expect(ctx.calls.comments).toHaveLength(0);
+  });
+  it("does not fall back to the shared account when their own connection fails", async () => {
+    const ctx = setup(true);
+    ctx.deps.broppy.createIssue = async () => { throw new Error("403"); };
+    await click(ctx, buttonValue(await suggestion(ctx), "track_task"), "UMAYA");
     expect(ctx.calls.created).toHaveLength(0);
   });
 });

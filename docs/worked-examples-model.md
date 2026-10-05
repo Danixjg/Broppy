@@ -5,6 +5,7 @@ The challenge brief's five scenarios, run end to end on the demo data with a lan
 - **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so "last week" finds it.
 - **Writer:** Groq's `openai/gpt-oss-120b`, captured on 2026-10-03. Model answers vary from run to run, so the tests don't check this file. Where the model couldn't answer, the built-in writer did, as noted.
 - **Search:** keywords, synonyms and freshness, plus semantic similarity from Cloudflare Workers AI's `@cf/baai/bge-m3` embeddings, at `SEMANTIC_MIN` 0.51.
+- **Data:** the 26 hand-written items alone. This run predates tighter search (D68 to D70) and the generated company in the demo (D75 to D79); `pnpm scenarios:model` captures it again on today's code and data.
 - **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in compliance, Alex is an intern and Wei Ming is a contractor.
 - **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose link brought a document in. The person asking sees only their own trace, which never names what they couldn't see.
 
@@ -56,7 +57,7 @@ Read as: Slack first, and Slack only from 8 Oct 2026 to 15 Oct 2026; other platf
 
 ### Ravi asks the same question
 
-Ravi is in #db-oncall, so his answer cites it: yes. It adds:
+Ravi is in #db-oncall, so Ravi's answer cites it: yes. It adds:
 
 > On-call blocker raised overnight: the database migration hit lock timeouts on the settlements table. [slack:db-oncall:0]
 
@@ -97,8 +98,8 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 | Wei Ming | Show me the zebra onboarding notes from the Q9 offsite (a topic that doesn't exist) | No accessible information was found for this query. |
 | Alex, intern | Show me the security incident report from the Q3 breach | No accessible information was found for this query. |
 
-- Wei's two replies are identical: yes. So are his own traces: yes, with 1 event each, an empty answer.
-- The compliance view shows what was refused for him: `confluence:q3-incident`, `slack:sec-incident`, `confluence:payment-service-runbook`, `jira:SEC-44`, `drive:runbook-2025`. Passages sent to the writer for him: none.
+- Wei Ming's two replies are identical: yes. So are the traces Wei Ming sees: yes, with 1 event each, an empty answer.
+- The compliance view shows what was refused for Wei Ming: `confluence:q3-incident`, `slack:sec-incident`, `confluence:payment-service-runbook`, `jira:SEC-44`, `drive:runbook-2025`. Passages sent to the writer for Wei Ming: none.
 - Ravi, who may see payments material, asks "What does PAY-101 need before cutover?" and gets a cited answer from 3 platforms.
 
 ![Wei Ming's reply](images/s3-wei.png)
@@ -109,9 +110,9 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 
 ### Maya removes David from #db-migration
 
-- **11:00** David asks the scenario 1 question. His answer cites `slack:db-migration`: yes.
-- **11:05** Maya removes him from the channel. The audit records `channel_membership_removed`: yes.
-- **11:06** David asks again. His answer cites the channel: no. It still cites Jira: `jira:DB-12`, `jira:DB-15`.
+- **11:00** David asks the scenario 1 question. The answer cites `slack:db-migration`: yes.
+- **11:05** Maya removes David from the channel. The audit records `channel_membership_removed`: yes.
+- **11:06** David asks again. The answer cites the channel: no. It still cites Jira: `jira:DB-12`, `jira:DB-15`.
 
 > DB-12 (in progress) tracks the ledger database migration project. [jira:DB-12:0]
 > Waves one and two are complete, and wave three waits on DB-15. [jira:DB-12:0]
@@ -119,9 +120,9 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 
 ### Maya restricts the runbook page
 
-- **11:10** David asks "What's the latest runbook for the payment-service incident?" His answer cites the runbook: yes.
-- **11:15** Maya removes him from the page's viewers. The audit records `native_permission_changed`: yes.
-- **11:16** David asks again. His answer cites the runbook: no. His own trace mentions it: no. His answer now reads:
+- **11:10** David asks "What's the latest runbook for the payment-service incident?" The answer cites the runbook: yes.
+- **11:15** Maya removes David from the page's viewers. The audit records `native_permission_changed`: yes.
+- **11:16** David asks again. The answer cites the runbook: no. The trace David sees mentions it: no. The answer now reads:
 
 > Payment cutover discussion: PAY-101 depends on the SEC-44 failover drill. [slack:payments-cutover:0]
 > Use the approved runbook before switching traffic. [slack:payments-cutover:0]
@@ -131,7 +132,7 @@ Ravi is in #db-oncall, so his answer cites it: yes. It adds:
 
 *Written by the built-in writer instead of the model (rate_limited).*
 
-- Ravi asks the same question. His answer cites the runbook: yes.
+- Ravi asks the same question. Ravi's answer cites the runbook: yes.
 
 ![David's answer after leaving the channel](images/s4-david.png)
 

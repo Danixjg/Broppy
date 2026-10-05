@@ -5,7 +5,7 @@ import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplica
   sentences, tracked, type Project, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
-import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
+import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
   type SupabaseIndex } from "@brain/retrieval";
@@ -27,6 +27,10 @@ const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 // After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
 // questions don't wait on it meanwhile.
 const EMBEDDING_PAUSE_MS = 5 * 60_000;
+/** The mock data: the 26 hand-written items, or those plus the generated company (`pnpm dataset`). A `Brain` also takes
+ * a company generated in memory, as `pnpm bench` does at the brief's scale. */
+export type Corpus = "curated" | "demo";
+
 export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
@@ -53,10 +57,10 @@ export class Brain {
   private readonly supabaseSynced = new Set<string>();
   private embeddingPausedUntil = 0;
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
     this.persistence = options.persistence;
-    const fixture = loadMockCorpus();
+    const fixture = loadMockCorpus(new Date(), { generated: typeof options.corpus === "object" ? options.corpus : options.corpus === "demo" });
     this.users = options.users ?? fixture.users;
     this.connectors = options.connectors ?? fixture.connectors;
     this.liveMode = Boolean(options.connectors);
@@ -460,9 +464,13 @@ export class Brain {
 
     const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
     const allowedHits = candidates.filter(item => allowedIds.has(item.docId));
-    // Outside a project, a weak partial match drops out before its links are followed.
-    const hits = within ? allowedHits : coveringHits(allowedHits, item =>
-      asksForHistory || this.index.documents.get(item.docId)?.metadata.status !== "superseded");
+    // Outside a project, a weak partial match drops out before its links are followed, and so does one that doesn't
+    // name the issue the question names.
+    const hits = within ? allowedHits : namedIssueHits(coveringHits(allowedHits, item =>
+      asksForHistory || this.index.documents.get(item.docId)?.metadata.status !== "superseded"), trimmed, docId => {
+      const doc = this.index.documents.get(docId);
+      return doc ? `${doc.title}\n${doc.content}` : "";
+    });
     const linked = this.linkedCandidates(candidates, new Set(hits.map(item => item.docId)), plan, audit, within);
     const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
     const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
@@ -1075,6 +1083,20 @@ export class Brain {
     if (!connector) throw new Error("Unknown source");
     return connector;
   }
+}
+
+/**
+ * A question that names an issue ("Why is DB-15 blocked?") is about that issue. Once one of the matches names it, a
+ * match that doesn't drops out unless it covers two or more of the question's other distinctive words, so every
+ * blocked issue of another project doesn't crowd it out. Only the asker's allowed matches are read, so a document they
+ * can't open never changes the result.
+ */
+export function namedIssueHits<T extends SearchCandidate>(hits: T[], question: string, text: (docId: string) => string): T[] {
+  const keys = [...new Set((question.match(/(?<![A-Za-z0-9-])[A-Za-z][A-Za-z0-9]{1,9}-\d+(?![\d-])/g) ?? []).map(key => key.toUpperCase()))];
+  if (!keys.length) return hits;
+  const patterns = keys.map(key => new RegExp(`(?<![A-Za-z0-9-])${key}(?![\\d-])`, "i"));
+  const names = (hit: T) => patterns.some(pattern => pattern.test(text(hit.docId)));
+  return hits.some(names) ? hits.filter(hit => names(hit) || (hit.coverage ?? 0) >= 2) : hits;
 }
 
 /**

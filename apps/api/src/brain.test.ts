@@ -3,7 +3,7 @@ import { AuditLog } from "@brain/audit";
 import type { RemoteFgaAdapter } from "@brain/fga-adapter";
 import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
-import { Brain, coveringHits } from "./brain.js";
+import { Brain, coveringHits, namedIssueHits } from "./brain.js";
 import { ModelUnavailable } from "./llm.js";
 import { actorTrace } from "./server.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
@@ -579,6 +579,36 @@ describe("When the language model can't answer", () => {
     const answer = await brain.query(brain.user("ravi")!, question);
     expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
     expect(embed).not.toHaveBeenCalled();
+  });
+});
+
+describe("namedIssueHits", () => {
+  const hit = (docId: string, coverage: number) => ({ docId, chunkId: `${docId}:0`, score: 0.5, coverage });
+  const ids = (hits: Array<{ docId: string }>) => hits.map(item => item.docId);
+  const texts: Record<string, string> = {
+    issue: "DB-15 Replica lag. DB-15 waits on the replica storage quota.",
+    thread: "Blocker raised: the final wave is on hold until DB-15 is fixed.",
+    other: "PLAT-1 is blocked because it waits on finance approval.",
+    near: "DB-150 tracks something else entirely.",
+    runbook: "The gateway runbook lists the restart steps."
+  };
+  const text = (docId: string) => texts[docId];
+
+  it("keeps to the matches that name the issue the question names, in any case", () => {
+    const hits = [hit("issue", 2), hit("thread", 1), hit("other", 1), hit("near", 1)];
+    expect(ids(namedIssueHits(hits, "Why is DB-15 blocked?", text))).toEqual(["issue", "thread"]);
+    expect(ids(namedIssueHits(hits, "why is db-15 blocked?", text))).toEqual(["issue", "thread"]);
+  });
+
+  it("keeps a match that covers two other words of the question, and changes nothing without a named issue", () => {
+    const hits = [hit("issue", 1), hit("runbook", 2), hit("other", 1)];
+    expect(ids(namedIssueHits(hits, "Is DB-15 waiting on the gateway runbook?", text))).toEqual(["issue", "runbook"]);
+    expect(ids(namedIssueHits(hits, "What waits on the gateway runbook?", text))).toEqual(["issue", "runbook", "other"]);
+  });
+
+  it("changes nothing when no allowed match names the issue, so a hidden one can't steer the answer", () => {
+    const hits = [hit("other", 1), hit("runbook", 1)];
+    expect(ids(namedIssueHits(hits, "Why is DB-15 blocked?", text))).toEqual(["other", "runbook"]);
   });
 });
 

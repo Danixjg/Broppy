@@ -1,7 +1,7 @@
 // A seeded generator for the demo's company dataset: about 500 items across Confluence, Jira, Slack and Google Drive,
 // with each platform's own permissions, checked by the app's own rules. Run it with `pnpm dataset`, or
 // `pnpm dataset --scale brief` to build and check the brief's scale in memory.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import type { SourceDocument } from "../packages/types/src/index.js";
 import { BANKS } from "./dataset/banks/index.js";
@@ -30,6 +30,33 @@ export function validateCorpus(corpus: GeneratedCorpus, scale: Scale): string[] 
 }
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+
+/** The files `pnpm dataset` writes, by name, with their exact content. */
+export function generatedFiles(corpus: GeneratedCorpus): Record<string, string> {
+  return {
+    "documents.json": json(corpus.documents),
+    "fga-tuples.json": json(corpus.fgaTuples),
+    "persona-groups.json": json(corpus.personaGroups)
+  };
+}
+
+/**
+ * Writes the files into the folder and returns the names it wrote. A file whose content is already the same is left
+ * alone, even when only its line endings differ: Git for Windows checks text out with CRLF, and rewriting such a file
+ * with LF would make Git list it as changed.
+ */
+export async function writeGenerated(folder: URL, corpus: GeneratedCorpus): Promise<string[]> {
+  await mkdir(folder, { recursive: true });
+  const written: string[] = [];
+  for (const [name, content] of Object.entries(generatedFiles(corpus))) {
+    const file = new URL(name, folder);
+    const current = await readFile(file, "utf8").catch(() => undefined);
+    if (current?.replace(/\r\n/g, "\n") === content) continue;
+    await writeFile(file, content);
+    written.push(name);
+  }
+  return written;
+}
 
 function summary(corpus: GeneratedCorpus, scale: Scale): string {
   const count = (pick: (doc: SourceDocument) => string | undefined) => {
@@ -65,12 +92,10 @@ async function main(args: string[]): Promise<void> {
     return;
   }
   if (scale === "demo") {
-    const folder = new URL("./generated/", import.meta.url);
-    await mkdir(folder, { recursive: true });
-    await writeFile(new URL("documents.json", folder), json(corpus.documents));
-    await writeFile(new URL("fga-tuples.json", folder), json(corpus.fgaTuples));
-    await writeFile(new URL("persona-groups.json", folder), json(corpus.personaGroups));
-    process.stdout.write("Wrote data/generated/documents.json, fga-tuples.json and persona-groups.json.\n");
+    const written = await writeGenerated(new URL("./generated/", import.meta.url), corpus);
+    process.stdout.write(written.length
+      ? `Wrote ${written.map(name => `data/generated/${name}`).join(", ")}.\n`
+      : "data/generated is already up to date.\n");
   }
   process.stdout.write(`No problems found, in ${((performance.now() - started) / 1000).toFixed(1)} seconds.\n`);
 }

@@ -134,6 +134,8 @@ flowchart TB
 4. **Keep what covers the question:** outside a project, a match must cover at least half as many distinctive words,
    rounded up, as the best allowed match.
    - **No side channel:** the bar comes from allowed matches only, so a denied document can't move it.
+   - **A named issue:** a question that names an issue key, such as "Why is DB-15 blocked?", keeps to the matches that
+     name it once an allowed match does, along with any match covering two or more distinctive words (D79).
    - **Meaning:** a match found by meaning alone stays if it is at least as close as the closest match that clears
      the bar.
    - **History:** superseded copies don't set the bar unless the question asks for history.
@@ -230,6 +232,20 @@ person may also open.
   and every successful request. Semantic vectors are restored with the index.
 - **Without Supabase:** as in the public demo, everything lives in memory and resets on restart.
 
+## The demo's data
+
+- **Two sets:** [`data/mock/`](../data/mock/documents.json) holds the 26 hand-written items the scenarios and tests
+  are built on. [`data/generated/`](../data/generated/documents.json) holds a 500-item company from a seeded generator,
+  checked by the app's own access check, link reader, search words and workspace functions (D71 to D74).
+- **Who serves what (D75):** the demo API (`pnpm dev` and the public demo) serves both, and `MOCK_DATA=curated` gives
+  it the hand-written items alone. The SSO API keeps the hand-written items: its people come from the directory, which
+  doesn't have the generated company's groups.
+- **Checked on both:** every scenario test runs on each set with the same cited documents, and so do the worked
+  examples. A leak test asks about all eight projects as each of the six people, and checks that nothing they can't
+  open reaches the writer or their own trace.
+- **At the brief's scale:** `pnpm bench` builds about 20,000 items in 30 generated projects in memory, indexes them
+  with the same `Brain`, and times 20 questions for each person. Its numbers are in the [README](../README.md#speed-and-memory).
+
 ## Limits
 
 - **No webhooks:** freshness comes from polling plus the live check in each question.
@@ -243,6 +259,11 @@ person may also open.
   (the most similar unrelated pair scored 0.61), so about one unrelated pair in twenty still passes on similarity
   alone; keyword matches are unaffected.
 - **Demo identities:** they are fixtures chosen with a header, and only the public demo API accepts them.
+- **People who can open little:** the coverage bar comes from their own best match, so a question about something
+  hidden from them can be answered from an unrelated item that shares a word. At the brief's scale, most of the answers
+  the contractor and the intern get are like that (D76). Nothing hidden is used or named.
+- **Audit volume:** every ranked candidate and every access decision is an audit entry. At the brief's scale a broad
+  question writes up to about 25,000 entries: the slowest took 1.0 seconds, and 0.4 without writing them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
 - **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.
 - **Links by path:** a link is recognised by its path, whatever the host. A link to another company's Jira issue with

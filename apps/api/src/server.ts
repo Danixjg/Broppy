@@ -4,12 +4,13 @@ import { searchAudit } from "./audit-search.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { Brain } from "./brain.js";
+import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
 import { UserDirectory } from "./user-directory.js";
 import { ServiceActor } from "./service-actor.js";
+import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
 import { MockConnector, loadMockCorpus, type ImportScope } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
@@ -26,6 +27,8 @@ export interface ApiServer {
 interface ApiServerOptions {
   brain?: Brain;
   startOrchestrator?: boolean;
+  /** The mock data, in place of the one the settings choose (`corpusFromEnv`). */
+  corpus?: Corpus;
 }
 
 function send(response: ServerResponse, status: number, data: unknown): void {
@@ -57,6 +60,21 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
   "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
   "FGA_CLIENT_SECRET"];
+
+/**
+ * The mock data the API serves. The demo API serves the hand-written items and the generated company; the SSO API keeps
+ * the hand-written items, because its people come from the directory, which doesn't have the generated company's groups.
+ * MOCK_DATA=curated or demo chooses on the demo API.
+ */
+export function corpusFromEnv(env: NodeJS.ProcessEnv = process.env): Corpus {
+  const sso = Boolean(env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID);
+  const value = env.MOCK_DATA || undefined;
+  if (value !== undefined && value !== "curated" && value !== "demo") throw new Error("MOCK_DATA must be curated or demo");
+  if (sso && value === "demo") {
+    throw new Error("MOCK_DATA=demo is for the demo API; the SSO directory's people don't have the generated company's groups");
+  }
+  return value ?? (sso ? "curated" : "demo");
+}
 
 // PUBLIC_DEMO lets anyone pick a demo persona, so it only ever serves the fictional mock corpus.
 function publicDemo(): boolean {
@@ -124,6 +142,7 @@ async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
   const demoOnly = publicDemo();
+  const corpus = options.corpus ?? corpusFromEnv();
   const hasAuth0 = Boolean(process.env.AUTH0_ISSUER || process.env.AUTH0_AUDIENCE || process.env.AUTH0_ORG_ID);
   const directory = UserDirectory.fromEnv();
   if (hasAuth0 && !directory) throw new Error("Auth0 requires the Supabase user directory");
@@ -151,10 +170,18 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     throw new Error("Live sources require Auth0 sign-in");
   }
   const brain = options.brain ?? new Brain(models.llm,
-    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
+    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors, corpus });
+  // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
+  const applySite = async (source: Source) => {
+    const connector = connectors?.[source];
+    const site = oauth && connector instanceof LiveConnector ? await oauth.orgSite(source) : undefined;
+    if (site) (connector as LiveConnector).useSite(site);
+  };
+  for (const source of ["jira", "confluence"] as Source[]) await applySite(source);
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
   const serviceActor = ServiceActor.fromEnv(directory);
+  const jiraAsUser = oauth ? new JiraAsUser(oauth) : undefined;
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
   if (options.startOrchestrator === false) await brain.syncAll();
@@ -189,16 +216,28 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
         const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
+        await applySite(source);
         brain.markConnected(actor, source);
         await brain.persist();
         response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
         response.end(); return;
       }
 
-      // The Slack app acts as the Slack user's own Broppy user, for questions only. Any other request carrying the
+      const own = /^\/v1\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
+      if (own && request.method === "GET" && oauth && directory) {
+        const source = own[1] as Source;
+        const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub), "user");
+        brain.audit.append("user_connection_created", actor.id, { source });
+        await brain.persist();
+        response.writeHead(302, { location: new URL("/accounts.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
+        response.end(); return;
+      }
+
+      // The Slack app acts as the Slack user's own Broppy user, for questions and Jira writes only. Any other request carrying the
       // service header is refused rather than falling back to another identity.
       const service = serviceActor?.present(request) === true;
-      if (service && !(request.method === "POST" && url.pathname === "/v1/query")) {
+      const serviceRoutes = ["/v1/query", "/v1/service/jira/issue", "/v1/service/jira/comment"];
+      if (service && !(request.method === "POST" && serviceRoutes.includes(url.pathname))) {
         return await reply(response, 403, { error: "Forbidden" });
       }
       const resolve = () => service ? serviceActor!.resolve(request) : identity(request, brain, auth0, !connectors);
@@ -206,8 +245,46 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
       actor = user;
 
+      // Each person connects their own source accounts; the org-wide admin connection is separate.
+      const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+      if (url.pathname === "/v1/me/connections" && request.method === "GET") {
+        const connected = oauth ? new Set(await oauth.connectedSources(user.id)) : new Set<Source>();
+        return await reply(response, 200, { available: Boolean(oauth),
+          connections: sources.map(source => ({ source, configured: Boolean(oauth?.configs[source]), connected: connected.has(source) })) });
+      }
+      const mine = /^\/v1\/me\/connections\/(slack|jira|confluence|drive)(?:\/(authorize))?$/.exec(url.pathname);
+      if (mine) {
+        if (!oauth) return await reply(response, 404, { error: "Source OAuth is not configured" });
+        const source = mine[1] as Source;
+        if (mine[2] === "authorize" && request.method === "POST") return await reply(response, 200, { url: oauth.begin(source, user, "user") });
+        if (!mine[2] && request.method === "DELETE") {
+          await oauth.removeUser(source, user.id);
+          brain.audit.append("user_connection_removed", user.id, { source });
+          await brain.persist();
+          return await reply(response, 200, { ok: true });
+        }
+        return await reply(response, 404, { error: "Not found" });
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/me") {
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
+      }
+
+      // Jira writes the Slack app makes for a person, with that person's own connection. 409 means they haven't
+      // connected Jira (or no site is known), so the app falls back to its shared account.
+      if (service && (url.pathname === "/v1/service/jira/issue" || url.pathname === "/v1/service/jira/comment")) {
+        if (!jiraAsUser) return await reply(response, 404, { error: "Source OAuth is not configured" });
+        const input = await body(request);
+        if (url.pathname === "/v1/service/jira/issue") {
+          const issue = await jiraAsUser.createIssue(user, parseIssue(input));
+          if (!issue) return await reply(response, 409, { error: "Jira is not connected for this user" });
+          brain.audit.append("jira_issue_created_from_slack", user.id, { key: issue.key });
+          return await reply(response, 201, issue);
+        }
+        const comment = parseComment(input);
+        if (!await jiraAsUser.comment(user, comment.key, comment.text)) return await reply(response, 409, { error: "Jira is not connected for this user" });
+        brain.audit.append("jira_comment_added_from_slack", user.id, { key: comment.key });
+        return await reply(response, 200, { ok: true });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/query") {
@@ -479,7 +556,8 @@ function isMainModule(): boolean {
 export function startupMessage(host: string, port: number, env: NodeJS.ProcessEnv = process.env): string {
   const signIn = env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID ? "with Auth0 sign-in"
     : env.PUBLIC_DEMO === "true" ? "as the public demo, on mock data only" : "in demo mode (x-demo-user)";
-  return `API ready at http://${host}:${port} ${signIn}. Leave this window open; Ctrl+C stops it.`;
+  const data = corpusFromEnv(env) === "demo" ? ", with the generated company" : "";
+  return `API ready at http://${host}:${port} ${signIn}${data}. Leave this window open; Ctrl+C stops it.`;
 }
 
 if (isMainModule()) {

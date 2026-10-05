@@ -2,9 +2,13 @@
 // it with the app's own access check, link reader, search words and workspace functions. After changing the generator
 // or its banks, run `pnpm dataset` to write the files again.
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { SourceDocument } from "../packages/types/src/index.js";
-import { generateCorpus, validateCorpus, type GeneratedCorpus } from "./generate.js";
+import { generateCorpus, generatedFiles, validateCorpus, writeGenerated, type GeneratedCorpus } from "./generate.js";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 // Git for Windows may check text out with CRLF line endings.
@@ -18,9 +22,25 @@ describe("the generated dataset", () => {
   });
 
   it("is what the generator writes, byte for byte", () => {
-    const files = { "documents.json": corpus.documents, "fga-tuples.json": corpus.fgaTuples, "persona-groups.json": corpus.personaGroups };
-    const stale = Object.entries(files).filter(([name, value]) => committed(name) !== json(value)).map(([name]) => name);
+    const stale = Object.entries(generatedFiles(corpus)).filter(([name, content]) => committed(name) !== content).map(([name]) => name);
     expect(stale, "out of date in data/generated: run pnpm dataset").toEqual([]);
+  });
+
+  it("leaves a file alone when only its line endings differ, so Git doesn't list it as changed", async () => {
+    const path = await mkdtemp(join(tmpdir(), "dataset-"));
+    try {
+      const folder = pathToFileURL(`${path}/`);
+      const files = generatedFiles(corpus);
+      // As Git for Windows checks them out: CRLF line endings. One file is out of date.
+      for (const [name, content] of Object.entries(files)) await writeFile(new URL(name, folder), content.replace(/\n/g, "\r\n"));
+      await writeFile(new URL("fga-tuples.json", folder), "[]\n");
+      expect(await writeGenerated(folder, corpus)).toEqual(["fga-tuples.json"]);
+      expect(await readFile(new URL("documents.json", folder), "utf8")).toBe(files["documents.json"].replace(/\n/g, "\r\n"));
+      expect(await readFile(new URL("fga-tuples.json", folder), "utf8")).toBe(files["fga-tuples.json"]);
+      expect(await writeGenerated(folder, corpus)).toEqual([]);
+    } finally {
+      await rm(path, { recursive: true, force: true });
+    }
   });
 
   it("depends only on the seed", () => {

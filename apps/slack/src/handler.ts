@@ -147,6 +147,13 @@ async function track(deps: Deps, s: Suggestion, user: string, responseUrl: strin
   try {
     const person = deps.people.find(p => p.slackId === s.a);
     const name = person?.name ?? `<@${s.a}>`;
+    // The confirming person's own Jira connection when they have one; the shared account otherwise. A failure with
+    // their connection (for example no permission in that project) is not retried with the shared account.
+    const email = await deps.slack.userEmail(user).catch(() => undefined);
+    const asUser = async <T>(call: (email: string) => Promise<T | undefined | false>): Promise<T | undefined | false> => {
+      if (!email) return undefined;
+      try { return await call(email); } catch (error) { if (error instanceof NotLinkedError) return undefined; throw error; }
+    };
     const fp = fingerprint(s.p, s.t);
     const words = tokens(s.t);
     const existing = await deps.store.findTask(s.p, fp, words);
@@ -155,13 +162,15 @@ async function track(deps: Deps, s: Suggestion, user: string, responseUrl: strin
       // The same task again: add to the ticket that already tracks it.
       key = existing.issueKey;
       url = existing.issueUrl;
-      await deps.jira.addComment(key, `Raised again in Slack (channel ${s.c}): "${s.s}"\n\nConfirmed by ${name}${s.d ? `, due ${s.d}` : ""}.`);
+      const text = `Raised again in Slack (channel ${s.c}): "${s.s}"\n\nConfirmed by ${name}${s.d ? `, due ${s.d}` : ""}.`;
+      if (!await asUser(email => deps.broppy.comment(email, key, text))) await deps.jira.addComment(key, text);
       await deps.store.recordRepeat(existing, s.c, s.ts);
     } else {
-      const created = await deps.jira.createIssue({
+      const issue = {
         project: s.p, summary: s.t, assigneeAccountId: person?.jiraAccountId, dueDate: s.d,
         description: `Raised in Slack (channel ${s.c}):\n\n"${s.s}"\n\nConfirmed by ${name}.`
-      });
+      };
+      const created = await asUser(email => deps.broppy.createIssue(email, issue)) || await deps.jira.createIssue(issue);
       key = created.key;
       url = created.url;
       await deps.store.saveTask({

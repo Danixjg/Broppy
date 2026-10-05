@@ -33,16 +33,26 @@ The admin view links to `/connectors.html`. It shows connection status, counts, 
   "jira": {
     "clientId": "ATLASSIAN_CLIENT_ID",
     "clientSecret": "SERVER_SECRET",
-    "baseUrl": "https://company.atlassian.net",
-    "cloudId": "ATLASSIAN_CLOUD_ID",
-    "scopes": ["read:jira-work", "read:me", "offline_access"]
+    "scopes": ["read:jira-work", "write:jira-work", "read:me", "offline_access"]
   }
 }
 ```
 
+Atlassian sites are found at sign-in: after the admin connects Jira or Confluence, Broppy asks Atlassian which sites the account can reach and stores the site (base URL and cloud ID) with the token. If exactly one site is reachable it is used automatically. If several are, set `cloudId` (or `baseUrl`) in that source's configuration to choose one; a person-level picker is not built yet. Configuration values also still work and take effect when no site was discovered. People connecting their own Atlassian account must be able to reach the organization's site.
+
 Register `${API_ORIGIN}/v1/admin/connections/SOURCE/callback` with each provider. Confluence uses an Atlassian app with Confluence read scopes and its `cloudId`. Slack uses a Slack OAuth v2 app and **user** read scopes for conversations, history, replies and `users:read.email`; only channels visible to that credential are imported. The callback verifies the connected account email against the administrator's directory identity. Tokens and refresh tokens are stored in Supabase Vault; API responses and state snapshots contain no tokens. Source OAuth state expires after ten minutes and is single use; restarting the API cancels pending authorization flows. Google uses PKCE. Tokens with no refresh capability require reconnecting when expired.
 
 The connected administrator's user token can establish that administrator's source access. Other users still need their own delegated source credentials; no credential means no access. The settings people-matching list checks directory identity mappings, not credential availability. Domain-wide Google delegation and Auth0 Token Vault are not implemented. Do not infer that installing one app authorizes every employee.
+
+### Per-user connections
+
+Alongside the admin's org-wide connection, every signed-in person can connect their own account at `/accounts.html` ("My accounts" in the workspace header). It reuses the same `SOURCE_OAUTH_JSON` apps, so each provider app must **also** register `${API_ORIGIN}/v1/connections/SOURCE/callback` as a redirect URI (the admin one stays `/v1/admin/connections/SOURCE/callback`). Run migration `007_user_source_tokens.sql`. For a brand-new Supabase project, `infra/supabase/schema.sql` is the same end state (migrations 001-007) in one file.
+
+- API: `GET /v1/me/connections`, `POST /v1/me/connections/SOURCE/authorize`, `DELETE /v1/me/connections/SOURCE`. Any active user of the organization may use them; the OAuth state is single use, expires in ten minutes, and the callback re-checks the directory entry and that the connected account's email matches the person's directory identity for that source.
+- Storage: one Vault secret per organization + user + source (`public.user_source_connections`). Tokens never appear in API responses or snapshots. Connect and disconnect are audited (`user_connection_created`, `user_connection_removed`).
+- Use: live per-user authorization checks prefer the person's own token and fall back to the org connection only when that person made it. Imports still use the org connection.
+- Disconnecting a source as an admin also purges every person's own connection to it.
+- For other services, `SourceOAuth.authorizationFor(userId, source)` returns the `Authorization` header (refreshing when needed) or `undefined` when that person has not connected. It is an in-process lookup, so the Slack app (a separate Vercel function) needs either to share this class with its own Persistence credentials or to call a server-to-server endpoint, which is not added yet.
 
 For explicitly managed credentials, use `LIVE_SOURCES_JSON` with all four source keys. Each entry accepts `ids`, `serviceAuthorization`, `userAuthorizations` keyed by workspace user ID, optional `discover: true`, and, for Atlassian, `baseUrl` and optional `cloudId`. Authorization values include the scheme, e.g. `Bearer ...`. Use either this mode or `SOURCE_OAUTH_JSON` per API process.
 
