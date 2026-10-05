@@ -5,7 +5,7 @@ import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplica
   sentences, tracked, type Project, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
-import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
+import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
   type SupabaseIndex } from "@brain/retrieval";
@@ -27,7 +27,8 @@ const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 // After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
 // questions don't wait on it meanwhile.
 const EMBEDDING_PAUSE_MS = 5 * 60_000;
-/** The mock data: the 26 hand-written items, or those plus the generated company (`pnpm dataset`). */
+/** The mock data: the 26 hand-written items, or those plus the generated company (`pnpm dataset`). A `Brain` also takes
+ * a company generated in memory, as `pnpm bench` does at the brief's scale. */
 export type Corpus = "curated" | "demo";
 
 export class Brain {
@@ -56,10 +57,10 @@ export class Brain {
   private readonly supabaseSynced = new Set<string>();
   private embeddingPausedUntil = 0;
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
     this.persistence = options.persistence;
-    const fixture = loadMockCorpus(new Date(), { generated: options.corpus === "demo" });
+    const fixture = loadMockCorpus(new Date(), { generated: typeof options.corpus === "object" ? options.corpus : options.corpus === "demo" });
     this.users = options.users ?? fixture.users;
     this.connectors = options.connectors ?? fixture.connectors;
     this.liveMode = Boolean(options.connectors);

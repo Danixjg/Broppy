@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import generatedDocuments from "../../../data/generated/documents.json" with { type: "json" };
 import generatedGroups from "../../../data/generated/persona-groups.json" with { type: "json" };
 import fgaTuples from "../../../data/mock/fga-tuples.json" with { type: "json" };
+import type { SourceDocument } from "@brain/types";
 import { loadMockCorpus, nativeAllows } from "./index.js";
 
 describe("Stage 1 mock corpus", () => {
@@ -107,6 +108,20 @@ describe("Stage 1 mock corpus", () => {
     }
     expect(both.users.find(user => user.id === "david")!.groups).toEqual(["data", "payments", "platform", "security"]);
     expect(both.users.find(user => user.id === "wei")!.groups).toEqual([]);
+  });
+
+  it("adds items generated in memory the same way, such as the brief's scale for pnpm bench", async () => {
+    const now = new Date("2026-10-16T00:30:00.000Z");
+    const page = (generatedDocuments as unknown as SourceDocument[]).find(doc => doc.source === "confluence")!;
+    const extra = { ...page, docId: "confluence:900001", sourceNativeId: "900001" };
+    const corpus = loadMockCorpus(now, { generated: { documents: [extra], personaGroups: { david: ["data"], nur: ["risk"] } } });
+    const all = (await Promise.all(Object.values(corpus.connectors).map(connector => connector.listItems()))).flat();
+    expect(all).toHaveLength(27);
+    expect(Date.parse(all.find(doc => doc.docId === extra.docId)!.updatedAt) - Date.parse(extra.updatedAt)).toBe(16 * 86_400_000);
+    expect(corpus.users.find(user => user.id === "david")!.groups).toEqual(["data", "payments", "security"]);
+    expect(corpus.users.find(user => user.id === "nur")!.groups).toEqual(["compliance", "payments", "risk"]);
+    expect(() => loadMockCorpus(now, { generated: { documents: [{ ...page, docId: "jira:PAY-101" }], personaGroups: {} } }))
+      .toThrow("Generated item jira:PAY-101 has a hand-written item's id");
   });
 
   it("intersects brain grants with each platform's native restriction", async () => {
