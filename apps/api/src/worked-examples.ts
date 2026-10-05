@@ -77,7 +77,8 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
   const at: Clock = hhmm => options.at(`${DAY}T${hhmm}:00.000Z`);
   const freshBrain: FreshBrain = async hhmm => {
     at(hhmm);
-    const brain = new Brain(options.llm, { embedding: options.embedding });
+    // The demo API's data: the hand-written items the scenarios are about, with the generated company beside them.
+    const brain = new Brain(options.llm, { embedding: options.embedding, corpus: "demo" });
     await brain.syncAll();
     return brain;
   };
@@ -108,6 +109,8 @@ function introduction(writer: string, withModel: boolean, search?: string): stri
         "below is real output.",
     "",
     "- **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so \"last week\" finds it.",
+    "- **Data:** what the demo API serves: the 26 hand-written items the scenarios are about, and the generated company " +
+      "of 500 more beside them (`pnpm dataset`), with six other projects that compete for every answer.",
     `- **Writer:** ${writer}`,
     ...(search ? [`- **Search:** ${search}`] : []),
     "- **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in " +
@@ -231,7 +234,7 @@ async function scenario1(freshBrain: FreshBrain, ask: Ask): Promise<string[]> {
     "",
     "### Ravi asks the same question",
     "",
-    `Ravi is in #db-oncall, so his answer cites it: ${yes(cites(ravi, "slack:db-oncall"))}.` +
+    `Ravi is in #db-oncall, so Ravi's answer cites it: ${yes(cites(ravi, "slack:db-oncall"))}.` +
       (onCall ? ` It adds:\n\n> ${onCall}` : ""),
     "",
     "![David's answer in the workspace](images/s1-david.png)",
@@ -302,11 +305,11 @@ async function scenario3(freshBrain: FreshBrain, ask: Ask): Promise<string[]> {
     `| Wei Ming | ${ABSENT} (a topic that doesn't exist) | ${absent.answer.text} |`,
     `| Alex, intern | ${Q3} | ${alex.answer.text} |`,
     "",
-    `- Wei's two replies are identical: ${yes(JSON.stringify(wei.answer) === JSON.stringify(absent.answer))}. So ` +
-      `are his own traces: ${yes(shape(wei) === shape(absent))}, with ${ownTrace(wei).length} event each, an empty ` +
-      "answer.",
-    `- The compliance view shows what was refused for him: ${refused.length ? refused.join(", ") : "nothing"}. ` +
-      `Passages sent to the writer for him: ${sent || "none"}.`,
+    `- Wei Ming's two replies are identical: ${yes(JSON.stringify(wei.answer) === JSON.stringify(absent.answer))}. ` +
+      `So are the traces Wei Ming sees: ${yes(shape(wei) === shape(absent))}, with ${ownTrace(wei).length} event ` +
+      "each, an empty answer.",
+    `- The compliance view shows what was refused for Wei Ming: ${refused.length ? refused.join(", ") : "nothing"}. ` +
+      `Passages sent to the writer for Wei Ming: ${sent || "none"}.`,
     `- Ravi, who may see payments material, asks "${PAY101}" and gets a cited answer from ${platforms.size} ` +
       "platforms.",
     "",
@@ -345,26 +348,26 @@ async function scenario4(freshBrain: FreshBrain, ask: Ask, at: Clock): Promise<s
     "",
     "### Maya removes David from #db-migration",
     "",
-    `- **11:00** David asks the scenario 1 question. His answer cites ${code("slack:db-migration")}: ` +
+    `- **11:00** David asks the scenario 1 question. The answer cites ${code("slack:db-migration")}: ` +
       `${yes(cites(before, "slack:db-migration"))}.`,
-    `- **11:05** Maya removes him from the channel. The audit records ${code("channel_membership_removed")}: ` +
+    `- **11:05** Maya removes David from the channel. The audit records ${code("channel_membership_removed")}: ` +
       `${yes(audited(brain, "channel_membership_removed"))}.`,
-    `- **11:06** David asks again. His answer cites the channel: ${yes(cites(after, "slack:db-migration"))}. It ` +
+    `- **11:06** David asks again. The answer cites the channel: ${yes(cites(after, "slack:db-migration"))}. It ` +
       `still cites Jira: ${jira.length ? jira.join(", ") : "none"}.`,
     "",
     ...quote(after),
     "",
     "### Maya restricts the runbook page",
     "",
-    `- **11:10** David asks "${RUNBOOK}" His answer cites the runbook: ${yes(cites(runbookBefore, RUNBOOK_DOC))}.`,
-    `- **11:15** Maya removes him from the page's viewers. The audit records ${code("native_permission_changed")}: ` +
+    `- **11:10** David asks "${RUNBOOK}" The answer cites the runbook: ${yes(cites(runbookBefore, RUNBOOK_DOC))}.`,
+    `- **11:15** Maya removes David from the page's viewers. The audit records ${code("native_permission_changed")}: ` +
       `${yes(audited(brain, "native_permission_changed"))}.`,
-    `- **11:16** David asks again. His answer cites the runbook: ${yes(cites(runbookAfter, RUNBOOK_DOC))}. His own ` +
-      `trace mentions it: ${yes(mentions(ownTrace(runbookAfter), "payment-service-runbook"))}. His answer now reads:`,
+    `- **11:16** David asks again. The answer cites the runbook: ${yes(cites(runbookAfter, RUNBOOK_DOC))}. The trace ` +
+      `David sees mentions it: ${yes(mentions(ownTrace(runbookAfter), "payment-service-runbook"))}. The answer now reads:`,
     "",
     ...quote(runbookAfter),
     "",
-    `- Ravi asks the same question. His answer cites the runbook: ${yes(cites(ravi, RUNBOOK_DOC))}.`,
+    `- Ravi asks the same question. Ravi's answer cites the runbook: ${yes(cites(ravi, RUNBOOK_DOC))}.`,
     "",
     "![David's answer after leaving the channel](images/s4-david.png)",
     ""
