@@ -46,12 +46,12 @@ curl -s http://127.0.0.1:3000/v1/query \
 
 | User | Role | Useful scenario |
 | --- | --- | --- |
-| Ravi (`ravi`) | Head of payments (member), payments/security/fraud groups | Ask about PAY-101, SEC-44, and the cutover plan; Maya can remove his Slack channel membership to show a live access change on the next query. |
+| Ravi (`ravi`) | Head of payments (member), payments/security/fraud groups | Ask about PAY-101, SEC-44, and the cutover plan; Maya can remove Ravi from a Slack channel to show a live access change on the next query. |
 | Maya (`maya`) | Admin | Edit mock source content, narrow a tier, revoke brain grants, remove a group or native Slack channel member, run sync, and preview access. |
-| Alex (`alex`) | Intern | Try a security or restricted incident query; the fixed no-result reply conceals inaccessible results. Catch up on the open steering deck and chargeback guide. |
-| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; he isn't in the private #db-oncall channel, so it never reaches his answers. Compare with Ravi's view. Turn the #db-migration agreement into a Jira task, then mark it done. |
+| Alex (`alex`) | Intern | Try a security or restricted incident query; the fixed no-result reply conceals inaccessible results. Catch up on what a new hire should read first: the intern overview and guides. |
+| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; David isn't in the private #db-oncall channel, so it never reaches those answers. Compare with Ravi's view. Turn the #db-migration agreement into a Jira task, then mark it done. |
 | Nur (`nur`) | Compliance | Inspect and search audit events, seal a batch, inspect and verify a proof, view traces, and export CSV. |
-| Wei Ming (`wei`) | Contractor | Access explicitly shared vendor integration material; payment/security material remains denied. |
+| Wei Ming (`wei`) | Contractor | Open only what is shared by name: the #vendor-integration thread and, in the generated company, the partner API integration project. Payment and security material stays denied. |
 
 The challenge brief's scenarios run on the mock data as written:
 
@@ -60,10 +60,10 @@ The challenge brief's scenarios run on the mock data as written:
 | 1 | David: "What's the status of the database migration project and were there any blockers raised in Slack last week?" | Slack comes first, limited to the last week; Jira issues count at any date and show their status ("DB-15 (blocked)"). The answer cites #db-migration, DB-12, DB-15 and the plan page. The private #db-oncall blocker appears only for its members, such as Ravi. |
 | 2 | Maya appends a step to the payment-service incident runbook; David asks "What's the latest runbook for the payment-service incident?" | The next answer quotes every step, including the new one, and cites version 4 with its edit time. The superseded 2025 copy is never cited. An edit made at the source is picked up the same way, before any sync. |
 | 3 | Wei or Alex: "Show me the security incident report from the Q3 breach" | The fixed no-result reply, identical to a question about something that doesn't exist. |
-| 4 | Maya removes David from #db-migration, or restricts the runbook page | His next answer drops that channel or page; his own trace doesn't name it. |
+| 4 | Maya removes David from #db-migration, or restricts the runbook page | David's next answer drops that channel or page, and the trace David sees doesn't name it. |
 | 5 | Nur: "Show me everything user 'ravi' accessed related to the 'payment-gateway' Confluence space in the last 30 days" | The audit search reads the user, space and dates, and returns those questions with their answers and access decisions. |
 
-**[Worked examples](docs/worked-examples.md)** walk through all five with the real answers, citations, access decisions, audit entries and screenshots. `pnpm scenarios` regenerates that page, and `pnpm test` fails when it no longer matches what the code does. `pnpm scenarios:model` runs the same steps with the configured language model and writes [`docs/worked-examples-model.md`](docs/worked-examples-model.md); its calls count against the usage meter. The run committed there is Groq's `openai/gpt-oss-120b` with Cloudflare's embeddings, captured on 3 Oct: the same four sources in scenario 1, every runbook step, and the fixed reply for Wei and Alex.
+**[Worked examples](docs/worked-examples.md)** walk through all five with the real answers, citations, access decisions, audit entries and screenshots. `pnpm scenarios` regenerates that page, and `pnpm test` fails when it no longer matches what the code does. `pnpm scenarios:model` runs the same steps with the configured language model and writes [`docs/worked-examples-model.md`](docs/worked-examples-model.md); its calls count against the usage meter. The run committed there is Groq's `openai/gpt-oss-120b` with Cloudflare's embeddings, captured on 3 Oct, before tighter search and the generated company: the same four sources in scenario 1, every runbook step, and the fixed reply for Wei and Alex.
 
 A question that names a platform (Slack, Jira, Confluence, Drive) gets that platform first. A time it names ("last week", "past 3 days", "yesterday") limits that platform, or every platform when none is named. Other platforms with a clearly relevant match take turns, so one answer can cite all four. A question that names a project you can open (the title of its master page) keeps to that project's items, and the answer says so. Words that name no topic, such as status, project or update, count less and make no match on their own when the question has more specific words. A match must also cover at least half as many of the question's distinctive words as the best one. The most relevant source is quoted in full, and the next three add their best sentence. Mock dates move forward with the clock, so "last week" keeps finding the demo data.
 
@@ -80,6 +80,22 @@ With an embedding provider (Cloudflare Workers AI's `bge-m3`, D56), sync embeds 
 - **What it never says:** the hand-written story's words, so it doesn't change the scenarios' answers; months, dates or quarters, which the demo's date shift can't move; and, in what the intern and the contractor can open, anything about items hidden from them, not even a name.
 
 `pnpm dataset` writes the three files again and prints the counts and how many items each person can open. A file whose content hasn't changed is left alone, even if Git for Windows checked it out with different line endings, so Git doesn't list it as changed. `pnpm test` fails when the files no longer match the generator. `pnpm dataset --scale brief` builds and checks the brief's scale in memory: about 20,000 items in 30 projects, with 600 colleagues. The demo API (`pnpm dev` and the public demo) serves both sets, and every scenario test runs on both. The SSO API keeps the hand-written items, because its people come from the directory, which doesn't have the generated company's groups. `MOCK_DATA=curated` gives the demo API the hand-written items alone.
+
+### Speed and memory
+
+`pnpm bench` builds the brief's scale in memory beside the hand-written items, indexes it with the same code as the demo API, and has each of the six people ask the same 20 questions: the brief's scenarios, the generated projects by name, and the catch-ups. `pnpm bench --scale demo` does the same with the demo's 526 items. Three runs in the development container (4 logical processors of a 2.8 GHz Xeon, 16 GB of memory, Node 22), whose times varied by about a third from run to run:
+
+| | Brief's scale | Demo |
+| --- | --- | --- |
+| Items | 19,729, in 32 projects | 526, in 8 projects |
+| Generate, then index | 2.1–2.7 s, then 8.3–11.1 s | 0.1 s, then 0.1–0.2 s |
+| Memory after indexing | heap +585 MB; 852–861 MB in all | heap +8 MB; about 150 MB in all |
+| A question: median, then 95th percentile | 83–108 ms, then 470–640 ms | 5–6 ms, then 12–14 ms |
+| Documents the access check decides on, per question | 981–1,355 | 45–51 |
+| Of those, refused before the writer | 56–68% for Maya, David and Ravi; 94% for Nur; over 99% for Wei Ming and Alex | 31–49%; 74%; 91% and 95% |
+| Audit entries per question | 1,980–2,729 | 102–120 |
+
+Every candidate is audited, so a question costs more the more search finds: the slowest, "What rate limit applies to the partner API?", matched about 12,400 documents, wrote about 24,800 audit entries and took about a second, 60% of it spent writing those entries. The APIs serve 26 or 526 items; the brief's scale runs only in `pnpm bench`.
 
 ## Choosing what a company includes
 
@@ -111,8 +127,11 @@ suggestions.
     entry under **Raw data**.
   - Routine sync checks, which found nothing changed, are hidden behind a toggle. The search, the proofs and the CSV
     export still use every entry.
-- **Projects:** choose one in the header. Its Confluence master page, threads, tasks and files follow. A project is
-  listed only to people who can open its master page.
+- **Projects:** choose one in the header, or All sources. Its Confluence master page, threads, tasks and files follow.
+  A project is listed only to people who can open its master page.
+- **Long lists:** the Slack, Jira, Drive and source lists show eight items, then a button such as "Show 72 more tasks"
+  that shows the rest and moves the focus to the first of them. A list starts again from eight when the search, the
+  project or the person changes.
 - **Links:** a document lists the linked items the person may also open. Answers bring in a ticket's linked thread,
   page and files, and say what linked them ("linked from DB-12").
 - **From conversation to task:** an agreement such as "Agreed: …" in a thread becomes a suggested Jira task.
@@ -121,7 +140,7 @@ suggestions.
 - **Latest and duplicates:** "Why latest?" lists the reason for every point, and a likely duplicate gets a merge
   preview that changes nothing.
 - **Catch-up:** chosen by role and groups.
-  - Alex, an intern, gets an onboarding overview, and Wei what is shared with him.
+  - Alex, an intern, gets an onboarding overview, and Wei Ming, a contractor, what has been shared with them.
   - Team members get a project's status, blockers and decisions, from that project only.
   - Nur gets the last 7 days of the audit trail.
 
