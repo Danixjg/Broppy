@@ -2,12 +2,13 @@ import type { Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
 import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplicatesFor, latestFor, projectOf, projectsFor,
-  sentences, tracked, type WorkspaceDocument } from "./workspace.js";
+  sentences, tracked, type Project, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AuditLog } from "@brain/audit";
-import { loadMockCorpus, MockConnector, type Container, type ImportScope } from "@brain/connectors";
+import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
-import { groundedOutput, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, type LlmClient, type SemanticEmbeddingClient, type SupabaseIndex } from "@brain/retrieval";
+import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
+  type SupabaseIndex } from "@brain/retrieval";
 import type {
   Citation,
   ConnectorState,
@@ -23,8 +24,15 @@ import type {
 } from "@brain/types";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+// After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
+// questions don't wait on it meanwhile.
+const EMBEDDING_PAUSE_MS = 5 * 60_000;
+/** The mock data: the 26 hand-written items, or those plus the generated company (`pnpm dataset`). A `Brain` also takes
+ * a company generated in memory, as `pnpm bench` does at the brief's scale. */
+export type Corpus = "curated" | "demo";
+
 export class Brain {
-  readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string }>();
+  readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
   readonly orgId: string;
   private persistence?: Persistence;
@@ -47,11 +55,12 @@ export class Brain {
   private readonly syncQueues = new Map<Source, Promise<void>>();
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
+  private embeddingPausedUntil = 0;
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector> } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
     this.persistence = options.persistence;
-    const fixture = loadMockCorpus();
+    const fixture = loadMockCorpus(new Date(), { generated: typeof options.corpus === "object" ? options.corpus : options.corpus === "demo" });
     this.users = options.users ?? fixture.users;
     this.connectors = options.connectors ?? fixture.connectors;
     this.liveMode = Boolean(options.connectors);
@@ -93,7 +102,10 @@ export class Brain {
     const next = this.persistQueue.catch(() => undefined).then(async () => {
       await this.audit.flush();
       if (!this.persistence) return;
-      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources.map(source => this.connectors[source].listItems()))).flat();
+      // A disconnected source is purged, so its mock originals are not written to the snapshot either.
+      const connectorDocuments = this.liveMode ? undefined : (await Promise.all(sources
+        .filter(source => this.connections.get(source)?.status !== "Not connected")
+        .map(source => this.connectors[source].listItems()))).flat();
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
@@ -119,7 +131,10 @@ export class Brain {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(() => this.syncSource(source)).catch(async error => {
       const connection = this.connections.get(source);
-      if (connection && connection.status !== "Not connected") connection.status = "Error";
+      if (connection && connection.status !== "Not connected") {
+        connection.status = "Error";
+        connection.error = error instanceof Error ? error.message : "Sync failed";
+      }
       const job = this.jobs.get(source);
       if (job?.status === "running") { job.status = "failed"; job.error = error instanceof Error ? error.message : "Source discovery failed"; }
       await this.persist();
@@ -215,6 +230,7 @@ export class Brain {
         this.runs.set(source, run);
         await this.persist();
       }
+      await this.retryMissingEmbeddings(source);
       this.states.set(source, {
         ...state, orgId: this.orgId,
         cursor: run.cursorTo,
@@ -227,7 +243,7 @@ export class Brain {
         this.audit.append("import_completed", "sync", { ...job });
       }
       const connection = this.connections.get(source);
-      if (connection) connection.status = "Live";
+      if (connection) { connection.status = "Live"; connection.error = undefined; }
       await this.persist();
     } catch (error: unknown) {
       this.runs.set(source, { ...run, status: "failed" });
@@ -241,6 +257,17 @@ export class Brain {
     }
   }
 
+  /** A provider sign-in finished. A new connection imports nothing until the admin chooses. Reconnecting a source that is
+   * already set up, for instance after its credential was rejected, keeps the scope the admin chose. */
+  markConnected(actor: User, source: Source): void {
+    this.assertOrg(actor);
+    const existing = this.connections.get(source);
+    const keep = existing && existing.status !== "Not connected";
+    this.connections.set(source, { source, status: "Connected", scope: keep ? existing.scope : { mode: "none" },
+      connectedBy: actor.id, connectedAt: new Date().toISOString() });
+    this.audit.append("connection_created", actor.id, { source, reconnected: Boolean(keep) });
+  }
+
   /** Admin picker: the channels, projects, spaces or shared drives the connected credential can see. */
   async listContainers(actor: User, source: Source): Promise<Container[]> {
     this.assertOrg(actor);
@@ -249,10 +276,13 @@ export class Brain {
     return this.connectors[source].listContainers();
   }
 
-  async connect(actor: User, source: Source, scope: ImportScope = {}): Promise<void> {
+  async connect(actor: User, source: Source, scope?: ImportScope): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (this.liveMode) throw new Error("Live OAuth setup is required");
+    // Connecting again keeps the scope already chosen, unless a new one is given.
+    const existing = this.connections.get(source);
+    scope ??= existing && existing.status !== "Not connected" ? existing.scope : {};
     this.connections.set(source, { source, status: "Connected", scope, connectedBy: actor.id, connectedAt: new Date().toISOString() });
     this.audit.append("connection_created", actor.id, { source });
     await this.persist();
@@ -355,19 +385,47 @@ export class Brain {
       this.audit.append(type, user.id, { traceId, ...data });
     audit("query_received", { question: trimmed, questionHash: hashQuestion(trimmed) });
     await this.audit.flush();
+
+    // ② Access is decided on document IDs only, and every decision is audited.
+    const authorize = async (docIds: string[]): Promise<Set<string>> => {
+      const localDecisions = this.fga.batchCheck(user, docIds);
+      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
+      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
+      const decisions = localDecisions.map(decision => {
+        const remote = remoteById.get(decision.docId);
+        return decision.allowed && remote && !remote.allowed ? remote :
+          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
+      });
+      for (const decision of decisions) {
+        audit("access_decision", {
+          ...this.auditDocument(decision.docId),
+          allowed: decision.allowed,
+          reason: decision.reason
+        });
+      }
+      return new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
+    };
+
     // Platforms the question names come first in the answer; a time range it names applies to those platforms, or to
     // every platform when it names none.
     const plan = planQuery(trimmed);
-    const within = options.within ? new Set(options.within.docIds) : undefined;
-    const project = options.within?.project;
+    // A question that names a project the person may open keeps to that project's items. A project they may not open
+    // changes nothing, and its refusal never reaches their own trace.
+    const named = options.within ? undefined : this.namedProject(trimmed);
+    const keptTo = named && (await authorize([named.masterDocId])).has(named.masterDocId) ? named : undefined;
+    const within = options.within ? new Set(options.within.docIds) : keptTo ? new Set(keptTo.docIds) : undefined;
+    const project = options.within?.project ?? keptTo?.name;
     const scope: QueryScope | undefined = plan.sources.length || plan.window || project
       ? { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) } : undefined;
     audit("query_planned", { sources: plan.sources, ...plan.window, ...(project ? { project } : {}) });
 
     let queryVector: number[] | undefined;
     if (this.embedding && (this.embedding.available?.() ?? true)) {
-      try { queryVector = await this.embedding.embed(trimmed); }
-      catch { audit("embedding_fallback", {}); }
+      if (Date.now() < this.embeddingPausedUntil) audit("embedding_fallback", { reason: "paused" });
+      else {
+        try { queryVector = await this.embedding.embed(trimmed); }
+        catch { this.pauseEmbedding(); audit("embedding_fallback", { reason: "failed" }); }
+      }
     }
     // Keep the full local candidate set so denied hits cannot crowd an
     // accessible document out of the authorization pass.
@@ -375,9 +433,10 @@ export class Brain {
     let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
       try {
-        // Remote ranking may only reorder chunks that pass the local relevance gate.
-        const relevant = new Set(localCandidates.map(item => item.chunkId));
-        const remote = (await this.supabase.search(plan.searchText, queryVector, 30)).filter(item => relevant.has(item.chunkId));
+        // Remote ranking may only reorder chunks that pass the local relevance gate, and keeps their local coverage.
+        const relevant = new Map(localCandidates.map(item => [item.chunkId, item]));
+        const remote = (await this.supabase.search(plan.searchText, queryVector, 30)).filter(item => relevant.has(item.chunkId))
+          .map(item => ({ ...item, coverage: relevant.get(item.chunkId)!.coverage, semantic: relevant.get(item.chunkId)!.semantic }));
         const seen = new Set(remote.map(item => item.chunkId));
         candidates = [...remote, ...localCandidates.filter(item => !seen.has(item.chunkId))];
       }
@@ -400,36 +459,24 @@ export class Brain {
       });
     }
 
-    // ② Access is decided on document IDs only, and every decision is audited.
-    const authorize = async (docIds: string[]): Promise<Set<string>> => {
-      const localDecisions = this.fga.batchCheck(user, docIds);
-      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
-      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
-      const decisions = localDecisions.map(decision => {
-        const remote = remoteById.get(decision.docId);
-        return decision.allowed && remote && !remote.allowed ? remote :
-          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
-      });
-      for (const decision of decisions) {
-        audit("access_decision", {
-          ...this.auditDocument(decision.docId),
-          allowed: decision.allowed,
-          reason: decision.reason
-        });
-      }
-      return new Set(decisions.filter(decision => decision.allowed).map(decision => decision.docId));
-    };
-
     const allowedIds = await authorize(candidateDocIds);
     if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
-    const linked = this.linkedCandidates(candidates, allowedIds, plan, audit, within);
+    const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
+    const allowedHits = candidates.filter(item => allowedIds.has(item.docId));
+    // Outside a project, a weak partial match drops out before its links are followed, and so does one that doesn't
+    // name the issue the question names.
+    const hits = within ? allowedHits : namedIssueHits(coveringHits(allowedHits, item =>
+      asksForHistory || this.index.documents.get(item.docId)?.metadata.status !== "superseded"), trimmed, docId => {
+      const doc = this.index.documents.get(docId);
+      return doc ? `${doc.title}\n${doc.content}` : "";
+    });
+    const linked = this.linkedCandidates(candidates, new Set(hits.map(item => item.docId)), plan, audit, within);
     const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
     const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
-      ...candidates.filter(item => allowedIds.has(item.docId)),
+      ...hits,
       ...linked.filter(item => linkedAllowed.has(item.docId))
     ];
-    const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
     const currentCandidates = authorizedCandidates.filter(item =>
       this.index.documents.get(item.docId)?.metadata.status !== "superseded");
     const answerCandidates = balanceBySource(!asksForHistory && currentCandidates.length ? currentCandidates : authorizedCandidates,
@@ -491,12 +538,19 @@ export class Brain {
       generated = await this.fallbackLlm.generate(context, trimmed);
       fromModel = false;
     }
-    let answer = groundedOutput(generated, citationMap, evidence);
-    // Nothing the model wrote was copied word for word from the sources: answer as if no model were set.
-    if (fromModel && answer.text === NO_RESULT) {
+    // Each line must say only what a passage it cites says (packages/retrieval/src/grounding.ts).
+    let checked = checkAnswer(generated, citationMap, evidence);
+    const leftOut = checked.report.removed;
+    let fellBack = false;
+    // Nothing the model wrote is backed by the sources: answer as if no model were set.
+    if (fromModel && checked.answer.text === NO_RESULT) {
       audit("llm_fallback", { reason: "ungrounded" });
-      answer = groundedOutput(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+      checked = checkAnswer(await this.fallbackLlm.generate(context, trimmed), citationMap, evidence);
+      fellBack = true;
     }
+    // After a fallback the asker isn't told about the model's lines, which would say which writer answered (D57).
+    const answer = fellBack && checked.answer.check
+      ? { ...checked.answer, check: { ...checked.answer.check, removed: [] } } : checked.answer;
     let outputUser = user;
     if (revalidateUser) {
       try {
@@ -523,9 +577,29 @@ export class Brain {
       answer: answer.text,
       documents: answer.citations.map(citation => this.auditDocument(citation.docId)),
       citationIds: answer.citations.map(citation => citation.chunkId),
-      empty: answer.text === NO_RESULT
+      empty: answer.text === NO_RESULT,
+      // What the checker kept, and what it left out with the text and the reason, for compliance (D63).
+      ...(checked.report.lines.length || leftOut.length ? { check: {
+        lines: checked.report.lines.map(line => line.kind), removed: leftOut, ...(fellBack ? { fallback: true } : {})
+      } } : {})
     });
     return scope ? { ...answer, scope } : answer;
+  }
+
+  /**
+   * The one project a question names: every distinctive word of its name, the master page's title, is in the question.
+   * None when it names two or more. Its items are counted as the workspace counts them, before any access check.
+   */
+  private namedProject(question: string): Project | undefined {
+    const asked = new Set(terms(question));
+    const docs = [...this.index.documents.values()].filter(doc => !doc.deletedAt);
+    const named = docs.filter(doc => doc.source === "confluence" && doc.metadata.label === "master" && doc.metadata.space)
+      .filter(master => {
+        const words = distinctiveWords(master.title.replace(/\s+master page$/i, ""));
+        return words.length > 0 && words.every(word => asked.has(word));
+      });
+    if (named.length !== 1) return undefined;
+    return projectsFor(docs.map(doc => ({ ...doc, links: doc.links ?? [] }))).find(item => item.masterDocId === named[0].docId);
   }
 
   /** The items one link away, in either direction, that still exist: what this item links to, and what links to it. */
@@ -663,8 +737,9 @@ export class Brain {
     const inProject = issues.filter(issue => issue.metadata.project === project);
     const model = inProject.find(issue => declared.includes(issue.docId)) ??
       [...inProject].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
-    const permissions = model && await this.connectors.jira.fetchPermissions(model.docId);
-    if (!model || !permissions) throw new Error("Unknown document");
+    const modelPermissions = model && await this.connectors.jira.fetchPermissions(model.docId);
+    if (!model || !modelPermissions) throw new Error("Unknown document");
+    const permissions = this.narrowedToThread(modelPermissions, model.tier, threadDocId);
     const numbers = (await this.connectors.jira.listIds()).map(id => id.match(new RegExp(`^jira:${project}-(\\d+)$`))?.[1])
       .filter((value): value is string => Boolean(value)).map(Number);
     const key = `${project}-${Math.max(0, ...numbers) + 1}`;
@@ -678,6 +753,26 @@ export class Brain {
     await this.sync("jira");
     this.audit.append("task_created", actor.id, { ...this.auditDocument(doc.docId), fromDocId: threadDocId });
     return { docId: doc.docId, title: doc.title };
+  }
+
+  /**
+   * The task quotes the thread, so its readers must be a subset of the thread's readers. When the model issue would
+   * let anyone in who can't open the thread, the permissions shrink to exactly the people who can open both.
+   */
+  private narrowedToThread(model: SourcePermission, tier: Tier, threadDocId: string): SourcePermission {
+    const probe = { docId: "task-audience", permissions: model, tier };
+    const modelGrants = new FgaAdapter();
+    modelGrants.upsert(probe);
+    const both = this.users.filter(user => modelGrants.check(user, probe.docId).allowed);
+    const readers = both.filter(user => this.fga.check(user, threadDocId).allowed);
+    if (readers.length === both.length) return model;
+    const jiraIdentity = (user: User) => user.platformIdentities?.jira;
+    return {
+      users: readers.map(user => user.email), groups: [], public: false,
+      native: model.native?.source === "jira"
+        ? { ...model.native, issueViewers: readers.map(jiraIdentity).filter((id): id is string => Boolean(id)) }
+        : model.native
+    };
   }
 
   /** Marks a Jira task done, on mock sources only. A status is metadata, so nothing is re-chunked or re-embedded. */
@@ -714,6 +809,42 @@ export class Brain {
     connector.updatePermissions(docId, permissions);
     await this.sync(connector.source);
     this.audit.append("native_permission_changed", actor.id, { ...this.auditDocument(docId) });
+  }
+
+  /** An explicit block: the person loses this document whatever the source, the tier or any grant would allow. */
+  async blockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.block(docId, userId);
+    this.audit.append("user_blocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  async unblockUser(actor: User, docId: string, userId: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.unblock(docId, userId);
+    this.audit.append("user_unblocked", actor.id, { ...this.auditDocument(docId), userId });
+    await this.persist();
+  }
+
+  /** Lets one person past the tier of a restricted document, for a stated reason, until a date at most 90 days away. The admin who approves it is its owner. */
+  async grantRestricted(actor: User, docId: string, userId: string, reason: string, expiresAt: string): Promise<void> {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    if (!this.user(userId)) throw new Error("Unknown user");
+    this.fga.grantRestricted(docId, { userId, owner: actor.id, reason: reason.trim(), expiresAt });
+    this.audit.append("restricted_grant_created", actor.id, { ...this.auditDocument(docId), userId, reason: reason.trim(), expiresAt });
+    await this.persist();
+  }
+
+  /** Removes restricted grants that have ended, and records each one. */
+  sweepRestrictedGrants(now = new Date()): void {
+    for (const item of this.fga.sweepExpired(now)) {
+      this.audit.append("restricted_grant_expired", "sync", { ...this.auditDocument(item.docId), userId: item.userId, owner: item.owner });
+    }
   }
 
   removeUserFromGroup(actor: User, userId: string, group: string): void {
@@ -840,19 +971,36 @@ export class Brain {
     return doc;
   }
 
+  private embeddingReady(): boolean {
+    return Boolean(this.embedding) && (this.embedding?.available?.() ?? true) && Date.now() >= this.embeddingPausedUntil;
+  }
+
+  private pauseEmbedding(): void {
+    this.embeddingPausedUntil = Date.now() + EMBEDDING_PAUSE_MS;
+  }
+
+  /** Embeds this source's documents that still lack vectors: after a failure, a pause or a restart. */
+  private async retryMissingEmbeddings(source: Source): Promise<void> {
+    for (const doc of [...this.index.documents.values()]) {
+      if (!this.embeddingReady()) return;
+      if (doc.source !== source || doc.deletedAt || this.index.semanticCount(doc.docId) === doc.chunks.length) continue;
+      await this.persistSearch(doc.docId, false);
+    }
+  }
+
   private async persistSearch(docId: string, contentChanged: boolean): Promise<void> {
     const indexed = this.index.documents.get(docId);
     if (!indexed || indexed.deletedAt) return;
-    const existing = this.index.semanticVectorsFor(docId);
-    // Over its budget, the embedding client is skipped: the document keeps keyword search until it is available.
-    if (this.embedding && (this.embedding.available?.() ?? true) &&
-      (contentChanged || existing.size !== indexed.chunks.length)) {
-      if (!await this.index.refreshSemantic(docId, this.embedding)) {
-        throw new Error("Semantic embedding refresh failed");
-      }
+    // An embedding that fails, or waits out a pause or the budget, never stops sync: the document keeps keyword
+    // search, and a later sync embeds it (retryMissingEmbeddings).
+    let embedded = false;
+    if (this.embeddingReady() && (contentChanged || this.index.semanticCount(docId) !== indexed.chunks.length)) {
+      embedded = await this.index.refreshSemantic(docId, this.embedding!);
+      if (!embedded) this.pauseEmbedding();
     }
     if (this.supabase) {
-      const rewriteChunks = contentChanged || !this.supabaseSynced.has(docId);
+      // Vectors that arrive late rewrite the chunks, so Supabase's search gets them too.
+      const rewriteChunks = contentChanged || embedded || !this.supabaseSynced.has(docId);
       try {
         await this.supabase.syncDocument(indexed, this.index.semanticVectorsFor(docId), rewriteChunks);
         this.supabaseSynced.add(docId);
@@ -863,7 +1011,17 @@ export class Brain {
     }
   }
 
+  /** A source that errors counts as denied for this document, so the other sources still answer. */
   private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
+    try {
+      return await this.checkedLiveDocument(user, docId);
+    } catch {
+      this.audit.append("source_check_failed", user.id, { ...this.auditDocument(docId) });
+      return undefined;
+    }
+  }
+
+  private async checkedLiveDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
     if (this.connections.get(connector.source)?.status === "Not connected") return undefined;
     if (!await connector.checkAccess(user, docId)) {
@@ -925,6 +1083,33 @@ export class Brain {
     if (!connector) throw new Error("Unknown source");
     return connector;
   }
+}
+
+/**
+ * A question that names an issue ("Why is DB-15 blocked?") is about that issue. Once one of the matches names it, a
+ * match that doesn't drops out unless it covers two or more of the question's other distinctive words, so every
+ * blocked issue of another project doesn't crowd it out. Only the asker's allowed matches are read, so a document they
+ * can't open never changes the result.
+ */
+export function namedIssueHits<T extends SearchCandidate>(hits: T[], question: string, text: (docId: string) => string): T[] {
+  const keys = [...new Set((question.match(/(?<![A-Za-z0-9-])[A-Za-z][A-Za-z0-9]{1,9}-\d+(?![\d-])/g) ?? []).map(key => key.toUpperCase()))];
+  if (!keys.length) return hits;
+  const patterns = keys.map(key => new RegExp(`(?<![A-Za-z0-9-])${key}(?![\\d-])`, "i"));
+  const names = (hit: T) => patterns.some(pattern => pattern.test(text(hit.docId)));
+  return hits.some(names) ? hits.filter(hit => names(hit) || (hit.coverage ?? 0) >= 2) : hits;
+}
+
+/**
+ * The search hits that cover enough of the question: at least half, rounded up, of the distinctive words the best
+ * eligible hit covers. Only hits the asker may open are passed in, so a denied document can't move the bar. A hit
+ * found by meaning alone stays if it is at least as close as the closest hit that clears the bar.
+ */
+export function coveringHits<T extends SearchCandidate>(hits: T[], eligible: (hit: T) => boolean): T[] {
+  const base = hits.some(eligible) ? hits.filter(eligible) : hits;
+  const required = Math.ceil(Math.max(0, ...base.map(hit => hit.coverage ?? 0)) / 2);
+  const close = base.filter(hit => (hit.coverage ?? 0) >= required && hit.semantic !== undefined).map(hit => hit.semantic!);
+  const closest = close.length ? Math.max(...close) : -Infinity;
+  return hits.filter(hit => (hit.coverage ?? 0) >= required || (hit.semantic !== undefined && hit.semantic >= closest));
 }
 
 // The question's time window: it applies to the platforms the question names, or to every platform when it names none.

@@ -1,0 +1,6077 @@
+[
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100000"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100000"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100001"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100001"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100002"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100002"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100003"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100003"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100004"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100004"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100005"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100005"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100006"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100006"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100007"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100007"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100008"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100008"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100009"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100009"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100010"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100010"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100011"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100011"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100012"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100012"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100013"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100013"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100014"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100014"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100015"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100015"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100016"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100016"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100017"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100017"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100018"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100018"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100018"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100019"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100019"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100019"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100020"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100020"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100020"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100021"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100021"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100021"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100022"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100022"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100022"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100023"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100023"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100023"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100024"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100024"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100024"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100025"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100025"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100025"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100026"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100026"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100026"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100027"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100027"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100027"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100028"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100028"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100028"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100029"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100029"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100029"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100030"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100030"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100030"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100031"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100031"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100031"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100032"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100032"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100032"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100033"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100033"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100033"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100034"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100034"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100035"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100035"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100036"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100036"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100037"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100037"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100038"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100038"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100039"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100039"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100040"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100040"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100041"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100041"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100042"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100042"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100043"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100043"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100044"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100044"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100045"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100045"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100046"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100046"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100047"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100048"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100048"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100049"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100049"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100050"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100050"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100051"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100051"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100052"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100052"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100053"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100053"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100054"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100054"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100055"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100055"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100056"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100056"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100057"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100057"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100058"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100058"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100059"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100060"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100061"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100062"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100062"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100062"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100063"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100063"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100063"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100064"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100064"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100064"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100065"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100065"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100065"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100066"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100066"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100066"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100067"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100067"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100067"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100068"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100068"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100068"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100069"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100069"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100069"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100070"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100070"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100070"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100071"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100071"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100071"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100072"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100072"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100072"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100072"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100073"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100073"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100073"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100073"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100074"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100074"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100074"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100074"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100075"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100075"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100075"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100075"
+  },
+  {
+    "user": "group:eng-leads#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100076"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100077"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100077"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100077"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100077"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100078"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100078"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100078"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100078"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100079"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100079"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100079"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100079"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100080"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100080"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100080"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100080"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100081"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100081"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100081"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100081"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100082"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100082"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100082"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100082"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100083"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100083"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100083"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100083"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100084"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100084"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100084"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100084"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100085"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100085"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100085"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100085"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100086"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100086"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100086"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100086"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100087"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100087"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100087"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100087"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100088"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100088"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100088"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100088"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100089"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100089"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100089"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100089"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100090"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100090"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100090"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100090"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100091"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100091"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100091"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100091"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100092"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100092"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100092"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100092"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100093"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100093"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100093"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100093"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100094"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100094"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100094"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100094"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100095"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100095"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100095"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100095"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100096"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100096"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100096"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100096"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100097"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100097"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100097"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100097"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100098"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100098"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100098"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100098"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100099"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100099"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100099"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100099"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100100"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100100"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100100"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100100"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100101"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100101"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100101"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100101"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100102"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100102"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100102"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100102"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100103"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100103"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100103"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100103"
+  },
+  {
+    "user": "group:eng-leads#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100104"
+  },
+  {
+    "user": "group:eng-leads#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100105"
+  },
+  {
+    "user": "group:eng-leads#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100106"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100107"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100108"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100109"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100110"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100111"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100112"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100113"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100114"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100114"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100115"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100115"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100116"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100116"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100117"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100117"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100118"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100118"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100119"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100119"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100120"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100120"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100121"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100121"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100122"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100122"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100123"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100123"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100124"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100125"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100126"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100127"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100128"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100129"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100130"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100131"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100132"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100133"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100134"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100135"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100136"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100137"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100138"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:confluence:100139"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100140"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100140"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100140"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100141"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100141"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100141"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100142"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100142"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100142"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100143"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100143"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100143"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100144"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100144"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100144"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100145"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100145"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100145"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100146"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100146"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100146"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100147"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100147"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100147"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100148"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:confluence:100148"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:confluence:100148"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:11OTrlOnJma4Glby"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:11OTrlOnJma4Glby"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:11Zh7lMNUn3TVvzc"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:11Zh7lMNUn3TVvzc"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:11izJgoAwe6ywkbE"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:11izJgoAwe6ywkbE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:11izJgoAwe6ywkbE"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:12PltD28Irkc4e8k"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:12Ty6WyRdqpI83Pl"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:12Ty6WyRdqpI83Pl"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:12XajTadTD2tC8Kq"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:12XajTadTD2tC8Kq"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:12XajTadTD2tC8Kq"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:12XajTadTD2tC8Kq"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:12iqAq8sR8L7kO7V"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:12iqAq8sR8L7kO7V"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:12tMEbyENwvYR5w7"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:12tMEbyENwvYR5w7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:12tMEbyENwvYR5w7"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:136L81vTiMap5rSi"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:136L81vTiMap5rSi"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:136L81vTiMap5rSi"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:13ArKiWNUXFeJ2x5"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:13ArKiWNUXFeJ2x5"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:13ZgLYBxurfHMz7o"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:13ZgLYBxurfHMz7o"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:154pvuskEF7J8Dls"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:160PQ50Ic0A5RSLd"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:160PQ50Ic0A5RSLd"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:16akFzluqvZptvJ6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:16cv5HRmGIp0CQpP"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:16cv5HRmGIp0CQpP"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:16vCCiCwRoVaW0nX"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:16vCCiCwRoVaW0nX"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:17gTHjgIXzS1ZzvU"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:17gTHjgIXzS1ZzvU"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:17pW4vtASww4BQkO"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:17pW4vtASww4BQkO"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:drive:17pW4vtASww4BQkO"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:17w2iAu0xfwehyRw"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:17w2iAu0xfwehyRw"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:18DyvdEUCw4ubnHj"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:18DyvdEUCw4ubnHj"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:18DyvdEUCw4ubnHj"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1AWR3im8lVTMCj6Q"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1AWR3im8lVTMCj6Q"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BHKopJGflGbLvMK"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BHKopJGflGbLvMK"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BHKopJGflGbLvMK"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1Bs4c9CvNO5gUrRw"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1Bs4c9CvNO5gUrRw"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1Bs4c9CvNO5gUrRw"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Bs4c9CvNO5gUrRw"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BsQBxJkMm57lo9W"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BsQBxJkMm57lo9W"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1BsQBxJkMm57lo9W"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1COZHiLRDsKUpNoE"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1COZHiLRDsKUpNoE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1COZHiLRDsKUpNoE"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ChOKgappP0hGBI5"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ChOKgappP0hGBI5"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:drive:1CxCZvophnjLdDA7"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DMkhMM1p5pt63gy"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DMkhMM1p5pt63gy"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DMkhMM1p5pt63gy"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DURIABbT4G6jg6y"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DURIABbT4G6jg6y"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DURIABbT4G6jg6y"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:drive:1DasxEL7mGZfpDmX"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Dyt1Y3k7wIu3OOt"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Dyt1Y3k7wIu3OOt"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1E8v0TPSR6trc0K4"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1E8v0TPSR6trc0K4"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1EDiEjBVdv3RQ6lL"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1EDiEjBVdv3RQ6lL"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1F1VmUqDWM9XBFOF"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1F1VmUqDWM9XBFOF"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1FUoAb6RQZLrgfzC"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Fa9QAeoIGaiIQFw"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Fa9QAeoIGaiIQFw"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FgzkupzIOkgZVJT"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FgzkupzIOkgZVJT"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FgzkupzIOkgZVJT"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FgzkupzIOkgZVJT"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FwYqd1TmLvQgmVe"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1FwYqd1TmLvQgmVe"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1GNNaysWyggRrHOZ"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1GNNaysWyggRrHOZ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1GNNaysWyggRrHOZ"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1HmccR742UJfMtb6"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1HmccR742UJfMtb6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1HmccR742UJfMtb6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1HuZ4l15wFVItaz2"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1HuZ4l15wFVItaz2"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ITUdFJtMRQVrNDW"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ITUdFJtMRQVrNDW"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1IcLAufxzVWhaoIq"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1IcLAufxzVWhaoIq"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1JFtxtvFNMp7gtbI"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1JFtxtvFNMp7gtbI"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1JFtxtvFNMp7gtbI"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1KsvmAY9eFwvMUtP"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1KsvmAY9eFwvMUtP"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1KsvmAY9eFwvMUtP"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1KsvmAY9eFwvMUtP"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:drive:1KtsLUKX3eptxPli"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Lh3WFPYyfJNc2nd"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Lh3WFPYyfJNc2nd"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MG5M31DTmEhH6nn"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MG5M31DTmEhH6nn"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MG5M31DTmEhH6nn"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MG5M31DTmEhH6nn"
+  },
+  {
+    "user": "user:jonas.wagner@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1MIGvey5r3TX1353"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MIGvey5r3TX1353"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MIGvey5r3TX1353"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MIGvey5r3TX1353"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MXDan2cx6iFcDXW"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1MXDan2cx6iFcDXW"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Mw75I4ESzc4JSQs"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Mw75I4ESzc4JSQs"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Mw75I4ESzc4JSQs"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1N8gFyx1UKZbQa2d"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1N8gFyx1UKZbQa2d"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1NaDNh124tlaYqyu"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1NaDNh124tlaYqyu"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1OGWbAuioei3qb2W"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1OGWbAuioei3qb2W"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1PRAg0TmJhlOyOPO"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1PRAg0TmJhlOyOPO"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1PRAg0TmJhlOyOPO"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1PfA5y7Ohg9i9uBC"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QTr1jH4djMaoONm"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QTr1jH4djMaoONm"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QrQAzVSNNkt8O3G"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QrQAzVSNNkt8O3G"
+  },
+  {
+    "user": "user:jonas.wagner@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1QzT7J7F3SZPkKvP"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QzT7J7F3SZPkKvP"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QzT7J7F3SZPkKvP"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1QzT7J7F3SZPkKvP"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1R8uOU4pCVDXHGbL"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1R8uOU4pCVDXHGbL"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1RR9qLlmCdZAHKF0"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1RR9qLlmCdZAHKF0"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Rb2OZu7jaCApwff"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Rb2OZu7jaCApwff"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Rb2OZu7jaCApwff"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1SHVrsqPlJ3wxx19"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1SHVrsqPlJ3wxx19"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1SsbcC4xXcGmTuuX"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1SsbcC4xXcGmTuuX"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TN2pyGhQcdDe88F"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TN2pyGhQcdDe88F"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TN2pyGhQcdDe88F"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTJeKFSf8pBFEaj"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTJeKFSf8pBFEaj"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTJeKFSf8pBFEaj"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTJeKFSf8pBFEaj"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTOBXXXjc9UynRr"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTOBXXXjc9UynRr"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TTOBXXXjc9UynRr"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TvLUuocRy9NGtxs"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1TvLUuocRy9NGtxs"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1U2ceJeJlGgb2sUO"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1U2ceJeJlGgb2sUO"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1U916OAkyElEu4ar"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1U916OAkyElEu4ar"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1UjkCbvgAsI7tQd9"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1UjkCbvgAsI7tQd9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1UjkCbvgAsI7tQd9"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1VfoR4LGJxNugh0n"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1VfoR4LGJxNugh0n"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1VkTefeEtkyVypcN"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1VkTefeEtkyVypcN"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Vn0FOJAxx3PISUu"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Vn0FOJAxx3PISUu"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Vn0FOJAxx3PISUu"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WVKfsmMXrkrh0fx"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WVKfsmMXrkrh0fx"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WVKfsmMXrkrh0fx"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WuJr7HVQVnFokfX"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WuJr7HVQVnFokfX"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1WuJr7HVQVnFokfX"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XGjitiuFfJjDcF2"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XGjitiuFfJjDcF2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XGjitiuFfJjDcF2"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XNQxdr9yhoUQlSj"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XNQxdr9yhoUQlSj"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XSW7lsTeneUW5Ji"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XSW7lsTeneUW5Ji"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1XSW7lsTeneUW5Ji"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Xy8ysWKdWJ4vA08"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Xy8ysWKdWJ4vA08"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1YGapqfNleLBlKrE"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1YGapqfNleLBlKrE"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1YQruoNfNO2aAPCF"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1YQruoNfNO2aAPCF"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Ym7QNXI1djwIGMc"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Ym7QNXI1djwIGMc"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Ym7QNXI1djwIGMc"
+  },
+  {
+    "user": "user:marco.ito@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1Z0t6LLozSq0XWan"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Z0t6LLozSq0XWan"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Z0t6LLozSq0XWan"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZHUSu9KE4FwQR79"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZHUSu9KE4FwQR79"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZLpwXAePjAnjhpS"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZLpwXAePjAnjhpS"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZRAEgeXThwYp77H"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZRAEgeXThwYp77H"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZRAEgeXThwYp77H"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ZRAEgeXThwYp77H"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Zen4A935QxmguFU"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Zen4A935QxmguFU"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1Zen4A935QxmguFU"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1aAg8seo8WZxwPcu"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1aAg8seo8WZxwPcu"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1aM9IRmnZ8WWZlfJ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1aM9IRmnZ8WWZlfJ"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1aYAf9is3k6bg6bf"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1aYAf9is3k6bg6bf"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:drive:1aYAf9is3k6bg6bf"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1bVcVq7BekFFHfoE"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1bVcVq7BekFFHfoE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1bVcVq7BekFFHfoE"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1c3XujEay4id7slZ"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1c3XujEay4id7slZ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1c3XujEay4id7slZ"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cMKhSDcZKhKg3Nh"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cMKhSDcZKhKg3Nh"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cMKhSDcZKhKg3Nh"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cfDlFRtRJsBNXlI"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cvz4o152UUrqDqL"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cvz4o152UUrqDqL"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1cvz4o152UUrqDqL"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dFvGyIU6opafSDc"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dFvGyIU6opafSDc"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dFvGyIU6opafSDc"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dPoUtnOWo7mpqrh"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dPoUtnOWo7mpqrh"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1djzFoAkHLB0CrT5"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1djzFoAkHLB0CrT5"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1djzFoAkHLB0CrT5"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1dmh0zxvp9S4ixy6"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dz293SB6smJIl5y"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1dz293SB6smJIl5y"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1eJFLa9uabuK26h9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1eJFLa9uabuK26h9"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1ePCq7Z0UF0avN1Y"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1edL237HQAKVGULE"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1edL237HQAKVGULE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1edL237HQAKVGULE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1etMfatYzRWR0u0z"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1etMfatYzRWR0u0z"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1gld6HDNQ0rHk3gR"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1gld6HDNQ0rHk3gR"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1hfZCJNirfAjXAMS"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1hfZCJNirfAjXAMS"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1iVCArRPZK75vEgj"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1iVCArRPZK75vEgj"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1iVCArRPZK75vEgj"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1j4pOzMqqETPvmDG"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1j4pOzMqqETPvmDG"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1j4pOzMqqETPvmDG"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1j4pOzMqqETPvmDG"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1jMZydHGxdfH23TZ"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1jMZydHGxdfH23TZ"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:drive:1jrzcixcO6j94EkG"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1jxudYhZZJ3Urql0"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1jxudYhZZJ3Urql0"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kHAEfaEtNjPtorE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kHAEfaEtNjPtorE"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kS4hN9OJvNdmL1a"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kS4hN9OJvNdmL1a"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kdmEwcyYuoUjrDQ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kdmEwcyYuoUjrDQ"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kyytCz182xiYhaH"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1kyytCz182xiYhaH"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1l7C4TGCtfdEL236"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1l7C4TGCtfdEL236"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1lQ69D7QcbRcuQb2"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1lQ69D7QcbRcuQb2"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ma6cTIYHiEqgJYb"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ma6cTIYHiEqgJYb"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1mudHEOz3Q7Dh1yN"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nCAMBAuGH8cfjDl"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nCAMBAuGH8cfjDl"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nFqXD209xHs1iGt"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nFqXD209xHs1iGt"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nFqXD209xHs1iGt"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nFqXD209xHs1iGt"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nZGIKmpxg4yyn3j"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nZGIKmpxg4yyn3j"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nZGIKmpxg4yyn3j"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nZGIKmpxg4yyn3j"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1nuz2Tf4v3FwXF2Z"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1nuz2Tf4v3FwXF2Z"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1nuz2Tf4v3FwXF2Z"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1nuz2Tf4v3FwXF2Z"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1p2IkFLJDQUTUkl7"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1p2IkFLJDQUTUkl7"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1p69f6iyV4mpemFr"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1p69f6iyV4mpemFr"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1p69f6iyV4mpemFr"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pNcGW9ALQdc6ffw"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pVChIBV9juYWFgZ"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pVChIBV9juYWFgZ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pVChIBV9juYWFgZ"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pj87Vu5hBecMrUP"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1pj87Vu5hBecMrUP"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1q2FipSCQfY3Jpx5"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1q2FipSCQfY3Jpx5"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1q2bemWiz2jANs5m"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1qr518y278LYcc87"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1qr518y278LYcc87"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1qr518y278LYcc87"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1quuCWTxzkd0zYdx"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1quuCWTxzkd0zYdx"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1quuCWTxzkd0zYdx"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:drive:1r6ucObKd3Xfrxk2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1r6ucObKd3Xfrxk2"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1rDiCXMr0li5OCfJ"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1rDiCXMr0li5OCfJ"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1sHcKOBOCLOCWrwj"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1sHcKOBOCLOCWrwj"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1sHcKOBOCLOCWrwj"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1sLYxRWgS8HEungz"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ttnK4nAbQBn7yLy"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ttnK4nAbQBn7yLy"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uGNara0gE4UXobI"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uGNara0gE4UXobI"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uGNara0gE4UXobI"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:drive:1uNBl5K5Q2inrdq1"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uTLFetNU2MDmRV0"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uTLFetNU2MDmRV0"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1uTLFetNU2MDmRV0"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ubQVMZ62PEyVkFP"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1ubQVMZ62PEyVkFP"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1v2jMMfHw7UactxV"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1v2jMMfHw7UactxV"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1v2jMMfHw7UactxV"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1v3OKFhANd6pIG3E"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:drive:1v3OKFhANd6pIG3E"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1xkFiWuf88jNNxVC"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1xkFiWuf88jNNxVC"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1xkFiWuf88jNNxVC"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1xkFiWuf88jNNxVC"
+  },
+  {
+    "user": "user:yuki.oyelaran@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1y9qcDKlGmEohjRa"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1y9qcDKlGmEohjRa"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1y9qcDKlGmEohjRa"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1y9qcDKlGmEohjRa"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1yC7rtL7QzLVY6rO"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1yC7rtL7QzLVY6rO"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1yC7rtL7QzLVY6rO"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:drive:1z5Okk5mpX25Plwo"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:drive:1z5Okk5mpX25Plwo"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zIXoywJjoRSXOZA"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zIXoywJjoRSXOZA"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zIXoywJjoRSXOZA"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1zM48JvQY8xqv7BN"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:drive:1zM48JvQY8xqv7BN"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zM48JvQY8xqv7BN"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zZgLJn4S5gAyK0x"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zZgLJn4S5gAyK0x"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:drive:1zZgLJn4S5gAyK0x"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-1"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-1"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-1"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-10"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-10"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-10"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-11"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-11"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-11"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-12"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-12"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-12"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-13"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-13"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-13"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-14"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-14"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-14"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-2"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-2"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-3"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-3"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-3"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-4"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-4"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-4"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-5"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-5"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-5"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-6"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-6"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-7"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-7"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-8"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-8"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-8"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-9"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:CARD-9"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-1"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-1"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-10"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-10"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-11"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-11"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-12"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-12"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-13"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-13"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-14"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-14"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-15"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-15"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-16"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-16"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-17"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-17"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-18"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-18"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-19"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-19"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-2"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-20"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-20"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-21"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-21"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-22"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-22"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-23"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-23"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-24"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-24"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-25"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-25"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-26"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-26"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-27"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-27"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-28"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-28"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-3"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-3"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-4"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-4"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-5"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-5"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-6"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-7"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-8"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-8"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:DATA-9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-1"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-1"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-10"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-11"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-11"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-12"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-12"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-13"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-13"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-14"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-14"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-15"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-15"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-16"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-16"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-17"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-17"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-18"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-18"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-19"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-19"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-2"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-20"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-20"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-21"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-21"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-22"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-22"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-3"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-3"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-4"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-4"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-5"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-5"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-6"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-7"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-8"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-8"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:jira:KYC-9"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-1"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-1"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-1"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-10"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-10"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-10"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-11"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-11"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-11"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-12"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-12"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-12"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-13"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-13"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-13"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-14"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-14"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-14"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-15"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-15"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-15"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-16"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-16"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-16"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-17"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-17"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-17"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-18"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-18"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-18"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-19"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-19"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-19"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-2"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-2"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-20"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-20"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-20"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-21"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-21"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-21"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-22"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-22"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-22"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-23"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-23"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-23"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-24"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-24"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-24"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-25"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-25"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-25"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-26"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-26"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-26"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-27"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-27"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-27"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-28"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-28"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-28"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-29"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-29"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-29"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-3"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-3"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-3"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-30"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-30"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-30"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-31"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-31"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-31"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-32"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-32"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-32"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-4"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-4"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-4"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-5"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-5"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-5"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-6"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-6"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-7"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-7"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-8"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-8"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-8"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-9"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-9"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:jira:MOB-9"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-1"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-1"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-10"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-10"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-11"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-11"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-12"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-12"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-13"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-13"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-14"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-14"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-15"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-15"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-16"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-16"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-17"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-17"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-18"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-18"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-19"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-19"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-2"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-2"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-20"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-20"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-21"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-21"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-22"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-22"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-23"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-23"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-24"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-24"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-25"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-25"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-26"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-26"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-27"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-27"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-28"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-28"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-29"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-29"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-3"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-3"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-30"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-30"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-31"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-31"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-32"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-32"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-33"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-33"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-34"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-34"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-35"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-35"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-36"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-36"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-4"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-4"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-5"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-5"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-6"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-6"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-7"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-7"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-8"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-8"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-9"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:jira:PLAT-9"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-1"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-1"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-1"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-1"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-2"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-2"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-2"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-2"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-3"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-3"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-3"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-3"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-4"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-4"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-4"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-4"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-5"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-6"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-6"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:jira:VEND-6"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-6"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-7"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:jira:VEND-8"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C0P52VRR3"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C0P52VRR3"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C0P52VRR3"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C0P52VRR3"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:slack:C11R0YHAK"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C18Z45QXV"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C18Z45QXV"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:slack:C1AVZW9X8"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C1HMCYGA0"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C1HMCYGA0"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C1X1GTEVY"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C2GNT7RYU"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C312EMLGF"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C312EMLGF"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C312EMLGF"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C312EMLGF"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C38KUAHLW"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C38KUAHLW"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:slack:C3GSK8PFC"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C3TDXYIAN"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C3TDXYIAN"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C3TDXYIAN"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C3TDXYIAN"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C50KAMBWK"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C50KAMBWK"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C50KAMBWK"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C50KAMBWK"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C5DRQCOV4"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C5DRQCOV4"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:slack:C5IO2EUWM"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C5UMKBIUD"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C5UMKBIUD"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:C61XQ4N1O"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C61XQ4N1O"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C61XQ4N1O"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6B0T9NHZ"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6B0T9NHZ"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6B0T9NHZ"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6B0T9NHZ"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6USI99UR"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6USI99UR"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6USI99UR"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6USI99UR"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6Y0KCZOK"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6Y0KCZOK"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6ZBZW637"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6ZBZW637"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6ZBZW637"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:C6ZBZW637"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:C9K8AOI8O"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:C9K8AOI8O"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:slack:C9K8AOI8O"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:C9MXKDKY6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C9MXKDKY6"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:C9RQM75KV"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:slack:C9RQM75KV"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CA69D6IN0"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CA69D6IN0"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CAGJCGLIV"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CAGJCGLIV"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CAVRF76FC"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CAVRF76FC"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CAVRF76FC"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CCFE4CWG2"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CCFE4CWG2"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CDLMQ661E"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CDLMQ661E"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:slack:CDLMQ661E"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CF0DINR9L"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:slack:CF0DINR9L"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CF0DINR9L"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CFA3KJ9AX"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CFC65Y94K"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CFC65Y94K"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CHAG2H5YE"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:slack:CHAG2H5YE"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CHAG2H5YE"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CID8V1UXL"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CID8V1UXL"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CID8V1UXL"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJBG6SW0Y"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJBG6SW0Y"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJXT3FHRB"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJXT3FHRB"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJXT3FHRB"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJZ2NMZQK"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJZ2NMZQK"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CJZ2NMZQK"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:slack:CK3XS4V7P"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLB5J7H8H"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLB5J7H8H"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLB5J7H8H"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLJZ5WHYH"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLJZ5WHYH"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLJZ5WHYH"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLSSIWHIY"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLSSIWHIY"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLSSIWHIY"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLSSIWHIY"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLWY0JDO7"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLWY0JDO7"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CLWY0JDO7"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CMVVR8ITQ"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CMVVR8ITQ"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CMVVR8ITQ"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CMVVR8ITQ"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CN7VR3T2L"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CN7VR3T2L"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CNESFMZOI"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:slack:CNESFMZOI"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CNESFMZOI"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CNXEQS53J"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:slack:CNXEQS53J"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:COFEF7T5M"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:COFEF7T5M"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:COFEF7T5M"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:COHL6P1BQ"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:COHL6P1BQ"
+  },
+  {
+    "user": "group:people-ops#member",
+    "relation": "group_reader",
+    "object": "document:slack:CPDP5N8SX"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CPO81XEEJ"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CPO81XEEJ"
+  },
+  {
+    "user": "user:*",
+    "relation": "public_reader",
+    "object": "document:slack:CQVGBTZ67"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CS85URXDL"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CS85URXDL"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CS85URXDL"
+  },
+  {
+    "user": "group:design#member",
+    "relation": "group_reader",
+    "object": "document:slack:CSKTN63HA"
+  },
+  {
+    "user": "group:finance#member",
+    "relation": "group_reader",
+    "object": "document:slack:CSKTN63HA"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CSKTN63HA"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CTD4JEN86"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CTD4JEN86"
+  },
+  {
+    "user": "user:ada.pereira@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CTS2OCZBO"
+  },
+  {
+    "user": "user:leon.torres@aspire.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CTS2OCZBO"
+  },
+  {
+    "user": "group:interns#member",
+    "relation": "group_reader",
+    "object": "document:slack:CTS2OCZBO"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CW6YN7XT6"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:slack:CW6YN7XT6"
+  },
+  {
+    "user": "group:legal#member",
+    "relation": "group_reader",
+    "object": "document:slack:CWYWB5BHB"
+  },
+  {
+    "user": "group:data#member",
+    "relation": "group_reader",
+    "object": "document:slack:CX4FQHUYQ"
+  },
+  {
+    "user": "group:mobile#member",
+    "relation": "group_reader",
+    "object": "document:slack:CX4FQHUYQ"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CX4FQHUYQ"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CX4FQHUYQ"
+  },
+  {
+    "user": "user:nikolai.berg@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CXQOJCYQX"
+  },
+  {
+    "user": "user:tobias.iyer@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CXQOJCYQX"
+  },
+  {
+    "user": "user:wei@contractor.example",
+    "relation": "direct_reader",
+    "object": "document:slack:CXQOJCYQX"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CXQOJCYQX"
+  },
+  {
+    "user": "group:platform#member",
+    "relation": "group_reader",
+    "object": "document:slack:CXY713T1S"
+  },
+  {
+    "user": "group:sre#member",
+    "relation": "group_reader",
+    "object": "document:slack:CXY713T1S"
+  },
+  {
+    "user": "group:product#member",
+    "relation": "group_reader",
+    "object": "document:slack:CYZRYK04Y"
+  },
+  {
+    "user": "group:risk#member",
+    "relation": "group_reader",
+    "object": "document:slack:CYZRYK04Y"
+  },
+  {
+    "user": "user:david@aspire.example",
+    "relation": "member",
+    "object": "group:data"
+  },
+  {
+    "user": "user:maya@aspire.example",
+    "relation": "member",
+    "object": "group:eng-leads"
+  },
+  {
+    "user": "user:nur@aspire.example",
+    "relation": "member",
+    "object": "group:legal"
+  },
+  {
+    "user": "user:maya@aspire.example",
+    "relation": "member",
+    "object": "group:mobile"
+  },
+  {
+    "user": "user:david@aspire.example",
+    "relation": "member",
+    "object": "group:platform"
+  },
+  {
+    "user": "user:maya@aspire.example",
+    "relation": "member",
+    "object": "group:platform"
+  },
+  {
+    "user": "user:ravi@aspire.example",
+    "relation": "member",
+    "object": "group:platform"
+  },
+  {
+    "user": "user:nur@aspire.example",
+    "relation": "member",
+    "object": "group:risk"
+  },
+  {
+    "user": "user:ravi@aspire.example",
+    "relation": "member",
+    "object": "group:sre"
+  }
+]

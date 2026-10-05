@@ -76,7 +76,9 @@ our code runs.
   - A Management API machine-to-machine application with permission to read and create users and add organization
     members: `AUTH0_MANAGEMENT_CLIENT_ID` and `AUTH0_MANAGEMENT_CLIENT_SECRET`.
   - The database connection's name in `AUTH0_DATABASE_CONNECTION`.
-  - `MOCK_USER_PASSWORDS_JSON`, with one password of 12 or more characters per user ID.
+  - `MOCK_USER_PASSWORDS_JSON`, with one password per user ID. Each needs at least 12 characters and must meet the
+    database connection's password policy (**Authentication → Database →** the connection **→ Authentication
+    Methods → Password**). New connections require at least 15 characters by default.
 
   Set these in your shell for the one-off run, so they don't need to live in `.env.local`:
 
@@ -87,8 +89,19 @@ our code runs.
   pnpm exec tsx --env-file=.env.local data/seed-auth0-users.ts
   ```
 
-  The script reuses existing Auth0 accounts and does not reset their passwords. It prints `Provisioned <id>` for each
-  user.
+  In PowerShell, set them one per line. Keep the JSON in single quotes. The values last until the window closes:
+
+  ```powershell
+  $env:AUTH0_MANAGEMENT_CLIENT_ID = "…"
+  $env:AUTH0_MANAGEMENT_CLIENT_SECRET = "…"
+  $env:AUTH0_DATABASE_CONNECTION = "Username-Password-Authentication"
+  $env:MOCK_USER_PASSWORDS_JSON = '{"ravi":"…","maya":"…","alex":"…","david":"…","nur":"…","wei":"…"}'
+  pnpm exec tsx --env-file=.env.local data/seed-auth0-users.ts
+  ```
+
+  The script reuses existing Auth0 accounts and does not reset their passwords, so a second run is safe. It prints
+  `Provisioned <id>` for each user. If it stops instead, see the seed script errors in section 6. Once all six are
+  provisioned, delete the machine-to-machine application, because its secret was typed into a shell.
 - [ ] Sign in as a **seeded** user, e.g. `ravi@aspire.example`. A personal or newly created account has no directory
       entry, and the API rejects it.
 
@@ -99,6 +112,9 @@ pnpm install
 pnpm dev:sso               # API on 127.0.0.1:3000, Auth0 mode, reads .env.local
 pnpm --dir apps/web dev    # web host on 127.0.0.1:3001 (restart it after workspace UI edits)
 ```
+
+Run each in its own terminal and leave both open. The API prints
+`API ready at http://127.0.0.1:3000 with Auth0 sign-in` once it accepts requests, and the web host prints `Ready`.
 
 `pnpm dev` is still the **demo** API: it accepts `x-demo-user` for curl testing and for the website's demo, and it
 loads no env file. Sign-ins never reach it, because the website sends Auth0 tokens only to `BRAIN_API_URL`.
@@ -150,6 +166,18 @@ loads no env file. Sign-ins never reach it, because the website sends Auth0 toke
 | `AUDIT_SIGNING_KEY_FILE is required for durable audit` | No signing key path is set |
 | `ENOENT … .pem` | The key path is wrong. It's resolved from the repository root. |
 | `Invalid Auth0 configuration` | `AUTH0_ISSUER` isn't exactly `https://AUTH0_DOMAIN/` (check the trailing slash), or the audience or org is empty |
+
+### Seed script errors (`data/seed-auth0-users.ts`)
+
+The script stops at the first refusal and prints the reason Auth0 or Supabase gave. Users provisioned before it
+stopped stay provisioned.
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `User provisioning failed (401): access_denied: Unauthorized` | Auth0 doesn't recognise the Client ID and Secret: they're from another application or tenant, or part of the secret is missing | Copy both again with the copy buttons on the machine-to-machine application's **Settings** |
+| `(403): access_denied: Client is not authorized to access …` | The application isn't authorized for the Auth0 Management API | On the application's **APIs** tab, authorize the **Auth0 Management API** with `read:users`, `create:users` and `create:organization_members` |
+| `(400): … PasswordStrengthError`, `PasswordDictionaryError` or `PasswordNoUserInfoError` | A password breaks the connection's policy: too short or simple, too common, or containing the person's name or email | Choose a longer, less guessable password for that user |
+| `(400)` naming the connection | `AUTH0_DATABASE_CONNECTION` doesn't name a database connection, or the connection isn't enabled for the application | Copy the name from **Authentication → Database**, and enable the application on the connection's **Applications** tab |
 
 ## How the code fits
 

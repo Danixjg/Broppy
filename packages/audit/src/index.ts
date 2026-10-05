@@ -152,7 +152,22 @@ export class AuditLog {
     const loaded = options.initial ?? options.store?.load() ?? { entries: [], batches: [] };
     this.storedEntries = structuredClone(loaded.entries);
     this.storedBatches = structuredClone(loaded.batches);
-    if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid stored audit log");
+    if (!this.verifyChain()) throw new Error(`Invalid stored audit log: entry ${this.firstBrokenSequence()} does not match its hash chain`);
+    if (!this.verifyBatches()) throw new Error("Invalid stored audit log: a sealed batch does not verify");
+  }
+
+  /** The sequence number of the first entry that breaks the chain, or undefined when the chain is intact. */
+  firstBrokenSequence(): number | undefined {
+    let previousHash = GENESIS;
+    for (let i = 0; i < this.storedEntries.length; i++) {
+      const entry = this.storedEntries[i];
+      try {
+        if (!entry || entry.sequence !== i + 1 || entry.previousHash !== previousHash ||
+          !HASH.test(entry.hash) || entry.hash !== entryHash(entry)) return i + 1;
+      } catch { return i + 1; }
+      previousHash = entry.hash;
+    }
+    return undefined;
   }
 
   get entries(): AuditEntry[] {

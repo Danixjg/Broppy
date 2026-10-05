@@ -84,12 +84,17 @@ export interface SearchCandidate {
   docId: string;
   chunkId: string;
   score: number;
+  /** How many of the question's distinctive words the chunk matches: a word and its synonyms count once, and generic
+   * work words not at all. */
+  coverage?: number;
+  /** The chunk's semantic similarity to the question, when both have vectors. */
+  semantic?: number;
 }
 
 export interface AccessDecision {
   docId: string;
   allowed: boolean;
-  reason: "fga" | "source" | "tier";
+  reason: "fga" | "source" | "tier" | "blocked";
 }
 
 export interface AuditEntry {
@@ -138,8 +143,21 @@ export interface QueryScope {
   project?: string;
 }
 
+/** Why the answer checker left a line of the writer's reply out of an answer. */
+export type RemovalReason = "no_citation" | "unknown_citation" | "new_fact" | "changed_meaning" | "new_words" | "wrong_source";
+
+/** What the answer checker found (packages/retrieval, checkAnswer). */
+export interface AnswerCheck {
+  /** One entry per line of the answer's text, in order: copied from its source, or reworded, with the source
+   * sentences that back it. */
+  lines: Array<{ kind: "quoted" | "reworded"; support: string[] }>;
+  /** Lines of the writer's reply that were left out. Only the reason: their text is never part of an answer. */
+  removed: Array<{ reason: RemovalReason }>;
+}
+
 export interface QueryAnswer {
   text: string;
   citations: Citation[];
   scope?: QueryScope;
+  check?: AnswerCheck;
 }

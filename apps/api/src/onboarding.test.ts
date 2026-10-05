@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { Brain } from "./brain.js";
+import type { Persistence } from "./persistence.js";
 it("imports scoped history and disconnect purges documents and grants", async () => {
   const brain = new Brain(); const admin = brain.user("maya")!;
   await brain.connect(admin, "drive");
@@ -77,4 +78,50 @@ it("only an admin of the organisation can list or change what is included", asyn
   const brain = new Brain();
   await expect(brain.listContainers(brain.user("ravi")!, "slack")).rejects.toThrow("Forbidden");
   await expect(brain.setScope(brain.user("ravi")!, "slack", { mode: "all" })).rejects.toThrow("Forbidden");
+});
+
+it("reconnecting a source keeps the scope the admin chose, while a new connection starts at none", async () => {
+  const brain = new Brain(); const admin = brain.user("maya")!;
+  brain.connections.get("jira")!.status = "Not connected";
+  brain.markConnected(admin, "jira");
+  expect(brain.connections.get("jira")!.scope).toEqual({ mode: "none" });
+  await brain.setScope(admin, "jira", { mode: "selected", containers: ["PAY"] });
+  brain.connections.get("jira")!.status = "Error";
+  brain.markConnected(admin, "jira");
+  expect(brain.connections.get("jira")).toMatchObject({ status: "Connected", scope: { mode: "selected", containers: ["PAY"] } });
+  await brain.disconnect(admin, "jira");
+  brain.markConnected(admin, "jira");
+  expect(brain.connections.get("jira")!.scope).toEqual({ mode: "none" });
+});
+
+it("shows why a source is in error, keeps its documents, and clears the reason once it syncs", async () => {
+  const brain = new Brain(); const admin = brain.user("maya")!;
+  await brain.sync("drive");
+  const before = live(brain, "drive").length;
+  const connector = brain.connectors.drive;
+  const discover = connector.discover.bind(connector);
+  connector.discover = async () => { throw new Error("drive credential was rejected; reconnect the source"); };
+  await expect(brain.sync("drive")).rejects.toThrow("reconnect");
+  expect(brain.connections.get("drive")).toMatchObject({ status: "Error", error: "drive credential was rejected; reconnect the source" });
+  expect(live(brain, "drive").length).toBe(before);
+  connector.discover = discover;
+  await brain.sync("drive");
+  expect(brain.connections.get("drive")).toMatchObject({ status: "Live", error: undefined });
+});
+
+it("pressing Connect again in the demo keeps the scope already chosen", async () => {
+  const brain = new Brain(); const admin = brain.user("maya")!;
+  await brain.setScope(admin, "slack", { mode: "selected", containers: ["DB"] });
+  await brain.connect(admin, "slack");
+  expect(brain.connections.get("slack")!.scope).toEqual({ mode: "selected", containers: ["DB"] });
+});
+it("keeps a disconnected source's raw documents out of the saved state", async () => {
+  let snapshot: { connectorDocuments?: Array<{ source: string }> } = {};
+  const persistence = { loadState: async () => undefined, saveState: async (value: typeof snapshot) => { snapshot = structuredClone(value); } } as unknown as Persistence;
+  const brain = new Brain(undefined, { persistence });
+  await brain.syncAll(); await brain.persist();
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "slack")).toBe(true);
+  await brain.disconnect(brain.user("maya")!, "slack");
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "slack")).toBe(false);
+  expect(snapshot.connectorDocuments?.some(doc => doc.source === "jira")).toBe(true);
 });

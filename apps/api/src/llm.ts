@@ -31,15 +31,32 @@ export class ModelCallError extends Error {
 export const REQUEST_TIMEOUT_MS = 60_000;
 
 // All speak the same chat completions API. Hunyuan (Tencent's China site) has its search enhancement turned off, so
-// answers use only our context; TokenHub is Tencent's international model service.
+// answers use only our context; TokenHub is Tencent's international model service. Sampling stays at each model's
+// default: OpenAI recommends temperature 1.0 for gpt-oss, and forcing 0 can make a reasoning model loop. A fixed seed
+// was tried on Groq and didn't make the same question get the same answer, so answers vary from run to run.
 const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unknown> }> = {
   hunyuan: { baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", extra: { enable_enhancement: false } },
   tokenhub: { baseUrl: "https://tokenhub-intl.tencentcloudmaas.com/v1", extra: {} },
   groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
 };
 
-const SYSTEM = "Answer with exact sentences copied from the supplied context, one sentence per line. Cite each " +
-  "sentence with its context citation in square brackets. If the context cannot answer, say so.";
+// The model may reword lightly (D64): the answer checker (packages/retrieval/src/grounding.ts) keeps a line only when
+// the passage it cites backs every fact in it. A run on 3 Oct answered half of scenario 1 (the Slack blocker, not the
+// Jira status), so the rules below also ask it to cover the whole question.
+const SYSTEM = [
+  "You answer a question about a company's work using only the context passages supplied, which the asker may see.",
+  "Rules:",
+  "1. Copy sentences from the passages where you can. You may shorten a sentence or join two from one passage, but " +
+    "keep every name, number, date, issue key and status word exactly as written, and add nothing the passages don't " +
+    "say. Write one sentence per line, each followed by its passage's citation in square brackets.",
+  "2. Answer every part of the question. If it asks about several things, such as a project's status and its " +
+    "blockers, include sentences for each.",
+  "3. Use every passage that helps answer the question, not just the first. Leave out passages unrelated to it.",
+  "4. Keep status labels that begin a passage, such as \"DB-15 (blocked):\", as part of the copied sentence.",
+  "5. When a passage lists steps, include every step, in order.",
+  "6. Put the most direct answer first, and use at most eight sentences.",
+  "7. If the passages can't answer the question, say so in one line."
+].join("\n");
 
 /** For a provider that doesn't report usage: about three characters a token, rounded up, so the count errs high. */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 3);

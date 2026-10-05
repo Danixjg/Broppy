@@ -19,10 +19,10 @@ flowchart TB
     DemoAPI["demo-api: PUBLIC_DEMO,<br/>fictional data only"]
   end
 
-  TokenHub["TokenHub: question and<br/>authorized passages<br/>only; free tokens,<br/>post-paid off"]
   Supabase[("Supabase: directory,<br/>state, chunks, Vault<br/>tokens, audit rows with<br/>no updates or deletes")]
   Sources["Sources: mock in both<br/>APIs; live Slack, Jira,<br/>Confluence and Drive<br/>for SSO only"]
-  Groq["Groq free plan: no<br/>card on file; the<br/>demo's 100 model<br/>answers a day"]
+  Groq["Groq free plan: no<br/>card on file; question<br/>and authorized passages<br/>only; a daily allowance<br/>per API"]
+  Embed["Cloudflare Workers AI,<br/>optional: embeds every<br/>chunk and question;<br/>free plan, no training"]
   Anchor["External write-once<br/>root anchor"]
 
   Visitor -->|"HTTPS and a cookie"| Session
@@ -33,11 +33,13 @@ flowchart TB
   Caddy --> DemoAPI
   Usage --- SsoAPI
   Usage --- DemoAPI
-  SsoAPI -.-> TokenHub
+  SsoAPI -.-> Groq
   SsoAPI --> Supabase
   SsoAPI --> Sources
   DemoAPI --> Sources
   DemoAPI -.-> Groq
+  SsoAPI -.-> Embed
+  DemoAPI -.-> Embed
   Supabase -.->|"not implemented"| Anchor
 
   class Session,Proxy,SsoAPI,DemoAPI guard

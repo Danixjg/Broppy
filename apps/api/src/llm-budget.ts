@@ -1,6 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { LlmClient, SemanticEmbeddingClient } from "@brain/retrieval";
-import { createHunyuanEmbeddingClientFromEnv } from "./embedding.js";
+import { embeddingFromEnv } from "./embedding.js";
 import { chatLlmFromEnv, estimateTokens, ModelCallError, ModelUnavailable, positiveInteger, type TokenUsage }
   from "./llm.js";
 
@@ -211,7 +211,7 @@ export class BudgetedEmbedding implements SemanticEmbeddingClient {
  */
 export function modelsFromEnv(env: NodeJS.ProcessEnv = process.env): { llm?: BudgetedLlm; embedding?: BudgetedEmbedding } {
   const chat = chatLlmFromEnv(env);
-  const embedder = createHunyuanEmbeddingClientFromEnv(env);
+  const embedder = embeddingFromEnv(env);
   const file = env.LLM_USAGE_FILE?.trim() || undefined;
   const limits: BudgetLimits = {
     chatTokens: positiveInteger(env.LLM_TOKEN_BUDGET, "LLM_TOKEN_BUDGET"),
@@ -225,7 +225,8 @@ export function modelsFromEnv(env: NodeJS.ProcessEnv = process.env): { llm?: Bud
     const name = chat.provider === "tokenhub" ? "TokenHub" : "Hunyuan";
     throw new Error(`${name} needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET, so it stops before its free tokens run out`);
   }
-  if (embedder && (!file || limits.embeddingTokens === undefined)) {
+  // Cloudflare's free plan refuses calls past its daily allocation instead of billing, so its budget is optional.
+  if (embedder?.provider === "hunyuan" && (!file || limits.embeddingTokens === undefined)) {
     throw new Error("Hunyuan embeddings need LLM_USAGE_FILE and EMBEDDING_TOKEN_BUDGET, so they stop before their " +
       "free tokens run out");
   }

@@ -22,3 +22,11 @@ it("reads the same relative windows as questions, including 'past'", () => {
   expect(window("everything ravi accessed in the past 30 days")).toMatchObject({ from: "2026-09-15T00:00:00.000Z" });
   expect(window("denied access yesterday")).toMatchObject({ from: "2026-10-14T00:00:00.000Z", to: "2026-10-14T23:59:59.999Z" });
 });
+
+it("matches nobody for a user who is not in the directory", () => {
+  const brain = new Brain();
+  brain.audit.append("query_received", "ravi", {});
+  const result = searchAudit(brain.audit.entries, new URLSearchParams({ q: "everything user 'jdoe' accessed in the last 30 days" }), brain.users);
+  expect(result.filters.user).toBe("jdoe");
+  expect(result.entries).toEqual([]);
+});

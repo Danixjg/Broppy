@@ -3,8 +3,9 @@ import { AuditLog } from "@brain/audit";
 import type { RemoteFgaAdapter } from "@brain/fga-adapter";
 import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
-import { Brain } from "./brain.js";
+import { Brain, coveringHits, namedIssueHits } from "./brain.js";
 import { ModelUnavailable } from "./llm.js";
+import { actorTrace } from "./server.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
 
 describe("Internal Brain security and sync", () => {
@@ -25,6 +26,31 @@ describe("Internal Brain security and sync", () => {
     const answer = await brain.query(brain.user("ravi")!, "What does PAY-101 need before cutover?");
     expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
     expect(answer.citations.map(citation => citation.docId)).not.toContain("drive:cutover-duplicate");
+  });
+
+  it("still answers from the other sources when one source's access check throws", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    vi.spyOn(brain.connectors.slack, "checkAccess").mockRejectedValue(new Error("Slack is down"));
+    const answer = await brain.query(brain.user("ravi")!, "What does PAY-101 need before cutover?");
+    const sources = answer.citations.map(citation => citation.docId.split(":")[0]);
+    expect(sources).not.toContain("slack");
+    expect(sources).toEqual(expect.arrayContaining(["jira", "confluence", "drive"]));
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "source_check_failed" }));
+  });
+
+  it("lets an admin block one person from a document, audited, with no effect on others", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const ravi = brain.user("ravi")!;
+    const ask = async () => (await brain.query(ravi, "What are the fraud chargeback override rules?")).citations.map(c => c.docId);
+    expect(await ask()).toContain("slack:fraud-private");
+    await expect(brain.blockUser(brain.user("alex")!, "slack:fraud-private", "ravi")).rejects.toThrow("Forbidden");
+    await brain.blockUser(brain.user("maya")!, "slack:fraud-private", "ravi");
+    expect(await ask()).not.toContain("slack:fraud-private");
+    expect(brain.audit.entries).toContainEqual(expect.objectContaining({ type: "user_blocked", actor: "maya" }));
+    await brain.unblockUser(brain.user("maya")!, "slack:fraud-private", "ravi");
+    expect(await ask()).toContain("slack:fraud-private");
   });
 
   it("links each item to what it names and what names it, among items that exist", async () => {
@@ -92,19 +118,93 @@ describe("Internal Brain security and sync", () => {
     expect(generated.mock.calls.flatMap(call => call[0]).some(item => item.citation === "jira:SEC-44:0")).toBe(false);
   });
 
-  it("retries a failed semantic refresh from the sync checkpoint", async () => {
-    const vector = [1, ...Array(1023).fill(0)] as number[];
-    let first = true;
-    const embedding = { embed: vi.fn(async () => {
-      if (first) { first = false; throw new Error("embedding unavailable"); }
-      return vector;
-    }) };
-    const brain = new Brain(undefined, { embedding });
-    await expect(brain.sync("slack")).rejects.toThrow("Semantic embedding refresh failed");
-    expect(brain.runs.get("slack")?.status).toBe("failed");
-    await brain.sync("slack");
-    expect(brain.runs.get("slack")?.status).toBe("complete");
-    expect(brain.index.semanticVectorsFor("slack:fraud-private").size).toBeGreaterThan(0);
+  it("keeps syncing when an embedding fails, and asks the provider again after a five-minute pause", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = true;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const brain = new Brain(undefined, { embedding: { embed } });
+      await brain.sync("slack");
+      // A free plan's refusal must not stop the import: every item is indexed for keyword search.
+      expect(brain.runs.get("slack")?.status).toBe("complete");
+      expect(brain.connections.get("slack")?.status).toBe("Live");
+      const slack = [...brain.index.documents.values()].filter(doc => doc.source === "slack" && !doc.deletedAt);
+      expect(slack.length).toBeGreaterThan(1);
+      expect(slack.every(doc => brain.index.semanticVectorsFor(doc.docId).size === 0)).toBe(true);
+
+      // During the pause, neither sync nor questions call the provider, and answers still come from keywords.
+      expect(embed).toHaveBeenCalledTimes(1);
+      await brain.sync("slack");
+      const answer = await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      expect(embed).toHaveBeenCalledTimes(1);
+      expect(answer.citations.map(citation => citation.docId)).toContain("slack:payments-cutover");
+      expect(brain.audit.entries.some(entry => entry.type === "embedding_fallback" && entry.data.reason === "paused"))
+        .toBe(true);
+
+      // After the pause, the next sync embeds what was missed, without any change at the source.
+      failing = false;
+      vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+      await brain.sync("slack");
+      expect(slack.every(doc => brain.index.semanticVectorsFor(doc.docId).size === doc.chunks.length)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses the provider after a question's embedding fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = false;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const brain = new Brain(undefined, { embedding: { embed } });
+      await brain.syncAll();
+      failing = true;
+      const calls = embed.mock.calls.length;
+      await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      await brain.query(brain.user("ravi")!, "PAY-101 failover drill");
+      expect(embed.mock.calls.length).toBe(calls + 1);
+      expect(brain.audit.entries.filter(entry => entry.type === "embedding_fallback").map(entry => entry.data.reason))
+        .toEqual(["failed", "paused"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rewrites a document's chunks in Supabase once its late embedding succeeds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const vector = [1, ...Array(1023).fill(0)] as number[];
+      let failing = true;
+      const embed = vi.fn(async () => {
+        if (failing) throw new Error("embedding unavailable");
+        return vector;
+      });
+      const syncDocument = vi.fn(async (_doc: IndexedDocument, _vectors: Map<string, number[]>, _rewrite: boolean) =>
+        undefined);
+      const supabase = { syncDocument, search: vi.fn(async () => []), tombstone: vi.fn(async () => undefined) } as
+        unknown as SupabaseIndex;
+      const brain = new Brain(undefined, { embedding: { embed }, supabase });
+      await brain.sync("slack");
+      const writes = () => syncDocument.mock.calls.filter(call => call[0].docId === "slack:payments-cutover");
+      expect(writes()[0][1].size).toBe(0);
+
+      failing = false;
+      vi.setSystemTime(new Date(Date.now() + 5 * 60_000));
+      await brain.sync("slack");
+      const last = writes().at(-1)!;
+      expect(last[1].size).toBe(last[0].chunks.length);
+      expect(last[2]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("tombstones deleted items and removes them from retrieval", async () => {
@@ -362,6 +462,60 @@ describe("Internal Brain security and sync", () => {
   });
 });
 
+describe("The answer checker", () => {
+  const scenario1 = "What's the status of the database migration project and were there any blockers raised in Slack last week?";
+  const oncall = "On-call blocker raised overnight: the database migration hit lock timeouts on the settlements table.";
+
+  it("keeps the lines the passages back, reworded or not, and tells the asker only why the rest were left out", async () => {
+    let sent: string[] = [];
+    const brain = new Brain({ generate: async context => {
+      sent = context.map(item => item.citation);
+      const migration = context.find(item => item.citation === "slack:db-migration:0")!;
+      return [
+        `${migration.text.split(/(?<=[.!?])\s+/)[0]} [slack:db-migration:0]`,
+        "Waves 1 and 2 are done, and wave 3 is waiting on DB-15. [jira:DB-12:0]",
+        "Waves one and three are complete. [jira:DB-12:0]",
+        // Text from #db-oncall, which David can't see and the model was never sent.
+        `${oncall} [jira:DB-12:0]`
+      ].join("\n");
+    } });
+    await brain.syncAll();
+    let traceId = "";
+    const answer = await brain.query(brain.user("david")!, scenario1, id => { traceId = id; });
+    expect(sent).toContain("jira:DB-12:0");
+    expect(sent).not.toContain("slack:db-oncall:0");
+    expect(answer.text.split("\n")).toEqual([
+      "Database migration project standup: waves one and two of the ledger move are complete. [slack:db-migration:0]",
+      "Waves 1 and 2 are done, and wave 3 is waiting on DB-15. [jira:DB-12:0]"
+    ]);
+    expect(answer.check?.lines.map(line => line.kind)).toEqual(["quoted", "reworded"]);
+    expect(answer.check?.removed).toEqual([{ reason: "new_fact" }, { reason: expect.any(String) }]);
+    expect(answer.citations.map(citation => citation.chunkId)).toEqual(["slack:db-migration:0", "jira:DB-12:0"]);
+    expect(JSON.stringify(answer)).not.toMatch(/Waves one and three|lock timeouts/);
+    expect(brain.audit.entries.some(entry => entry.type === "llm_fallback")).toBe(false);
+
+    // Compliance sees what was left out and why; the asker's own trace shows only the reasons.
+    const own = brain.audit.entries.filter(entry => entry.data.traceId === traceId);
+    expect(own.find(entry => entry.type === "answer_returned")!.data.check).toEqual({ lines: ["quoted", "reworded"], removed: [
+      { text: "Waves one and three are complete.", reason: "new_fact", detail: expect.any(String), citations: ["jira:DB-12:0"] },
+      { text: oncall, reason: expect.any(String), detail: expect.any(String), citations: ["jira:DB-12:0"] }
+    ] });
+    const trace = actorTrace(own);
+    expect(trace.find(entry => entry.type === "answer_returned")!.data.check)
+      .toEqual({ lines: ["quoted", "reworded"], removed: [{ reason: "new_fact" }, { reason: expect.any(String) }] });
+    expect(JSON.stringify(trace)).not.toMatch(/Waves one and three|lock timeouts/);
+  });
+
+  it("gives the fixed reply no check, whatever the model would have written", async () => {
+    const generate = vi.fn(async () => "Restricted Q3 incident report and internal security findings. [confluence:q3-incident:0]");
+    const brain = new Brain({ generate });
+    await brain.syncAll();
+    expect(await brain.query(brain.user("wei")!, "Show me the security incident report from the Q3 breach"))
+      .toEqual({ text: NO_RESULT, citations: [] });
+    expect(generate).not.toHaveBeenCalled();
+  });
+});
+
 describe("When the language model can't answer", () => {
   const question = "What does PAY-101 need before cutover?";
 
@@ -394,6 +548,15 @@ describe("When the language model can't answer", () => {
     expect(answer.citations.map(citation => citation.chunkId)).toEqual(expected.citations.map(citation => citation.chunkId));
     expect(brain.audit.entries.filter(entry => entry.type === "llm_fallback").map(entry => entry.data.reason))
       .toEqual(["ungrounded"]);
+    // The asker isn't told about the model's lines, which would say which writer answered (D57); the audit keeps them.
+    expect(answer.check?.removed).toEqual([]);
+    const returned = brain.audit.entries.filter(entry => entry.type === "answer_returned").at(-1)!;
+    expect(returned.data.check).toMatchObject({ fallback: true,
+      removed: [{ text: "PAY-101 just needs the SEC-44 drill done first.", reason: expect.any(String) }] });
+    const own = actorTrace(brain.audit.entries.filter(entry => entry.data.traceId === returned.data.traceId))
+      .find(entry => entry.type === "answer_returned")!;
+    expect(own.data.check).toEqual({ lines: expect.any(Array), removed: [] });
+    expect(JSON.stringify(own)).not.toContain("just needs");
   });
 
   it("keeps a model's lines that are copied word for word and drops the rest, without falling back", async () => {
@@ -416,5 +579,60 @@ describe("When the language model can't answer", () => {
     const answer = await brain.query(brain.user("ravi")!, question);
     expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
     expect(embed).not.toHaveBeenCalled();
+  });
+});
+
+describe("namedIssueHits", () => {
+  const hit = (docId: string, coverage: number) => ({ docId, chunkId: `${docId}:0`, score: 0.5, coverage });
+  const ids = (hits: Array<{ docId: string }>) => hits.map(item => item.docId);
+  const texts: Record<string, string> = {
+    issue: "DB-15 Replica lag. DB-15 waits on the replica storage quota.",
+    thread: "Blocker raised: the final wave is on hold until DB-15 is fixed.",
+    other: "PLAT-1 is blocked because it waits on finance approval.",
+    near: "DB-150 tracks something else entirely.",
+    runbook: "The gateway runbook lists the restart steps."
+  };
+  const text = (docId: string) => texts[docId];
+
+  it("keeps to the matches that name the issue the question names, in any case", () => {
+    const hits = [hit("issue", 2), hit("thread", 1), hit("other", 1), hit("near", 1)];
+    expect(ids(namedIssueHits(hits, "Why is DB-15 blocked?", text))).toEqual(["issue", "thread"]);
+    expect(ids(namedIssueHits(hits, "why is db-15 blocked?", text))).toEqual(["issue", "thread"]);
+  });
+
+  it("keeps a match that covers two other words of the question, and changes nothing without a named issue", () => {
+    const hits = [hit("issue", 1), hit("runbook", 2), hit("other", 1)];
+    expect(ids(namedIssueHits(hits, "Is DB-15 waiting on the gateway runbook?", text))).toEqual(["issue", "runbook"]);
+    expect(ids(namedIssueHits(hits, "What waits on the gateway runbook?", text))).toEqual(["issue", "runbook", "other"]);
+  });
+
+  it("changes nothing when no allowed match names the issue, so a hidden one can't steer the answer", () => {
+    const hits = [hit("other", 1), hit("runbook", 1)];
+    expect(ids(namedIssueHits(hits, "Why is DB-15 blocked?", text))).toEqual(["other", "runbook"]);
+  });
+});
+
+describe("coveringHits", () => {
+  const hit = (docId: string, coverage: number, semantic?: number) =>
+    ({ docId, chunkId: `${docId}:0`, score: 0.5, coverage, ...(semantic === undefined ? {} : { semantic }) });
+  const ids = (hits: Array<{ docId: string }>) => hits.map(item => item.docId);
+  const every = () => true;
+
+  it("keeps hits that cover at least half, rounded up, of what the best hit covers", () => {
+    expect(ids(coveringHits([hit("a", 3), hit("b", 2), hit("c", 1)], every))).toEqual(["a", "b"]);
+    expect(ids(coveringHits([hit("a", 2), hit("b", 1)], every))).toEqual(["a", "b"]);
+  });
+
+  it("sets the bar from eligible hits only, and still passes the others through", () => {
+    // A superseded copy that covers more doesn't raise the bar for the current documents.
+    const hits = [hit("old", 3), hit("a", 2), hit("b", 1)];
+    expect(ids(coveringHits(hits, item => item.docId !== "old"))).toEqual(["old", "a", "b"]);
+  });
+
+  it("keeps a hit found by meaning alone only if it is as close as the closest hit that clears the bar", () => {
+    const hits = [hit("words", 2, 0.7), hit("close", 0, 0.8), hit("far", 0, 0.6)];
+    expect(ids(coveringHits(hits, every))).toEqual(["words", "close"]);
+    // With no word in common anywhere, meaning decides alone.
+    expect(ids(coveringHits([hit("x", 0, 0.6), hit("y", 0, 0.55)], every))).toEqual(["x", "y"]);
   });
 });

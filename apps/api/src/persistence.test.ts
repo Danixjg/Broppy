@@ -33,3 +33,17 @@ it("retries failed audit writes and verifies JSONB key ordering and previous sig
   const batches = log.batches; batches[1].previousRoot = "f".repeat(64);
   expect(() => new AuditLog({ signingKey: privateKey, initial: { entries, batches } })).toThrow("Invalid stored audit");
 });
+it("reports no permission change after a restart from a snapshot whose keys came back reordered", async () => {
+  // Postgres jsonb returns object keys shortest first, then in byte order, whatever order they were saved in.
+  const jsonb = (value: unknown): unknown => Array.isArray(value) ? value.map(jsonb) : value && typeof value === "object"
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => [key, jsonb(item)])) : value;
+  let snapshot: unknown;
+  const persistence = { loadState: async () => jsonb(structuredClone(snapshot)),
+    saveState: async (value: unknown) => { snapshot = structuredClone(value); } } as Persistence;
+  const brain = new Brain(undefined, { persistence }); await brain.syncAll(); await brain.persist();
+  const restored = new Brain(undefined, { persistence }); await restored.restore();
+  await restored.syncAll();
+  const synced = restored.audit.entries.filter(entry => entry.type === "document_synced");
+  expect(synced.filter(entry => entry.data.permissionChanged)).toEqual([]);
+});

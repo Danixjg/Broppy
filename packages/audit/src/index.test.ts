@@ -45,7 +45,7 @@ describe("AuditLog", () => {
         appendEntry: () => {},
         appendBatch: () => {}
       };
-      expect(() => new AuditLog({ store })).toThrow("Invalid stored audit log");
+      expect(() => new AuditLog({ store })).toThrow("Invalid stored audit log: entry 1 does not match");
     }
   });
 

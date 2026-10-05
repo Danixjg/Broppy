@@ -17,6 +17,8 @@ export interface WorkedExampleOptions {
   at(iso: string): void;
   /** Who wrote the answers, for the introduction. */
   writer: string;
+  /** How search ranked documents, for the introduction, when it used more than keywords. */
+  search?: string;
 }
 
 const DAY = "2026-10-15";
@@ -75,7 +77,8 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
   const at: Clock = hhmm => options.at(`${DAY}T${hhmm}:00.000Z`);
   const freshBrain: FreshBrain = async hhmm => {
     at(hhmm);
-    const brain = new Brain(options.llm, { embedding: options.embedding });
+    // The demo API's data: the hand-written items the scenarios are about, with the generated company beside them.
+    const brain = new Brain(options.llm, { embedding: options.embedding, corpus: "demo" });
     await brain.syncAll();
     return brain;
   };
@@ -85,7 +88,7 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
     return { answer, trace: brain.audit.entries.filter(entry => entry.data.traceId === traceId) };
   };
   return [
-    ...introduction(options.writer, options.llm !== undefined),
+    ...introduction(options.writer, options.llm !== undefined, options.search),
     ...await scenario1(freshBrain, ask),
     ...await scenario2(freshBrain, ask, at),
     ...await scenario3(freshBrain, ask),
@@ -94,7 +97,7 @@ export async function runWorkedExamples(options: WorkedExampleOptions): Promise<
   ].join("\n");
 }
 
-function introduction(writer: string, withModel: boolean): string[] {
+function introduction(writer: string, withModel: boolean, search?: string): string[] {
   return [
     withModel ? "# Worked examples with a language model" : "# Worked examples",
     "",
@@ -106,7 +109,10 @@ function introduction(writer: string, withModel: boolean): string[] {
         "below is real output.",
     "",
     "- **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so \"last week\" finds it.",
+    "- **Data:** what the demo API serves: the 26 hand-written items the scenarios are about, and the generated company " +
+      "of 500 more beside them (`pnpm dataset`), with six other projects that compete for every answer.",
     `- **Writer:** ${writer}`,
+    ...(search ? [`- **Search:** ${search}`] : []),
     "- **People:** David is the engineer in the brief, Ravi heads payments, Maya is an admin, Nur works in " +
       "compliance, Alex is an intern and Wei Ming is a contractor.",
     "- **Decision tables** are the compliance view of the audit trail. Match is the search score, or the item whose " +
@@ -117,17 +123,27 @@ function introduction(writer: string, withModel: boolean): string[] {
 
 function readAs(scope?: QueryScope): string {
   if (!scope) return "every platform, any date";
+  const project = scope.project ? `; kept to ${scope.project}` : "";
   const named = scope.sources.map(source => PLATFORMS[source] ?? source).join(", ");
   const range = scope.from && scope.to ? `${date(scope.from)} to ${date(scope.to)}` : undefined;
-  if (named && range) return `${named} first, and ${named} only from ${range}; other platforms at any date`;
-  if (named) return `${named} first; any date`;
-  return range ? `every platform, from ${range}` : "every platform, any date";
+  if (named && range) return `${named} first, and ${named} only from ${range}; other platforms at any date${project}`;
+  if (named) return `${named} first; any date${project}`;
+  return `${range ? `every platform, from ${range}` : "every platform, any date"}${project}`;
 }
 
 function quote(asked: Asked): string[] {
   const lines = asked.answer.text.split("\n").map(line => `> ${line}`);
   const fallback = asked.trace.find(entry => entry.type === "llm_fallback")?.data.reason;
   if (typeof fallback === "string") lines.push("", `*Written by the built-in writer instead of the model (${fallback}).*`);
+  // What the checker did to a model's reply. Every line the built-in writer writes is copied, so its page has no such note.
+  const check = asked.trace.find(entry => entry.type === "answer_returned")?.data.check as
+    { lines?: string[]; removed?: Array<{ text: string; reason: string }> } | undefined;
+  const reworded = check?.lines?.filter(kind => kind === "reworded").length ?? 0;
+  const removed = check?.removed ?? [];
+  if (reworded || removed.length) {
+    lines.push("", `*Checked: ${(check?.lines?.length ?? 0) - reworded} copied, ${reworded} reworded, ${removed.length} left out` +
+      `${removed.length ? `: ${removed.map(item => `"${item.text}" (${item.reason})`).join("; ")}` : ""}.*`);
+  }
   return lines;
 }
 
@@ -146,11 +162,15 @@ interface Checks { score?: number; linkedFrom?: string; access?: boolean; live?:
 // Every check each document went through, in ranking order, from a query's full trace.
 function checks(trace: AuditEntry[]): Map<string, Checks> {
   const rows = new Map<string, Checks>();
+  const ranked = new Map<string, number>();
   for (const entry of trace) {
     const docId = entry.data.docId;
     if (typeof docId !== "string") continue;
     const row = rows.get(docId) ?? {};
-    if (entry.type === "candidate_ranked" && typeof entry.data.score === "number") row.score = entry.data.score;
+    if (entry.type === "candidate_ranked" && typeof entry.data.score === "number") {
+      row.score = entry.data.score;
+      if (!ranked.has(docId)) ranked.set(docId, ranked.size);
+    }
     if (entry.type === "candidate_linked" && typeof entry.data.fromDocId === "string") row.linkedFrom = entry.data.fromDocId;
     if (entry.type === "access_decision") row.access = entry.data.allowed === true;
     if (entry.type === "live_access_decision") {
@@ -161,7 +181,10 @@ function checks(trace: AuditEntry[]): Map<string, Checks> {
     if (entry.type === "output_access_decision") row.output = entry.data.allowed === true;
     rows.set(docId, row);
   }
-  return rows;
+  // Searched documents first, then linked ones, then any checked for another reason, such as the master page of the
+  // project a question names, which is checked before the search.
+  const place = (docId: string, row: Checks) => ranked.get(docId) ?? (row.linkedFrom ? 1e6 : 2e6);
+  return new Map([...rows].sort(([a, x], [b, y]) => place(a, x) - place(b, y)));
 }
 
 const verdict = (value?: boolean) => (value === undefined ? "–" : value ? "allowed" : "**denied**");
@@ -211,7 +234,7 @@ async function scenario1(freshBrain: FreshBrain, ask: Ask): Promise<string[]> {
     "",
     "### Ravi asks the same question",
     "",
-    `Ravi is in #db-oncall, so his answer cites it: ${yes(cites(ravi, "slack:db-oncall"))}.` +
+    `Ravi is in #db-oncall, so Ravi's answer cites it: ${yes(cites(ravi, "slack:db-oncall"))}.` +
       (onCall ? ` It adds:\n\n> ${onCall}` : ""),
     "",
     "![David's answer in the workspace](images/s1-david.png)",
@@ -282,11 +305,11 @@ async function scenario3(freshBrain: FreshBrain, ask: Ask): Promise<string[]> {
     `| Wei Ming | ${ABSENT} (a topic that doesn't exist) | ${absent.answer.text} |`,
     `| Alex, intern | ${Q3} | ${alex.answer.text} |`,
     "",
-    `- Wei's two replies are identical: ${yes(JSON.stringify(wei.answer) === JSON.stringify(absent.answer))}. So ` +
-      `are his own traces: ${yes(shape(wei) === shape(absent))}, with ${ownTrace(wei).length} event each, an empty ` +
-      "answer.",
-    `- The compliance view shows what was refused for him: ${refused.length ? refused.join(", ") : "nothing"}. ` +
-      `Passages sent to the writer for him: ${sent || "none"}.`,
+    `- Wei Ming's two replies are identical: ${yes(JSON.stringify(wei.answer) === JSON.stringify(absent.answer))}. ` +
+      `So are the traces Wei Ming sees: ${yes(shape(wei) === shape(absent))}, with ${ownTrace(wei).length} event ` +
+      "each, an empty answer.",
+    `- The compliance view shows what was refused for Wei Ming: ${refused.length ? refused.join(", ") : "nothing"}. ` +
+      `Passages sent to the writer for Wei Ming: ${sent || "none"}.`,
     `- Ravi, who may see payments material, asks "${PAY101}" and gets a cited answer from ${platforms.size} ` +
       "platforms.",
     "",
@@ -325,26 +348,26 @@ async function scenario4(freshBrain: FreshBrain, ask: Ask, at: Clock): Promise<s
     "",
     "### Maya removes David from #db-migration",
     "",
-    `- **11:00** David asks the scenario 1 question. His answer cites ${code("slack:db-migration")}: ` +
+    `- **11:00** David asks the scenario 1 question. The answer cites ${code("slack:db-migration")}: ` +
       `${yes(cites(before, "slack:db-migration"))}.`,
-    `- **11:05** Maya removes him from the channel. The audit records ${code("channel_membership_removed")}: ` +
+    `- **11:05** Maya removes David from the channel. The audit records ${code("channel_membership_removed")}: ` +
       `${yes(audited(brain, "channel_membership_removed"))}.`,
-    `- **11:06** David asks again. His answer cites the channel: ${yes(cites(after, "slack:db-migration"))}. It ` +
+    `- **11:06** David asks again. The answer cites the channel: ${yes(cites(after, "slack:db-migration"))}. It ` +
       `still cites Jira: ${jira.length ? jira.join(", ") : "none"}.`,
     "",
     ...quote(after),
     "",
     "### Maya restricts the runbook page",
     "",
-    `- **11:10** David asks "${RUNBOOK}" His answer cites the runbook: ${yes(cites(runbookBefore, RUNBOOK_DOC))}.`,
-    `- **11:15** Maya removes him from the page's viewers. The audit records ${code("native_permission_changed")}: ` +
+    `- **11:10** David asks "${RUNBOOK}" The answer cites the runbook: ${yes(cites(runbookBefore, RUNBOOK_DOC))}.`,
+    `- **11:15** Maya removes David from the page's viewers. The audit records ${code("native_permission_changed")}: ` +
       `${yes(audited(brain, "native_permission_changed"))}.`,
-    `- **11:16** David asks again. His answer cites the runbook: ${yes(cites(runbookAfter, RUNBOOK_DOC))}. His own ` +
-      `trace mentions it: ${yes(mentions(ownTrace(runbookAfter), "payment-service-runbook"))}. His answer now reads:`,
+    `- **11:16** David asks again. The answer cites the runbook: ${yes(cites(runbookAfter, RUNBOOK_DOC))}. The trace ` +
+      `David sees mentions it: ${yes(mentions(ownTrace(runbookAfter), "payment-service-runbook"))}. The answer now reads:`,
     "",
     ...quote(runbookAfter),
     "",
-    `- Ravi asks the same question. His answer cites the runbook: ${yes(cites(ravi, RUNBOOK_DOC))}.`,
+    `- Ravi asks the same question. Ravi's answer cites the runbook: ${yes(cites(ravi, RUNBOOK_DOC))}.`,
     "",
     "![David's answer after leaving the channel](images/s4-david.png)",
     ""
@@ -412,7 +435,9 @@ async function scenario5(freshBrain: FreshBrain, ask: Ask, at: Clock): Promise<s
   const changed = brain.audit.entries;
   if (answer) changed[answer.sequence - 1].data.answer = "Nothing to report.";
   const deleted = brain.audit.entries;
-  const removed = deleted.splice(Math.floor(deleted.length / 2), 1)[0];
+  // The middle entry, unless that is the answer changed above: the two copies show two different entries.
+  const middle = Math.floor(deleted.length / 2);
+  const removed = deleted.splice(answer && deleted[middle]?.sequence === answer.sequence ? middle + 1 : middle, 1)[0];
 
   return [
     "## Scenario 5: the audit trail answers compliance questions",

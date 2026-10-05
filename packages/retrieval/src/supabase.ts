@@ -46,7 +46,9 @@ export class SupabaseIndex {
           "Content-Type": "application/json",
           ...(prefer ? { Prefer: prefer } : {})
         },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) })
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        // A database that stops answering must not hang a question; the caller falls back to the local index.
+        signal: AbortSignal.timeout(10_000)
       });
     } catch (error) {
       throw new Error(`Supabase ${label} failed: network error`, { cause: error });

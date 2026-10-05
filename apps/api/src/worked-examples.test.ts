@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SEMANTIC_MIN } from "@brain/retrieval";
 import { modelsFromEnv } from "./llm-budget.js";
 import { runWorkedExamples } from "./worked-examples.js";
 
@@ -7,6 +8,9 @@ import { runWorkedExamples } from "./worked-examples.js";
 // no longer matches it. `pnpm scenarios:model` captures the configured model's run in docs/worked-examples-model.md.
 const modelRun = process.env.WORKED_EXAMPLES === "model";
 const PROVIDERS: Record<string, string> = { tokenhub: "TokenHub", hunyuan: "Hunyuan", groq: "Groq" };
+const EMBEDDERS: Record<string, string> = {
+  cloudflare: "Cloudflare Workers AI's `@cf/baai/bge-m3`", hunyuan: "Hunyuan's `hunyuan-embedding`"
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -30,13 +34,16 @@ describe("worked examples", () => {
     if (!llm) throw new Error("No model is configured: set LLM_PROVIDER, LLM_API_KEY and LLM_MODEL in .env.local");
     const provider = process.env.LLM_PROVIDER ?? "hunyuan";
     const model = process.env.LLM_MODEL || process.env.HUNYUAN_MODEL || "";
+    const embedder = process.env.EMBEDDING_PROVIDER || (process.env.HUNYUAN_EMBEDDING_API_KEY ? "hunyuan" : "");
     vi.useFakeTimers({ toFake: ["Date"] });
     const markdown = await runWorkedExamples({
       llm,
       embedding,
       at: iso => vi.setSystemTime(new Date(iso)),
       writer: `${PROVIDERS[provider] ?? provider}'s \`${model}\`, captured on ${captured}. Model answers vary from run ` +
-        "to run, so the tests don't check this file. Where the model couldn't answer, the built-in writer did, as noted."
+        "to run, so the tests don't check this file. Where the model couldn't answer, the built-in writer did, as noted.",
+      search: embedding ? `keywords, synonyms and freshness, plus semantic similarity from ` +
+        `${EMBEDDERS[embedder] ?? embedder} embeddings, at \`SEMANTIC_MIN\` ${SEMANTIC_MIN}.` : undefined
     });
     writeFileSync(new URL("../../../docs/worked-examples-model.md", import.meta.url), markdown);
   }, 15 * 60_000);

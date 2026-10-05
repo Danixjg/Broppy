@@ -4,7 +4,7 @@ import { searchAudit } from "./audit-search.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { Brain } from "./brain.js";
+import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
@@ -25,6 +25,8 @@ export interface ApiServer {
 interface ApiServerOptions {
   brain?: Brain;
   startOrchestrator?: boolean;
+  /** The mock data, in place of the one the settings choose (`corpusFromEnv`). */
+  corpus?: Corpus;
 }
 
 function send(response: ServerResponse, status: number, data: unknown): void {
@@ -56,6 +58,21 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
   "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
   "FGA_CLIENT_SECRET"];
+
+/**
+ * The mock data the API serves. The demo API serves the hand-written items and the generated company; the SSO API keeps
+ * the hand-written items, because its people come from the directory, which doesn't have the generated company's groups.
+ * MOCK_DATA=curated or demo chooses on the demo API.
+ */
+export function corpusFromEnv(env: NodeJS.ProcessEnv = process.env): Corpus {
+  const sso = Boolean(env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID);
+  const value = env.MOCK_DATA || undefined;
+  if (value !== undefined && value !== "curated" && value !== "demo") throw new Error("MOCK_DATA must be curated or demo");
+  if (sso && value === "demo") {
+    throw new Error("MOCK_DATA=demo is for the demo API; the SSO directory's people don't have the generated company's groups");
+  }
+  return value ?? (sso ? "curated" : "demo");
+}
 
 // PUBLIC_DEMO lets anyone pick a demo persona, so it only ever serves the fictional mock corpus.
 function publicDemo(): boolean {
@@ -98,6 +115,11 @@ export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "seque
   return visible.map((entry, index) => {
     const data = { ...entry.data };
     delete data.traceId;
+    // The asker learns why lines were left out, never what they said (D63), and nothing of a model reply set aside.
+    if (entry.type === "answer_returned" && data.check && typeof data.check === "object") {
+      const check = data.check as { lines?: unknown; removed?: Array<{ reason?: unknown }>; fallback?: unknown };
+      data.check = { lines: check.lines, removed: check.fallback ? [] : (check.removed ?? []).map(item => ({ reason: item.reason })) };
+    }
     return { sequence: index + 1, timestamp: entry.timestamp, type: entry.type, data };
   });
 }
@@ -118,6 +140,7 @@ async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
   const demoOnly = publicDemo();
+  const corpus = options.corpus ?? corpusFromEnv();
   const hasAuth0 = Boolean(process.env.AUTH0_ISSUER || process.env.AUTH0_AUDIENCE || process.env.AUTH0_ORG_ID);
   const directory = UserDirectory.fromEnv();
   if (hasAuth0 && !directory) throw new Error("Auth0 requires the Supabase user directory");
@@ -129,7 +152,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const models = modelsFromEnv(process.env);
   const embedding = models.embedding;
   const supabase = embedding ? SupabaseIndex.fromEnv() : null;
-  if (supabase && !embedding) throw new Error("Supabase hybrid search requires HUNYUAN_EMBEDDING_API_KEY");
+  if (supabase && !embedding) throw new Error("Supabase hybrid search requires an embedding provider (EMBEDDING_PROVIDER)");
   const users = hasAuth0 ? await directory!.list() : undefined;
   const persistence = options.brain ? undefined : Persistence.fromEnv();
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
@@ -145,7 +168,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     throw new Error("Live sources require Auth0 sign-in");
   }
   const brain = options.brain ?? new Brain(models.llm,
-    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors });
+    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors, corpus });
   // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
   const applySite = async (source: Source) => {
     const connector = connectors?.[source];
@@ -161,8 +184,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
+    let actor: User | undefined;
     const reply = async (response: ServerResponse, status: number, data: unknown) => {
-      if (status >= 200 && status < 300) await brain.persist();
+      // A refused request is part of the trail too. Only the actor, method and route are recorded, never the body.
+      if (status === 403 && actor) {
+        brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
+        await brain.audit.flush();
+      }
+      // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own).
+      if (status >= 200 && status < 300) await (request.method === "GET" ? brain.audit.flush() : brain.persist());
       send(response, status, data);
     };
     try {
@@ -183,9 +213,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const source = callback[1] as Source;
         const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
         await applySite(source);
-        // Nothing is imported until the admin chooses what to include.
-        brain.connections.set(source, { source, status: "Connected", scope: { mode: "none" }, connectedBy: actor.id, connectedAt: new Date().toISOString() });
-        brain.audit.append("connection_created", actor.id, { source });
+        brain.markConnected(actor, source);
         await brain.persist();
         response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
         response.end(); return;
@@ -203,6 +231,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       const user = await identity(request, brain, auth0, !connectors);
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
+      actor = user;
 
       // Each person connects their own source accounts; the org-wide admin connection is separate.
       const sources: Source[] = ["slack", "jira", "confluence", "drive"];
@@ -360,6 +389,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, { ok: true });
       }
 
+      if (request.method === "POST" && (url.pathname === "/v1/admin/block" || url.pathname === "/v1/admin/unblock")) {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string") throw new Error("Invalid block");
+        if (url.pathname === "/v1/admin/block") await brain.blockUser(user, input.docId, input.userId);
+        else await brain.unblockUser(user, input.docId, input.userId);
+        return await reply(response, 200, { ok: true });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/admin/restricted-grant") {
+        const input = await body(request);
+        if (typeof input.userId !== "string" || typeof input.docId !== "string" || typeof input.reason !== "string" ||
+          typeof input.expiresAt !== "string") throw new Error("Invalid grant");
+        await brain.grantRestricted(user, input.docId, input.userId, input.reason, input.expiresAt);
+        return await reply(response, 200, { ok: true });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/admin/channel-member") {
         const input = await body(request);
         if (typeof input.userId !== "string" || typeof input.docId !== "string") {
@@ -403,7 +448,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
         if (query.length > 200) throw new Error("Invalid query");
         const documents = [...brain.index.documents.values()].map(doc => ({ docId: doc.docId, title: doc.title }));
-        return await reply(response, 200, searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents));
+        const result = searchAudit(brain.audit.entries, url.searchParams, brain.users, new Date(), documents);
+        brain.audit.append("audit_searched", user.id, { query, filters: result.filters, results: result.entries.length });
+        await brain.audit.flush();
+        return await reply(response, 200, result);
       }
 
       if (url.pathname === "/v1/audit/seal" && request.method === "POST") {
@@ -458,17 +506,44 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   return { brain, orchestrator, server };
 }
 
+// Serverless hosts such as Vercel import this module and call its default export once per request. The server is
+// built on first use and reused while the instance stays warm; there is no background sync loop between requests.
+let serverless: Promise<ApiServer> | undefined;
+
+export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  serverless ??= createApiServer({ startOrchestrator: false }).catch(error => {
+    serverless = undefined;
+    throw error;
+  });
+  const { server } = await serverless;
+  server.emit("request", request, response);
+}
+
 function isMainModule(): boolean {
   return Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
 }
 
+/** Printed once the API accepts requests, so a quiet window doesn't look like one still starting. */
+export function startupMessage(host: string, port: number, env: NodeJS.ProcessEnv = process.env): string {
+  const signIn = env.AUTH0_ISSUER || env.AUTH0_AUDIENCE || env.AUTH0_ORG_ID ? "with Auth0 sign-in"
+    : env.PUBLIC_DEMO === "true" ? "as the public demo, on mock data only" : "in demo mode (x-demo-user)";
+  const data = corpusFromEnv(env) === "demo" ? ", with the generated company" : "";
+  return `API ready at http://${host}:${port} ${signIn}${data}. Leave this window open; Ctrl+C stops it.`;
+}
+
 if (isMainModule()) {
-  const { orchestrator, server } = await createApiServer();
-  server.listen(Number(process.env.PORT ?? 3000), process.env.HOST ?? "127.0.0.1");
+  const { brain, orchestrator, server } = await createApiServer();
+  const port = Number(process.env.PORT ?? 3000);
+  const host = process.env.HOST ?? "127.0.0.1";
+  server.listen(port, host, () => process.stdout.write(`${startupMessage(host, port)}\n`));
 
   const stop = (): void => {
     orchestrator.stop();
     server.close();
+    // Seal what is left and write it out before the process exits, so the last entries are not left unsealed.
+    void (async () => {
+      try { brain.audit.seal(); await brain.audit.flush(); await brain.persist(); } catch { /* exiting anyway */ }
+    })();
   };
 
   process.once("SIGINT", stop);

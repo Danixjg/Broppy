@@ -27,6 +27,17 @@ describe("pnpm llm:usage", () => {
     expect(formatUsageReport(large)).toContain("Use Groq's free plan instead");
   });
 
+  it("doesn't judge Groq against Tencent's free tokens, since Groq's free plan can't bill", async () => {
+    const report = await measureUsage(model(2500));
+    const text = formatUsageReport(report, "groq");
+    expect(text).toContain("Groq's free plan can't bill");
+    expect(text).toContain("per day");
+    for (const tencentOnly of ["free tokens", "Tencent Cloud", "Verdict", "Use Groq's free plan instead"]) {
+      expect(text).not.toContain(tencentOnly);
+    }
+    expect(formatUsageReport(report, "tokenhub")).toContain("Use Groq's free plan instead");
+  });
+
   it("says so when no model answer could be measured", async () => {
     const failing = { generateWithUsage: vi.fn(async () => { throw new ModelUnavailable("rate_limited"); }) };
     const report = await measureUsage(failing, { questions: [["ravi", "What does PAY-101 need before cutover?"]] });
@@ -35,7 +46,7 @@ describe("pnpm llm:usage", () => {
     expect(formatUsageReport(report)).toContain("No model answers were measured");
   });
 
-  it("reports a reply with nothing copied word for word as no usable answer, counting its tokens", async () => {
+  it("reports a reply the passages don't back as no usable answer, counting its tokens", async () => {
     const paraphrasing = { generateWithUsage: vi.fn(async () => ({
       text: "PAY-101 just needs the SEC-44 drill done first. [jira:PAY-101:0]",
       usage: { prompt: 900, completion: 100, total: 1000 }
@@ -46,7 +57,7 @@ describe("pnpm llm:usage", () => {
     const text = formatUsageReport(report);
     expect(text).toContain("no model answer (ungrounded)");
     expect(text).toContain("No model answers were measured");
-    expect(text).toContain("word for word");
+    expect(text).toContain("backed by the passages it was given");
   });
 
   it("counts the tokens of an answer cut off at the limit, and says why it gave no answer", async () => {

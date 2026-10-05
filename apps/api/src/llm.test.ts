@@ -27,6 +27,13 @@ describe("ChatLlm", () => {
     expect(body.messages.map((message: { role: string }) => message.role)).toEqual(["system", "user"]);
     expect(JSON.parse(body.messages[1].content)).toEqual({ question: "When is cutover?", context });
     expect(init.body).not.toContain("restricted-title-sentinel");
+    // The model may reword lightly but must keep every fact (D64), and it must cover the whole question.
+    const system: string = body.messages[0].content;
+    for (const rule of [/Copy sentences from the passages where you can/, /shorten a sentence or join two/,
+      /keep every name, number, date, issue key and status word exactly as written/, /add nothing the passages don't say/,
+      /one sentence per line/, /every part of the question/, /every passage that helps/, /status labels/, /every step, in order/]) {
+      expect(system).toMatch(rule);
+    }
   });
 
   it("uses TokenHub's international endpoint without Hunyuan-only fields", async () => {
@@ -41,7 +48,7 @@ describe("ChatLlm", () => {
     expect(body).toMatchObject({ model: "hy3", stream: false, max_tokens: 1500 });
   });
 
-  it("uses Groq's endpoint without Hunyuan-only fields", async () => {
+  it("uses Groq's endpoint at the model's default sampling, without Hunyuan-only fields", async () => {
     const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "At 2 PM. [jira:PAY-101:0]" }));
     const client = new ChatLlm({ provider: "groq", apiKey: "gsk-key", model: "llama-3.3-70b-versatile",
       fetch: fetcher as typeof fetch });
@@ -51,6 +58,9 @@ describe("ChatLlm", () => {
     const body = JSON.parse(init.body as string);
     expect(body).not.toHaveProperty("enable_enhancement");
     expect(body).toMatchObject({ model: "llama-3.3-70b-versatile", stream: false, max_tokens: 1500 });
+    // OpenAI recommends gpt-oss's default sampling, and a seed didn't make Groq repeat its answers.
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("seed");
   });
 
   it("returns only the answer from a reasoning model, with the tokens the provider counted", async () => {

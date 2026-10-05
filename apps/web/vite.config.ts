@@ -5,6 +5,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   base: "/workspace/",
+  // public/ holds the published workspace itself (scripts/publish-workspace.mjs), so copying it into dist/ put each
+  // build inside the next one.
+  publicDir: false,
   plugins: [ react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   build: {

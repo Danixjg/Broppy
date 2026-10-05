@@ -1,3 +1,5 @@
+import generatedDocuments from "../../../data/generated/documents.json" with { type: "json" };
+import generatedGroups from "../../../data/generated/persona-groups.json" with { type: "json" };
 import documents from "../../../data/mock/documents.json" with { type: "json" };
 import users from "../../../data/mock/users.json" with { type: "json" };
 import type { NativePermission, Source, SourceDocument, SourcePermission, User } from "@brain/types";
@@ -263,17 +265,36 @@ export class MockConnector implements Connector {
 const FIXTURE_NOW = Date.parse("2026-09-30T00:00:00.000Z");
 const DAY = 86_400_000;
 
-export function loadMockCorpus(now = new Date()): {
+/** A generated company held in memory, such as the brief's scale, with the extra groups its six people belong to. */
+export interface GeneratedItems {
+  documents: SourceDocument[];
+  personaGroups: Record<string, string[]>;
+}
+
+/**
+ * The demo company. By default, the 26 hand-written items the scenarios and tests use. With `generated`, the generated
+ * company (`pnpm dataset`) joins them: about 500 more items, and the extra groups its six people belong to there. A
+ * company generated in memory joins them the same way.
+ */
+export function loadMockCorpus(now = new Date(), options: { generated?: boolean | GeneratedItems } = {}): {
   users: User[];
   connectors: Record<Source, MockConnector>;
 } {
   const shift = Math.floor((now.getTime() - FIXTURE_NOW) / DAY) * DAY;
-  const sourceDocs = (documents as unknown as SourceDocument[]).map(doc => ({
+  const handWritten = documents as unknown as SourceDocument[];
+  const generated: GeneratedItems | undefined = options.generated === true
+    ? { documents: generatedDocuments as unknown as SourceDocument[], personaGroups: generatedGroups }
+    : options.generated || undefined;
+  const extra = generated?.documents ?? [];
+  const ids = new Set(handWritten.map(doc => doc.docId));
+  for (const doc of extra) if (ids.has(doc.docId)) throw new Error(`Generated item ${doc.docId} has a hand-written item's id`);
+  const sourceDocs = [...handWritten, ...extra].map(doc => ({
     ...doc,
     updatedAt: new Date(Date.parse(doc.updatedAt) + shift).toISOString()
   }));
+  const groups = generated?.personaGroups ?? {};
   return {
-    users: copy(users as User[]),
+    users: copy(users as User[]).map(user => ({ ...user, groups: [...new Set([...user.groups, ...(groups[user.id] ?? [])])].sort() })),
     connectors: {
       slack: new MockConnector("slack", sourceDocs.filter(doc => doc.source === "slack")),
       jira: new MockConnector("jira", sourceDocs.filter(doc => doc.source === "jira")),

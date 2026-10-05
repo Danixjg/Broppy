@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Citation, SourceDocument } from "@brain/types";
-import { groundedOutput, HybridIndex, LocalGroundedLlm, type SemanticEmbeddingClient } from "./index.js";
+import { groundedOutput, HybridIndex, LocalGroundedLlm, NO_RESULT, type SemanticEmbeddingClient } from "./index.js";
 
 const vector = (dimension: number): number[] => Array.from({ length: 1024 }, (_, index) => index === dimension ? 1 : 0);
 
@@ -83,6 +83,17 @@ describe("HybridIndex semantic scoring", () => {
     expect(await index.refreshSemantic("doc", client)).toBe(false);
   });
 
+  it("treats the same permissions and metadata with their keys in another order as no change", () => {
+    const index = new HybridIndex();
+    const original = { ...document("doc", "Reimbursement procedure"), metadata: { status: "final", project: "PAY" } };
+    index.upsert(original);
+    const before = index.documents.get("doc")!;
+    const reordered = { ...original, metadata: { project: "PAY", status: "final" },
+      permissions: { public: false, groups: [], users: ["alice"] } };
+    expect(index.upsert(reordered)).toEqual({ contentChanged: false, permissionChanged: false });
+    expect(index.documents.get("doc")!.metadataHash).toBe(before.metadataHash);
+  });
+
   it("keeps a document's links with its metadata, so a link-only change never re-chunks or re-embeds", async () => {
     const index = new HybridIndex();
     const client = { embed: vi.fn(async () => vector(0)) };
@@ -163,6 +174,41 @@ describe("HybridIndex relevance", () => {
     index.upsert(document("thread", "Blocker raised: the backfill keeps timing out."));
     expect(index.search("any blockers?").map(result => result.docId)).toEqual(["thread"]);
   });
+
+  it("counts a word and its synonyms once, and reports how many of the question's words a hit covers", () => {
+    const index = new HybridIndex();
+    index.upsert(document("gateway", "Payment gateway operations and settlement health."));
+    index.upsert(document("sheet", "Payment reconciliation sheet for the partner."));
+    const coverage = Object.fromEntries(index.search("payment gateway operations").map(result => [result.docId, result.coverage]));
+    // "payment" also counts as "pay" and "payments", but it is one word of the question.
+    expect(coverage).toEqual({ gateway: 3, sheet: 1 });
+  });
+
+  it("makes no hit from generic work words alone, unless the question has nothing else", () => {
+    const index = new HybridIndex();
+    index.upsert(document("weekly", "Weekly status update for the project team."));
+    index.upsert(document("runners", "Runner pool status: 62 of 80 jobs moved."));
+    expect(index.search("What's the status of the runner pool?").map(result => result.docId)).toEqual(["runners"]);
+    expect(index.search("Any status update on the project?").map(result => result.docId).sort()).toEqual(["runners", "weekly"]);
+    expect(index.search("What's the status of the runner pool?")[0].coverage).toBe(2);
+  });
+
+  it("weighs generic work words less than the words that name the topic", () => {
+    const index = new HybridIndex();
+    index.upsert(document("capacity", "Runner capacity is short in the second rack."));
+    index.upsert(document("checks", "Status update: runner checks passed."));
+    expect(index.search("runner capacity status update").map(result => result.docId)).toEqual(["capacity", "checks"]);
+  });
+
+  it("reports a hit's semantic similarity when it has one", async () => {
+    const index = new HybridIndex();
+    index.upsert(document("invoices", "Reimbursement procedure"));
+    await index.refreshSemantic("invoices", { embed: async () => vector(0) });
+    const [hit] = index.search("payment", 20, vector(0));
+    expect(hit.semantic).toBeCloseTo(1);
+    expect(hit.coverage).toBe(0);
+    expect(index.search("reimbursement")[0].semantic).toBeUndefined();
+  });
 });
 
 describe("LocalGroundedLlm", () => {
@@ -200,6 +246,26 @@ describe("LocalGroundedLlm", () => {
     ];
     const output = await new LocalGroundedLlm().generate(context, "What is the status of the database, and what are the blockers?");
     expect(output.split("\n")[1]).toBe("Blocker raised on the ledger database. [thread:0]");
+  });
+
+  it("keeps a sentence copied with lookalike hyphens, quotes or spaces, and shows the source's own text", () => {
+    const allowed = new Map([["runbook:0", citation("runbook:0")]]);
+    const evidence = new Map([["runbook:0",
+      "Step 1: page the payments on-call engineer. Don't skip the drill. Step 2: freeze deploys."]]);
+    const output = [
+      // A non-breaking hyphen, and a narrow no-break space before the citation.
+      "Step 1: page the payments on\u2011call engineer.\u202f[runbook:0]",
+      "Don\u2019t skip the drill. [runbook:0]",
+      "step 2: FREEZE deploys. [runbook:0]"
+    ].join("\n");
+    expect(groundedOutput(output, allowed, evidence).text.split("\n")).toEqual([
+      "Step 1: page the payments on-call engineer. [runbook:0]",
+      "Don't skip the drill. [runbook:0]",
+      "Step 2: freeze deploys. [runbook:0]"
+    ]);
+    // A word the passage doesn't have still drops the line: "call" for "page" (grounding.test.ts covers rewording).
+    expect(groundedOutput("Step 1: call the payments on-call engineer. [runbook:0]", allowed, evidence).text)
+      .toBe(NO_RESULT);
   });
 
   it("quotes at most six sentences of the first source", async () => {

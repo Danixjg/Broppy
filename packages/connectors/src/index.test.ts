@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import generatedDocuments from "../../../data/generated/documents.json" with { type: "json" };
+import generatedGroups from "../../../data/generated/persona-groups.json" with { type: "json" };
 import fgaTuples from "../../../data/mock/fga-tuples.json" with { type: "json" };
+import type { SourceDocument } from "@brain/types";
 import { loadMockCorpus, nativeAllows } from "./index.js";
 
 describe("Stage 1 mock corpus", () => {
@@ -81,6 +84,44 @@ describe("Stage 1 mock corpus", () => {
     expect(written.get("slack:db-migration")).toBe(Date.parse("2026-09-27T02:00:00.000Z"));
     for (const [docId, time] of later) expect(time - written.get(docId)!).toBe(16 * 86_400_000);
     expect(Math.max(...later.values())).toBeLessThan(Date.parse("2026-10-16T00:00:00.000Z"));
+  });
+
+  it("adds the generated company when asked: its items, dated the same way, and its people's extra groups", async () => {
+    const now = new Date("2026-10-16T00:30:00.000Z");
+    const handWritten = loadMockCorpus(now);
+    const both = loadMockCorpus(now, { generated: true });
+    const items = async (corpus: ReturnType<typeof loadMockCorpus>) =>
+      (await Promise.all(Object.values(corpus.connectors).map(connector => connector.listItems()))).flat();
+    const generated = generatedDocuments as Array<{ docId: string; updatedAt: string }>;
+    const all = await items(both);
+    expect(all).toHaveLength(26 + generated.length);
+    expect(new Set(all.map(doc => doc.docId)).size).toBe(all.length);
+    const shifted = new Map(all.map(doc => [doc.docId, Date.parse(doc.updatedAt)]));
+    for (const doc of generated) expect(shifted.get(doc.docId)! - Date.parse(doc.updatedAt)).toBe(16 * 86_400_000);
+    // The hand-written items are the same either way, and the default stays at those 26.
+    const byId = new Map(all.map(doc => [doc.docId, doc]));
+    for (const doc of await items(handWritten)) expect(byId.get(doc.docId)).toEqual(doc);
+    expect(await items(loadMockCorpus(now))).toHaveLength(26);
+    for (const user of both.users) {
+      const before = handWritten.users.find(item => item.id === user.id)!;
+      expect(user.groups).toEqual([...new Set([...before.groups, ...generatedGroups[user.id as keyof typeof generatedGroups]])].sort());
+    }
+    expect(both.users.find(user => user.id === "david")!.groups).toEqual(["data", "payments", "platform", "security"]);
+    expect(both.users.find(user => user.id === "wei")!.groups).toEqual([]);
+  });
+
+  it("adds items generated in memory the same way, such as the brief's scale for pnpm bench", async () => {
+    const now = new Date("2026-10-16T00:30:00.000Z");
+    const page = (generatedDocuments as unknown as SourceDocument[]).find(doc => doc.source === "confluence")!;
+    const extra = { ...page, docId: "confluence:900001", sourceNativeId: "900001" };
+    const corpus = loadMockCorpus(now, { generated: { documents: [extra], personaGroups: { david: ["data"], nur: ["risk"] } } });
+    const all = (await Promise.all(Object.values(corpus.connectors).map(connector => connector.listItems()))).flat();
+    expect(all).toHaveLength(27);
+    expect(Date.parse(all.find(doc => doc.docId === extra.docId)!.updatedAt) - Date.parse(extra.updatedAt)).toBe(16 * 86_400_000);
+    expect(corpus.users.find(user => user.id === "david")!.groups).toEqual(["data", "payments", "security"]);
+    expect(corpus.users.find(user => user.id === "nur")!.groups).toEqual(["compliance", "payments", "risk"]);
+    expect(() => loadMockCorpus(now, { generated: { documents: [{ ...page, docId: "jira:PAY-101" }], personaGroups: {} } }))
+      .toThrow("Generated item jira:PAY-101 has a hand-written item's id");
   });
 
   it("intersects brain grants with each platform's native restriction", async () => {

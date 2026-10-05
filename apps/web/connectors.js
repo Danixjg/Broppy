@@ -68,6 +68,7 @@ async function load() {
       const job = progress.jobs.find(job => job.source === connection.source);
       const percent = job?.found ? Math.floor(100 * (job.indexed + job.skipped) / job.found) : 0;
       section.append(element("h2", connection.source), element("p", `${connection.status}${job?.status === "running" ? ` ${percent}%` : ""} · ${connection.count} items · Last sync: ${connection.lastSync || "Never"}`));
+      if (connection.error) section.append(element("p", `Needs attention: ${connection.error}`));
       if (job) section.append(element("p", `Found ${job.found}, indexed ${job.indexed}, skipped ${job.skipped}, failed ${job.failed}${job.error ? `: ${job.error}` : ""}`));
       section.append(scopeControls(connection));
       for (const [name, handler] of [["Connect", () => action(connection.source, "authorize")],

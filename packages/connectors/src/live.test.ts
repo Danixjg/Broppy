@@ -160,6 +160,38 @@ describe("live connector failure handling", () => {
     updated = "2026-09-27T09:00:00.000Z";
     expect((await connector.listUpdatedSince(first.cursor + 1)).ids).toEqual(["jira:PAY-101"]);
   });
+
+  it("re-reads every item on every twelfth poll, so a new share reaches the index within an hour", async () => {
+    // Sharing an item changes no version, so a poll that only reports moved versions would never pick it up.
+    const connector = new LiveConnector("jira", settings, [], vi.fn(async () => issue("2026-09-26T11:00:00.000Z")) as typeof fetch, instant);
+    let cursor = 0;
+    const reported: number[] = [];
+    for (let poll = 1; poll <= 24; poll++) {
+      const result = await connector.listUpdatedSince(cursor);
+      if (result.ids.length) reported.push(poll);
+      cursor = result.cursor;
+    }
+    expect(reported).toEqual([1, 12, 24]);
+  });
+
+  it("checks people's access five at a time", async () => {
+    let open = 0;
+    let most = 0;
+    const transport = vi.fn(async () => {
+      most = Math.max(most, ++open);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      open--;
+      return issue("2026-09-26T11:00:00.000Z");
+    });
+    const people = Array.from({ length: 12 }, (_, index): User => ({ ...user, id: `person${index}`,
+      email: `person${index}@example.test`, platformIdentities: { ...user.platformIdentities!, jira: `person${index}@example.test` } }));
+    const connector = new LiveConnector("jira", { ...settings,
+      userAuthorizations: Object.fromEntries(people.map(person => [person.id, `Bearer ${person.id}`])) },
+      people, transport as typeof fetch, instant);
+    const permissions = await connector.fetchPermissions("jira:PAY-101");
+    expect(permissions?.users).toHaveLength(12);
+    expect(most).toBeLessThanOrEqual(5);
+  });
 });
 
 describe("live connector scope", () => {
