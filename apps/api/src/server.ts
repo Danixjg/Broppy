@@ -9,6 +9,8 @@ import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
 import { UserDirectory } from "./user-directory.js";
+import { ServiceActor } from "./service-actor.js";
+import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
 import { MockConnector, loadMockCorpus, type ImportScope } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
@@ -178,6 +180,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   for (const source of ["jira", "confluence"] as Source[]) await applySite(source);
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
+  const serviceActor = ServiceActor.fromEnv(directory);
+  const jiraAsUser = oauth ? new JiraAsUser(oauth) : undefined;
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
   if (options.startOrchestrator === false) await brain.syncAll();
@@ -229,7 +233,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         response.end(); return;
       }
 
-      const user = await identity(request, brain, auth0, !connectors);
+      // The Slack app acts as the Slack user's own Broppy user, for questions and Jira writes only. Any other request carrying the
+      // service header is refused rather than falling back to another identity.
+      const service = serviceActor?.present(request) === true;
+      const serviceRoutes = ["/v1/query", "/v1/service/jira/issue", "/v1/service/jira/comment"];
+      if (service && !(request.method === "POST" && serviceRoutes.includes(url.pathname))) {
+        return await reply(response, 403, { error: "Forbidden" });
+      }
+      const resolve = () => service ? serviceActor!.resolve(request) : identity(request, brain, auth0, !connectors);
+      const user = await resolve();
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
       actor = user;
 
@@ -258,12 +270,29 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
       }
 
+      // Jira writes the Slack app makes for a person, with that person's own connection. 409 means they haven't
+      // connected Jira (or no site is known), so the app falls back to its shared account.
+      if (service && (url.pathname === "/v1/service/jira/issue" || url.pathname === "/v1/service/jira/comment")) {
+        if (!jiraAsUser) return await reply(response, 404, { error: "Source OAuth is not configured" });
+        const input = await body(request);
+        if (url.pathname === "/v1/service/jira/issue") {
+          const issue = await jiraAsUser.createIssue(user, parseIssue(input));
+          if (!issue) return await reply(response, 409, { error: "Jira is not connected for this user" });
+          brain.audit.append("jira_issue_created_from_slack", user.id, { key: issue.key });
+          return await reply(response, 201, issue);
+        }
+        const comment = parseComment(input);
+        if (!await jiraAsUser.comment(user, comment.key, comment.text)) return await reply(response, 409, { error: "Jira is not connected for this user" });
+        brain.audit.append("jira_comment_added_from_slack", user.id, { key: comment.key });
+        return await reply(response, 200, { ok: true });
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/query") {
         const input = await body(request);
         if (typeof input.question !== "string") throw new Error("Invalid question");
         let traceId: string | undefined;
         const answer = await brain.query(user, input.question, id => { traceId = id; },
-          () => identity(request, brain, auth0, !connectors));
+          resolve);
         return await reply(response, 200, { ...answer, traceId, importNotice: brain.importNotice() });
       }
 

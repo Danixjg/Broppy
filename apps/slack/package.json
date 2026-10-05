@@ -1,0 +1,9 @@
+{
+  "name": "@brain/slack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/functions": "^3.9.11"
+  }
+}
