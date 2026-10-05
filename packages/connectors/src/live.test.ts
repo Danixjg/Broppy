@@ -290,3 +290,19 @@ it("still imports an item whose optional link or label fields are malformed", as
     expect(doc?.metadata.label, source).toBeUndefined();
   }
 });
+
+describe("Atlassian site found at sign-in", () => {
+  it("refuses to read until a site is set, then uses that site's cloud ID", async () => {
+    const transport = vi.fn(async () => Response.json({ fields: { summary: "PAY-101", description: { content: [{ text: "Cutover requires approval." }] },
+      updated: "2026-09-26T11:00:00.000Z", status: { name: "Open" } } }));
+    const connector = new LiveConnector("jira", { ids: ["PAY-101"], serviceAuthorization: "", userAuthorizations: {},
+      authorization: async () => "Bearer org" }, [user], transport as unknown as typeof fetch);
+    await expect(connector.fetchDocument("jira:PAY-101")).rejects.toThrow("site is not connected");
+    expect(transport).not.toHaveBeenCalled();
+    connector.useSite({ baseUrl: "https://acme.atlassian.net", cloudId: "cloud-1" });
+    const doc = await connector.fetchDocument("jira:PAY-101");
+    expect(doc?.content).toContain("Cutover requires approval.");
+    expect(String((transport.mock.calls[0] as unknown[])[0])).toContain("https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/issue/PAY-101");
+    expect(() => connector.useSite({ baseUrl: "http://acme.atlassian.net", cloudId: "cloud-1" })).toThrow("HTTPS origin");
+  });
+});

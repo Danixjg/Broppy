@@ -89,7 +89,7 @@ function version(updatedAt: string, content: string): number {
 export class LiveConnector extends MockConnector {
   private pollCursor = 0;
   private scope: ImportScope = {};
-  private readonly origin: string;
+  private origin = "";
   private seen = new Map<string, number>();
 
   constructor(source: Source, private readonly settings: LiveSettings,
@@ -101,12 +101,25 @@ export class LiveConnector extends MockConnector {
       typeof settings.userAuthorizations !== "object") throw new Error(`Invalid ${source} live source configuration`);
     const base = source === "slack" ? "https://slack.com" :
       source === "drive" ? "https://www.googleapis.com" : settings.baseUrl;
-    if (!base) throw new Error(`${source} baseUrl is required`);
+    // With OAuth, an Atlassian site can arrive after sign-in through useSite instead of configuration.
+    if (!base && !(settings.authorization && (source === "jira" || source === "confluence"))) throw new Error(`${source} baseUrl is required`);
+    if (base) this.origin = LiveConnector.httpsOrigin(source, base);
+  }
+
+  private static httpsOrigin(source: Source, base: string): string {
     const url = new URL(base);
     if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
       throw new Error(`${source} baseUrl must be an HTTPS origin`);
     }
-    this.origin = url.origin;
+    return url.origin;
+  }
+
+  /** Points an Atlassian connector at the site discovered when its owner signed in. */
+  useSite(site: { baseUrl: string; cloudId: string }): void {
+    if (this.source !== "jira" && this.source !== "confluence") throw new Error("Only Atlassian sources have a site");
+    if (!site.cloudId) throw new Error("Atlassian site needs a cloud ID");
+    this.origin = LiveConnector.httpsOrigin(this.source, site.baseUrl);
+    this.settings.cloudId = site.cloudId;
   }
 
   private nativeId(docId: string): string {
@@ -118,6 +131,7 @@ export class LiveConnector extends MockConnector {
   }
 
   private async get(path: string, authorization: string, attempt = 0): Promise<unknown | undefined> {
+    if (!this.origin) throw new Error(`${this.source} site is not connected`);
     const requestOrigin = this.settings.cloudId ? `https://api.atlassian.com/ex/${this.source}/${encodeURIComponent(this.settings.cloudId)}` : this.origin;
     let response: Response;
     try {
