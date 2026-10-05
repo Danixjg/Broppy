@@ -71,6 +71,16 @@ In the default demo, changes made through admin routes or workspace actions alte
 
 With an embedding provider (Cloudflare Workers AI's `bge-m3`, D56), sync embeds changed document chunks and a query embeds its question. A refused or failed embedding never stops sync: that document keeps keyword search, the provider rests for five minutes, and a later sync embeds it. Questions asked meanwhile use keywords. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
 
+## Data
+
+`data/mock/` holds the 26 hand-written items that the scenarios, the tests and the worked examples use. `data/generated/` holds a larger company: 500 items across Confluence, Jira, Slack and Drive, made by a seeded generator (`data/generate.ts`, seed `20261016`) and checked by the app's own rules, through its access check, link reader, search words and workspace functions.
+
+- **Six projects and five company areas:** a build pipeline upgrade, a mobile app release, a customer data warehouse, KYC review automation, corporate card rewards and a partner API integration, plus engineering, legal, people, company and intern spaces. They come with private channels, restricted pages, and a contractor who sees only the items shared by name.
+- **Realistic mess:** superseded copies, near-copies, blocked issues, and agreements in Slack, some tracked by an issue and some not.
+- **What it never says:** the hand-written story's words, so it doesn't change the scenarios' answers; months, dates or quarters, which the demo's date shift can't move; and, in what the intern and the contractor can open, anything about items hidden from them, not even a name.
+
+`pnpm dataset` writes the three files again and prints the counts and how many items each person can open; `pnpm test` fails when the files no longer match the generator. `pnpm dataset --scale brief` builds and checks the brief's scale in memory: about 20,000 items in 30 projects, with 600 colleagues. The demo doesn't load the generated data yet.
+
 ## Choosing what a company includes
 
 Connecting a source imports **nothing** until an admin chooses. On the Connectors page, each source offers:
