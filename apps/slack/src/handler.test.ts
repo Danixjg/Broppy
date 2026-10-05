@@ -17,7 +17,8 @@ function setup() {
       postEphemeral: async a => { calls.ephemeral.push(a); },
       postMessage: async a => { calls.messages.push(a); },
       respond: async (_url, body) => { calls.responses.push(body); },
-      history: async () => undefined
+      history: async () => undefined,
+      userEmail: async id => id === "UNOBODY" ? undefined : `${id.slice(1).toLowerCase()}@x.test`
     },
     jira: {
       createIssue: async input => { calls.created.push(input); return { key: `DB-${15 + calls.created.length}`, url: `https://x.atlassian.net/browse/DB-${15 + calls.created.length}` }; },
@@ -25,7 +26,7 @@ function setup() {
     },
     broppy: { ask: async (user, q) => { calls.asks.push({ user, q }); return { text: "Wave three starts after DB-15 is resolved.", citations: [{ title: "Migration plan", url: "https://b/p" }] }; } },
     store: new MemoryTaskStore(),
-    people: [{ slackId: "UMAYA", name: "Maya", brainUserId: "maya", jiraAccountId: "acc-maya" }, { slackId: "UDAVID", name: "David", brainUserId: "david" }],
+    people: [{ slackId: "UMAYA", name: "Maya", jiraAccountId: "acc-maya" }, { slackId: "UDAVID", name: "David" }],
     channelProjects: { CDB: "DB" }, defaultProject: "OPS", threshold: 0.6, webUrl: "https://broppy.test",
     defer: work => { deferred.push(work); }, now: () => NOW
   };
@@ -144,12 +145,12 @@ describe("asking Broppy", () => {
   const command = (ctx: ReturnType<typeof setup>, user: string, text: string) => handleSlack(ctx.deps, signed(
     new URLSearchParams({ command: "/broppy", text, user_id: user, response_url: "https://hooks.slack.com/c" }).toString(), "/slack/commands"));
 
-  it("acknowledges at once and answers privately with sources, as the asker's own Broppy user", async () => {
+  it("acknowledges at once and answers privately with sources, for the asker's own Slack ID", async () => {
     const ctx = setup();
     const r = await command(ctx, "UMAYA", "what's blocking wave three?");
     expect((r.body as any).response_type).toBe("ephemeral");
     await Promise.all(ctx.deferred);
-    expect(ctx.calls.asks).toEqual([{ user: "maya", q: "what's blocking wave three?" }]);
+    expect(ctx.calls.asks).toEqual([{ user: "maya@x.test", q: "what's blocking wave three?" }]);
     const reply = ctx.calls.responses.at(-1);
     expect(reply.response_type).toBe("ephemeral");
     expect(JSON.stringify(reply.blocks)).toContain("Migration plan");
@@ -158,7 +159,6 @@ describe("asking Broppy", () => {
     const ctx = setup();
     await command(ctx, "UNOBODY", "anything");
     await Promise.all(ctx.deferred);
-    expect(ctx.calls.asks).toHaveLength(0);
     expect(ctx.calls.responses.at(-1).text).toContain("isn't linked");
   });
   it("handles the Ask Broppy message shortcut", async () => {
@@ -167,6 +167,6 @@ describe("asking Broppy", () => {
       type: "message_action", callback_id: "ask_broppy", user: { id: "UDAVID" }, response_url: "https://hooks.slack.com/m", message: { text: "Is DB-15 resolved?" }
     }) }).toString(), "/slack/interactions"));
     await Promise.all(ctx.deferred);
-    expect(ctx.calls.asks).toEqual([{ user: "david", q: "Is DB-15 resolved?" }]);
+    expect(ctx.calls.asks).toEqual([{ user: "david@x.test", q: "Is DB-15 resolved?" }]);
   });
 });

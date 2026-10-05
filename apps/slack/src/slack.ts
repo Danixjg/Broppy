@@ -16,6 +16,8 @@ export interface SlackApi {
   respond(responseUrl: string, body: Record<string, unknown>): Promise<void>;
   /** The text of one message, for the Ask Broppy shortcut. */
   history(channel: string, ts: string): Promise<string | undefined>;
+  /** The email Slack holds for a user (scope users:read.email). */
+  userEmail(userId: string): Promise<string | undefined>;
 }
 
 export class SlackWebApi implements SlackApi {
@@ -46,6 +48,10 @@ export class SlackWebApi implements SlackApi {
       signal: AbortSignal.timeout(10_000), redirect: "error"
     });
     if (!response.ok) throw new Error(`Slack response_url failed: ${response.status}`);
+  }
+  async userEmail(userId: string) {
+    const payload = await this.call("users.info", { user: userId }, true);
+    return typeof payload.user?.profile?.email === "string" ? payload.user.profile.email : undefined;
   }
   async history(channel: string, ts: string) {
     const payload = await this.call("conversations.history", { channel, latest: ts, inclusive: true, limit: 1 }, true);

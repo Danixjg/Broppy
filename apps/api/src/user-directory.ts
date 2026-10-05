@@ -82,4 +82,10 @@ export class UserDirectory {
     // One keyed lookup (org_id + auth0_sub), not a read of the whole directory on every request.
     return (await this.page(0, `&auth0_sub=eq.${encodeURIComponent(sub)}`, 1)).find(user => user.auth0Sub === sub);
   }
+
+  /** The user whose Slack identity in the directory (their Slack email) is this one. Several matches are ambiguous, so none. */
+  async bySlackIdentity(identity: string): Promise<User | undefined> {
+    const matches = await this.page(0, `&platform_identities->>slack=eq.${encodeURIComponent(identity)}`, 2);
+    return matches.length === 1 && matches[0].platformIdentities?.slack === identity ? matches[0] : undefined;
+  }
 }

@@ -6,8 +6,6 @@
 export interface Person {
   slackId: string;
   name: string;
-  /** The Broppy user this Slack user acts as. */
-  brainUserId?: string;
   /** The Jira account that gets the issue. */
   jiraAccountId?: string;
 }

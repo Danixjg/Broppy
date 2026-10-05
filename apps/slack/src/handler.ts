@@ -1,3 +1,4 @@
+import { NotLinkedError } from "./broppy.js";
 import { answerBlocks, suggestionBlocks, trackedLine, type Suggestion } from "./blocks.js";
 import type { Deps } from "./config.js";
 import { fingerprint, tokens } from "./fingerprint.js";
@@ -89,18 +90,19 @@ function commands(deps: Deps, form: URLSearchParams): SlackResponse {
 }
 
 async function answer(deps: Deps, slackUser: string, question: string, responseUrl: string): Promise<void> {
-  const person = deps.people.find(p => p.slackId === slackUser);
   try {
-    if (!person?.brainUserId) {
-      await deps.slack.respond(responseUrl, ephemeral("Your Slack account isn't linked to a Broppy user yet. Ask an admin to add you."));
-      return;
-    }
-    const result = await deps.broppy.ask(person.brainUserId, question);
+    const email = await deps.slack.userEmail(slackUser);
+    if (!email) throw new NotLinkedError();
+    const result = await deps.broppy.ask(email, question);
     await deps.slack.respond(responseUrl, {
       response_type: "ephemeral", replace_original: true, text: result.text.slice(0, 200),
       blocks: answerBlocks(question, result, openAsk(deps, question))
     });
   } catch (error) {
+    if (error instanceof NotLinkedError) {
+      await deps.slack.respond(responseUrl, { ...ephemeral("Your Slack account isn't linked to a Broppy user yet. Ask an admin to add your Slack ID to your Broppy profile."), replace_original: true });
+      return;
+    }
     console.error("broppy answer failed", error);
     await deps.slack.respond(responseUrl, { ...ephemeral("Broppy couldn't answer that just now."), replace_original: true });
   }

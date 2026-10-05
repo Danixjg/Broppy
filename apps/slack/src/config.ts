@@ -48,7 +48,7 @@ export function depsFromEnv(env: NodeJS.ProcessEnv, defer: Deps["defer"]): Deps 
     signingSecret: required(env, "SLACK_SIGNING_SECRET"),
     slack: new SlackWebApi(required(env, "SLACK_BOT_TOKEN")),
     jira: new JiraClient(required(env, "JIRA_BASE_URL"), required(env, "JIRA_EMAIL"), required(env, "JIRA_API_TOKEN")),
-    broppy: new BroppyClient(required(env, "BROPPY_API_URL")),
+    broppy: new BroppyClient(required(env, "BROPPY_API_URL"), required(env, "SLACK_SERVICE_TOKEN")),
     store, people,
     channelProjects: json<Record<string, string>>(env, "SLACK_CHANNEL_PROJECTS_JSON", {}),
     defaultProject: required(env, "JIRA_DEFAULT_PROJECT"),
