@@ -1,4 +1,7 @@
 export type Source = "slack" | "jira" | "confluence" | "drive";
+
+/** What a connector receives in place of a token: ask for an Authorization header (for one person, or the org connection when no one is named). Refreshing and storage stay behind it. */
+export type AuthorizationProvider = (userId?: string) => Promise<string | undefined>;
 export type Tier = "open" | "internal" | "restricted";
 
 export interface User {

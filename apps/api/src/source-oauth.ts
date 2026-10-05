@@ -1,20 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { Source, User } from "@brain/types";
+import type { AuthorizationProvider, Source, User } from "@brain/types";
+import { oauthProviders, type ProviderConfig } from "./oauth-providers.js";
 import type { Persistence } from "./persistence.js";
 
-type ProviderConfig = { clientId: string; clientSecret: string; scopes: string[]; baseUrl?: string; cloudId?: string };
 type Site = { baseUrl: string; cloudId: string };
-type Tokens = { access_token: string; refresh_token?: string; expires_at: number; userId: string; site?: Site };
-const endpoints = {
-  slack: { authorize: "https://slack.com/oauth/v2/authorize", token: "https://slack.com/api/oauth.v2.access" },
-  jira: { authorize: "https://auth.atlassian.com/authorize", token: "https://auth.atlassian.com/oauth/token" },
-  confluence: { authorize: "https://auth.atlassian.com/authorize", token: "https://auth.atlassian.com/oauth/token" },
-  drive: { authorize: "https://accounts.google.com/o/oauth2/v2/auth", token: "https://oauth2.googleapis.com/token" }
-};
+type Tokens = { access_token: string; refresh_token?: string; expires_at: number; userId: string; scopes?: string[]; site?: Site };
 type Mode = "org" | "user";
 /** OAuth state is single use and bound to the initiating user. Org connections need an admin; user connections only the signed-in person. Tokens stay in Vault. */
 export class SourceOAuth {
-  private readonly pending = new Map<string, { source: Source; mode: Mode; user: User; verifier: string; expiresAt: number }>();
   private readonly refreshes = new Map<string, Promise<string | undefined>>();
   private readonly cache = new Map<string, Tokens>();
   constructor(readonly configs: Partial<Record<Source, ProviderConfig>>, private readonly callbackOrigin: string,
@@ -24,51 +17,48 @@ export class SourceOAuth {
   }
   private callback(source: Source, mode: Mode) { return `${this.callbackOrigin.replace(/\/$/, "")}/v1/${mode === "org" ? "admin/" : ""}connections/${source}/callback`; }
   private key(source: Source, userId?: string) { return userId ? `${source}/${userId}` : source; }
-  begin(source: Source, user: User, mode: Mode = "org"): string {
+  /** Starts a sign-in. The single-use state lives in Supabase, so the callback can reach any API instance. */
+  async begin(source: Source, user: User, mode: Mode = "org"): Promise<string> {
     if ((mode === "org" && user.role !== "admin") || user.orgId !== this.persistence.orgId || user.active !== true) throw new Error("Forbidden");
     const config = this.configs[source]; if (!config) throw new Error("Source OAuth is not configured");
-    for (const [state, flow] of this.pending) if (flow.expiresAt < Date.now()) this.pending.delete(state);
+    const provider = oauthProviders[source];
     const state = randomBytes(32).toString("base64url"), verifier = randomBytes(32).toString("base64url");
-    this.pending.set(state, { source, mode, user, verifier, expiresAt: Date.now() + 600_000 });
-    const url = new URL(endpoints[source].authorize);
-    url.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: this.callback(source, mode), state,
-      response_type: "code", ...(source === "slack" ? { user_scope: config.scopes.join(",") } : { scope: config.scopes.join(" ") }),
-      ...(source === "jira" || source === "confluence" ? { audience: "api.atlassian.com", prompt: "consent" } : {}),
-      ...(source === "drive" ? { access_type: "offline", prompt: "consent", code_challenge_method: "S256",
-        code_challenge: createHash("sha256").update(verifier).digest("base64url") } : {}) }).toString();
+    await this.persistence.request("rpc/begin_oauth_flow", "POST", { organization: this.persistence.orgId, state_hash: this.hash(state), provider: source, flow_mode: mode,
+      person: user.id, person_sub: user.auth0Sub, code_verifier: verifier, ttl_seconds: 600 });
+    const url = new URL(provider.authorizeUrl);
+    url.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: this.callback(source, mode), state, response_type: "code",
+      ...provider.authorizeParams(config, verifier) }).toString();
     return url.href;
   }
+  private hash(state: string) { return createHash("sha256").update(state).digest("hex"); }
   private async exchange(source: Source, values: Record<string, string>): Promise<any> {
-    const config = this.configs[source]!;
-    const response = await this.transport(endpoints[source].token, { method: "POST", redirect: "error",
-      headers: { "content-type": source === "jira" || source === "confluence" ? "application/json" : "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(15000),
-      body: source === "jira" || source === "confluence" ? JSON.stringify({ client_id: config.clientId, client_secret: config.clientSecret, ...values }) : new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, ...values }) });
+    const config = this.configs[source]!, provider = oauthProviders[source];
+    const request = provider.tokenRequest(config, values);
+    const response = await this.transport(provider.tokenUrl, { method: "POST", redirect: "error",
+      headers: { "content-type": request.contentType }, signal: AbortSignal.timeout(15000), body: request.body });
     if (!response.ok) throw new Error("Source OAuth exchange failed");
-    const raw = await response.json();
-    if (raw.ok === false) throw new Error("Source OAuth exchange failed");
-    const result = source === "slack" ? raw.authed_user ?? raw : raw;
-    if (typeof result.access_token !== "string" || !result.access_token) throw new Error("Source OAuth returned no user token");
+    const result = provider.tokens(await response.json());
+    if (!result || typeof result.access_token !== "string" || !result.access_token) throw new Error("Source OAuth returned no user token");
     return result;
   }
   async complete(source: Source, state: string, code: string, currentUser: (sub: string) => Promise<User | undefined>, mode: Mode = "org"): Promise<User> {
-    const flow = this.pending.get(state); this.pending.delete(state);
-    if (!flow || flow.source !== source || flow.mode !== mode || flow.expiresAt <= Date.now() || !code) throw new Error("Invalid OAuth state");
-    const user = await currentUser(flow.user.auth0Sub);
-    if (!user || user.active !== true || (mode === "org" && user.role !== "admin") || user.orgId !== this.persistence.orgId || user.id !== flow.user.id) throw new Error("Forbidden");
-    const result = await this.exchange(source, { grant_type: "authorization_code", code, redirect_uri: this.callback(source, mode),
-      ...(source === "drive" ? { code_verifier: flow.verifier } : {}) });
+    const provider = oauthProviders[source];
+    const flow = state ? await this.persistence.request("rpc/consume_oauth_flow", "POST", { organization: this.persistence.orgId, state_hash: this.hash(state) }) : undefined;
+    if (!flow || flow.provider !== source || flow.flow_mode !== mode || !code) throw new Error("Invalid OAuth state");
+    const user = await currentUser(flow.person_sub);
+    if (!user || user.active !== true || (mode === "org" && user.role !== "admin") || user.orgId !== this.persistence.orgId || user.id !== flow.person) throw new Error("Forbidden");
+    const result = await this.exchange(source, { grant_type: "authorization_code", code, redirect_uri: this.callback(source, mode), ...provider.exchangeValues(flow.code_verifier) });
     // Confirm that the source account belongs to the signed-in user.
-    const profileUrl = source === "drive" ? "https://www.googleapis.com/oauth2/v3/userinfo" :
-      source === "slack" ? `https://slack.com/api/users.info?user=${encodeURIComponent(result.id ?? "")}` : "https://api.atlassian.com/me";
-    const response = await this.transport(profileUrl, { headers: { authorization: `Bearer ${result.access_token}` }, redirect: "error", signal: AbortSignal.timeout(15000) });
+    const response = await this.transport(provider.profileUrl(result), { headers: { authorization: `Bearer ${result.access_token}` }, redirect: "error", signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error("Source identity could not be matched");
     const profile = await response.json();
-    const email = source === "slack" ? profile.user?.profile?.email : profile.email;
+    const email = provider.email(profile);
     if (typeof email !== "string" || email.toLowerCase() !== user.email.toLowerCase() ||
       email.toLowerCase() !== user.platformIdentities?.[source]?.toLowerCase()) throw new Error("Source identity could not be matched");
     const tokens: Tokens = { access_token: result.access_token, refresh_token: result.refresh_token,
-      expires_at: result.expires_in ? Date.now() + Number(result.expires_in) * 1000 : Number.MAX_SAFE_INTEGER, userId: user.id };
-    if (source === "jira" || source === "confluence") {
+      expires_at: result.expires_in ? Date.now() + Number(result.expires_in) * 1000 : Number.MAX_SAFE_INTEGER, userId: user.id,
+      scopes: typeof result.scope === "string" ? result.scope.split(/[ ,]/).filter(Boolean) : this.configs[source]?.scopes };
+    if (provider.sites) {
       const sites = await this.accessibleSites(result.access_token);
       if (mode === "org") tokens.site = this.chooseSite(source, sites);
       else {
@@ -105,7 +95,7 @@ export class SourceOAuth {
   }
   /** The organization's Atlassian site: found at connect time, or pinned by configuration. */
   async orgSite(source: Source): Promise<Site | undefined> {
-    if (source !== "jira" && source !== "confluence") return undefined;
+    if (!oauthProviders[source].sites) return undefined;
     let tokens = this.cache.get(source);
     if (!tokens) tokens = await this.persistence.request("rpc/read_source_token", "POST", { organization: this.persistence.orgId, provider: source }) ?? undefined;
     if (tokens?.site) return tokens.site;
@@ -127,6 +117,8 @@ export class SourceOAuth {
     this.refreshes.set(key, next);
     try { return await next; } finally { this.refreshes.delete(key); }
   }
+  /** The credential source for one provider, in the shape connectors consume: they ask for a header and never see where it came from. */
+  provider(source: Source): AuthorizationProvider { return userId => this.authorization(source, userId); }
   /** The lookup other services (for example the Slack app) use to act as a user: user + provider -> Authorization header, or undefined when not connected. */
   authorizationFor(userId: string, source: Source): Promise<string | undefined> { return this.userAuthorization(source, userId); }
   private async userAuthorization(source: Source, userId: string): Promise<string | undefined> {
@@ -143,7 +135,8 @@ export class SourceOAuth {
     if (!tokens) tokens = await this.persistence.request("rpc/read_user_source_token", "POST", { organization: this.persistence.orgId, person: userId, provider: source }) ?? undefined;
     if (!tokens || tokens.userId !== userId) return undefined;
     tokens = await this.fresh(source, tokens, key, fresh => this.persistence.request("rpc/store_user_source_token", "POST",
-      { organization: this.persistence.orgId, person: userId, provider: source, token: fresh }));
+      { organization: this.persistence.orgId, person: userId, provider: source, token: fresh }),
+      async () => await this.persistence.request("rpc/read_user_source_token", "POST", { organization: this.persistence.orgId, person: userId, provider: source }) ?? undefined);
     return `Bearer ${tokens.access_token}`;
   }
   private async resolveAuthorization(source: Source, userId?: string): Promise<string | undefined> {
@@ -152,16 +145,30 @@ export class SourceOAuth {
     if (!tokens) tokens = await this.persistence.request("rpc/read_source_token", "POST", { organization: this.persistence.orgId, provider: source });
     if (!tokens || (userId && tokens.userId !== userId)) return undefined;
     tokens = await this.fresh(source, tokens, source, fresh => this.persistence.request("rpc/store_source_token", "POST",
-      { organization: this.persistence.orgId, provider: source, token: fresh, actor: fresh.userId }));
+      { organization: this.persistence.orgId, provider: source, token: fresh, actor: fresh.userId }),
+      async () => await this.persistence.request("rpc/read_source_token", "POST", { organization: this.persistence.orgId, provider: source }) ?? undefined);
     return `Bearer ${tokens.access_token}`;
   }
-  private async fresh(source: Source, tokens: Tokens, key: string, save: (tokens: Tokens) => Promise<unknown>): Promise<Tokens> {
-    if (tokens.expires_at <= Date.now() + 30_000) {
-      if (!tokens.refresh_token) throw new Error("Reconnect expired source");
-      const fresh = await this.exchange(source, { grant_type: "refresh_token", refresh_token: tokens.refresh_token });
-      tokens = { ...tokens, access_token: fresh.access_token, refresh_token: fresh.refresh_token ?? tokens.refresh_token,
-        expires_at: Date.now() + Number(fresh.expires_in ?? 3600) * 1000 };
-      await save(tokens);
+  /** Refreshes an expired token. Another instance may have refreshed (and, for Atlassian, rotated the refresh token) first, so the stored copy is checked before and after. */
+  private async fresh(source: Source, tokens: Tokens, key: string, save: (tokens: Tokens) => Promise<unknown>, reload: () => Promise<Tokens | undefined>): Promise<Tokens> {
+    const valid = (value?: Tokens) => Boolean(value && value.expires_at > Date.now() + 30_000);
+    if (!valid(tokens)) {
+      const stored = await reload();
+      if (stored && valid(stored)) tokens = stored;
+      else {
+        const latest = stored ?? tokens;
+        if (!latest.refresh_token) throw new Error("Reconnect expired source");
+        try {
+          const fresh = await this.exchange(source, { grant_type: "refresh_token", refresh_token: latest.refresh_token });
+          tokens = { ...latest, access_token: fresh.access_token, refresh_token: fresh.refresh_token ?? latest.refresh_token,
+            expires_at: Date.now() + Number(fresh.expires_in ?? 3600) * 1000 };
+          await save(tokens);
+        } catch (error) {
+          const raced = await reload();
+          if (!raced || !valid(raced) || raced.access_token === latest.access_token) throw error;
+          tokens = raced;
+        }
+      }
     }
     this.cache.set(key, tokens);
     return tokens;

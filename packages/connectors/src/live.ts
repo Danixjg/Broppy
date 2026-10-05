@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { MockConnector, selectsNothing, type Change, type Container, type ImportScope } from "./index.js";
 import { linkFromUrl, withLinks } from "./links.js";
-import type { Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import type { AuthorizationProvider, Source, SourceDocument, SourcePermission, User } from "@brain/types";
 
 /** The provider refused our own credential. That says nothing about the item, so it must never read as "deleted". */
 export class CredentialRejected extends Error {
@@ -30,7 +30,7 @@ export type LiveSettings = {
   baseUrl?: string;
   cloudId?: string;
   discover?: boolean;
-  authorization?: (userId?: string) => Promise<string | undefined>;
+  authorization?: AuthorizationProvider;
 };
 
 type LiveConfig = Record<Source, LiveSettings>;
