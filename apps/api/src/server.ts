@@ -183,8 +183,39 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         response.end(); return;
       }
 
+      const own = /^\/v1\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
+      if (own && request.method === "GET" && oauth && directory) {
+        const source = own[1] as Source;
+        const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub), "user");
+        brain.audit.append("user_connection_created", actor.id, { source });
+        await brain.persist();
+        response.writeHead(302, { location: new URL("/accounts.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
+        response.end(); return;
+      }
+
       const user = await identity(request, brain, auth0, !connectors);
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
+
+      // Each person connects their own source accounts; the org-wide admin connection is separate.
+      const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+      if (url.pathname === "/v1/me/connections" && request.method === "GET") {
+        const connected = oauth ? new Set(await oauth.connectedSources(user.id)) : new Set<Source>();
+        return await reply(response, 200, { available: Boolean(oauth),
+          connections: sources.map(source => ({ source, configured: Boolean(oauth?.configs[source]), connected: connected.has(source) })) });
+      }
+      const mine = /^\/v1\/me\/connections\/(slack|jira|confluence|drive)(?:\/(authorize))?$/.exec(url.pathname);
+      if (mine) {
+        if (!oauth) return await reply(response, 404, { error: "Source OAuth is not configured" });
+        const source = mine[1] as Source;
+        if (mine[2] === "authorize" && request.method === "POST") return await reply(response, 200, { url: oauth.begin(source, user, "user") });
+        if (!mine[2] && request.method === "DELETE") {
+          await oauth.removeUser(source, user.id);
+          brain.audit.append("user_connection_removed", user.id, { source });
+          await brain.persist();
+          return await reply(response, 200, { ok: true });
+        }
+        return await reply(response, 404, { error: "Not found" });
+      }
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });

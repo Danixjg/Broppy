@@ -4,7 +4,8 @@ const config: NextConfig = {
     return [
       { source: "/login.html", destination: "/auth/login", permanent: false },
       { source: "/index.html", destination: "/workspace/index.html", permanent: false },
-      { source: "/connectors.html", destination: "/workspace/connectors.html", permanent: false }
+      { source: "/connectors.html", destination: "/workspace/connectors.html", permanent: false },
+      { source: "/accounts.html", destination: "/workspace/accounts.html", permanent: false }
     ];
   }
 };
