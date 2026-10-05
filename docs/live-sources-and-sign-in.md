@@ -46,7 +46,7 @@ The connected administrator's user token can establish that administrator's sour
 
 ### Per-user connections
 
-Alongside the admin's org-wide connection, every signed-in person can connect their own account at `/accounts.html` ("My accounts" in the workspace header). It reuses the same `SOURCE_OAUTH_JSON` apps, so each provider app must **also** register `${API_ORIGIN}/v1/connections/SOURCE/callback` as a redirect URI (the admin one stays `/v1/admin/connections/SOURCE/callback`). Run migration `007_user_source_tokens.sql`. For a brand-new Supabase project, `infra/supabase/schema.sql` is the same end state (migrations 001-007) in one file.
+Alongside the admin's org-wide connection, every signed-in person can connect their own account at `/accounts.html` ("My accounts" in the workspace header). It reuses the same `SOURCE_OAUTH_JSON` apps, so each provider app must **also** register `${API_ORIGIN}/v1/connections/SOURCE/callback` as a redirect URI (the admin one stays `/v1/admin/connections/SOURCE/callback`). Run migration `007_user_source_tokens.sql`. For a brand-new Supabase project, `infra/supabase/schema.sql` is the same end state (migrations 001-008) in one file.
 
 - API: `GET /v1/me/connections`, `POST /v1/me/connections/SOURCE/authorize`, `DELETE /v1/me/connections/SOURCE`. Any active user of the organization may use them; the OAuth state is single use, expires in ten minutes, and the callback re-checks the directory entry and that the connected account's email matches the person's directory identity for that source.
 - Storage: one Vault secret per organization + user + source (`public.user_source_connections`). Tokens never appear in API responses or snapshots. Connect and disconnect are audited (`user_connection_created`, `user_connection_removed`).
@@ -69,3 +69,5 @@ Supabase audit writes are ordered, idempotent and reject conflicting sequences. 
 ## OpenFGA
 
 Install `infra/fga/model.fga` and set `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`. The OpenFGA SDK obtains and refreshes client-credentials tokens. Tuple subjects and objects include the organization namespace. Native Slack/Jira/Confluence/Drive permission shapes remain enforced in the connector layer, alongside tiers and fresh delegated source checks. A source-specific remote FGA schema remains a follow-up consideration; the current remote schema is the generic document intersection described in the audit.
+
+Sign-in state (`oauth_flows`, migration `008_oauth_flows.sql`) lives in Supabase rather than in API memory, so the provider's redirect can reach any API instance (Vercel runs several). Each provider's differences from the common flow are one entry in `apps/api/src/oauth-providers.ts`; connectors receive an `AuthorizationProvider` (`@brain/types`) and never see tokens.
