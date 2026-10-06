@@ -52,6 +52,8 @@ export class Brain {
   readonly states = new Map<Source, ConnectorState>();
   readonly runs = new Map<Source, SyncRun>();
   readonly llm: LlmClient;
+  // The model the organization's admin chose in settings. It wins over the operator's own model (the env vars).
+  private readonly orgLlm?: { current(): Promise<LlmClient | undefined> };
   // Answers from the same authorized context when the model can't: over budget, rate limited or failing.
   private readonly fallbackLlm = new LocalGroundedLlm();
   readonly lastTraceIds = new Map<string, string>();
@@ -62,7 +64,7 @@ export class Brain {
   readonly taskStore: TaskStore;
   private readonly slackUserIds: Record<string, string>;
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; taskStore?: TaskStore; slackUserIds?: Record<string, string>; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; taskStore?: TaskStore; slackUserIds?: Record<string, string>; orgLlm?: { current(): Promise<LlmClient | undefined> }; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
     this.persistence = options.persistence;
     const fixture = loadMockCorpus(new Date(), { generated: typeof options.corpus === "object" ? options.corpus : options.corpus === "demo" });
@@ -70,6 +72,7 @@ export class Brain {
     this.connectors = options.connectors ?? fixture.connectors;
     this.liveMode = Boolean(options.connectors);
     this.llm = llm;
+    this.orgLlm = options.orgLlm;
     this.audit = options.audit ?? new AuditLog();
     this.remoteFga = options.remoteFga;
     this.embedding = options.embedding;
@@ -559,9 +562,17 @@ export class Brain {
     await this.audit.flush();
     const evidence = new Map(context.map(item => [item.citation, item.text]));
     let generated: string;
-    let fromModel = !(this.llm instanceof LocalGroundedLlm);
+    // If the organization's own model can't be looked up, answer with the built-in writer rather than send the
+    // organization's context to a model it didn't choose.
+    let model: LlmClient = this.llm;
     try {
-      generated = await this.llm.generate(context, trimmed);
+      model = (await this.orgLlm?.current()) ?? this.llm;
+    } catch {
+      model = this.fallbackLlm;
+    }
+    let fromModel = !(model instanceof LocalGroundedLlm);
+    try {
+      generated = await model.generate(context, trimmed);
     } catch (error) {
       audit("llm_fallback", { reason: error instanceof ModelUnavailable ? error.reason : "error" });
       generated = await this.fallbackLlm.generate(context, trimmed);

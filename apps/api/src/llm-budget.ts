@@ -221,7 +221,7 @@ export function modelsFromEnv(env: NodeJS.ProcessEnv = process.env): { llm?: Bud
   if (!chat && !embedder) return {};
   // Only Groq's free plan can never bill. Past their free tokens, Tencent's services bill only if post-paid is turned
   // on in the console; the budget is a second stop that survives restarts, whatever that setting says.
-  if (chat && chat.provider !== "groq" && (!file || limits.chatTokens === undefined)) {
+  if (chat && (chat.provider === "hunyuan" || chat.provider === "tokenhub") && (!file || limits.chatTokens === undefined)) {
     const name = chat.provider === "tokenhub" ? "TokenHub" : "Hunyuan";
     throw new Error(`${name} needs LLM_USAGE_FILE and LLM_TOKEN_BUDGET, so it stops before its free tokens run out`);
   }

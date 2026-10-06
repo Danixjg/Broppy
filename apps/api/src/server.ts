@@ -10,6 +10,7 @@ import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
+import { ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
 import { ServiceActor } from "./service-actor.js";
 import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
@@ -174,8 +175,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (connectors && !hasAuth0) {
     throw new Error("Live sources require Auth0 sign-in");
   }
+  const orgModel = persistence ? new OrgModel(persistence) : undefined;
   const brain = options.brain ?? new Brain(models.llm,
-    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined,
+    { orgLlm: orgModel, orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined,
       taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
         ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
       slackUserIds: slackUserIdsFromEnv(), users, connectors, corpus });
@@ -347,6 +349,32 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           traceId,
           entries: user.role === "compliance" ? entries : actorTrace(entries)
         }) : send(response, 404, { error: "Not found" });
+      }
+
+      if (url.pathname === "/v1/admin/model") {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        if (!orgModel) return await reply(response, 503, { error: "Choosing a model needs Supabase persistence." });
+        if (request.method === "GET") {
+          const model = await orgModel.summary();
+          return await reply(response, 200, { model: model ?? null, source: model ? "organization" : models.llm ? "operator" : "built-in" });
+        }
+        if (request.method === "PUT") {
+          try {
+            const model = await orgModel.save(user.id, await body(request));
+            brain.audit.append("model_changed", user.id, { action: "set", provider: model.provider, model: model.model, baseUrl: model.baseUrl });
+            return await reply(response, 200, { model, source: "organization" });
+          } catch (error) {
+            if (error instanceof ModelCheckFailed) return await reply(response, error.refused ? 400 : 502,
+              { error: error.refused ? "The model provider refused the request. Check the key, the model name and the address." : "The model provider could not be reached. Try again." });
+            throw error;
+          }
+        }
+        if (request.method === "DELETE") {
+          await orgModel.remove();
+          brain.audit.append("model_changed", user.id, { action: "removed" });
+          return await reply(response, 200, { ok: true });
+        }
+        return await reply(response, 404, { error: "Not found" });
       }
 
       if (url.pathname.startsWith("/v1/admin/connections") || url.pathname === "/v1/admin/import-jobs" || url.pathname === "/v1/admin/onboard") {

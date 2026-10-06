@@ -89,6 +89,32 @@ function botCard(installation) {
     actions.append(refresh, disconnect);
   }
 }
+const modelProvider = document.getElementById("model-provider");
+const syncModelForm = () => { document.getElementById("model-url-label").hidden = modelProvider.value !== "openai_compatible"; };
+modelProvider.onchange = syncModelForm;
+const modelLabels = { organization: "Your organization's model is answering questions.", operator: "No model chosen here. Broppy's own default model is answering.", "built-in": "No model chosen. Broppy's built-in writer answers from the sources, without an AI model." };
+async function loadModel() {
+  try {
+    const { model, source } = await request("/v1/admin/model");
+    document.getElementById("model-status").textContent = model ? `${modelLabels[source]} Using ${model.model} (${model.provider.replace("_", "-")}).` : modelLabels[source];
+    if (model && !document.getElementById("model-form").contains(document.activeElement)) {
+      modelProvider.value = model.provider; document.getElementById("model-name").value = model.model; document.getElementById("model-url").value = model.baseUrl || ""; syncModelForm();
+    }
+    document.getElementById("model-remove").hidden = !model;
+  } catch (error) { document.getElementById("model-status").textContent = error.message; }
+}
+document.getElementById("model-form").onsubmit = async event => {
+  event.preventDefault();
+  const key = document.getElementById("model-key");
+  try {
+    document.getElementById("model-status").textContent = "Testing the connection...";
+    await request("/v1/admin/model", "PUT", { provider: modelProvider.value, model: document.getElementById("model-name").value,
+      ...(modelProvider.value === "openai_compatible" || document.getElementById("model-url").value ? { baseUrl: document.getElementById("model-url").value } : {}),
+      ...(key.value ? { apiKey: key.value } : {}) });
+    key.value = ""; await loadModel();
+  } catch (error) { document.getElementById("model-status").textContent = error.message; }
+};
+document.getElementById("model-remove").onclick = async () => { try { await request("/v1/admin/model", "DELETE"); await loadModel(); } catch (error) { document.getElementById("model-status").textContent = error.message; } };
 async function load() {
   const [result, progress, installation] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs"), request("/v1/admin/slack-installation")]);
   botCard(installation);
@@ -117,5 +143,5 @@ async function load() {
   if (!result.unmatched.length) unmatched.append(element("li", "All directory users have source identities."));
 }
 document.getElementById("onboard").onclick = async () => { try { await request("/v1/admin/onboard", "POST"); await load(); } catch (error) { status.textContent = error.message; } };
-try { await load(); setInterval(() => load().catch(error => { status.textContent = error.message; }), 3000); }
+try { await loadModel(); await load(); setInterval(() => load().catch(error => { status.textContent = error.message; }), 3000); }
 catch (error) { status.textContent = error.message; }
