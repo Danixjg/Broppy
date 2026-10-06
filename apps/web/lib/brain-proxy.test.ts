@@ -51,6 +51,21 @@ it("passes other API errors through unchanged", async () => {
   expect(response.status).toBe(403);
   expect(await response.json()).toEqual({ error: "Forbidden" });
 });
+it("says which step failed: no API token, no API address on Vercel, or an unreachable API", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  signedInApi(Response.json({}));
+  sdk.getAccessToken.mockRejectedValue(new Error("no token"));
+  let response = await GET(new NextRequest("http://127.0.0.1:3001/api/brain/v1/me"), params);
+  expect([response.status, (await response.json()).code]).toEqual([401, "token_unavailable"]);
+  sdk.getAccessToken.mockResolvedValue({ token: "sdk-test-token" });
+  vi.stubEnv("VERCEL", "1");
+  response = await GET(new NextRequest("http://127.0.0.1:3001/api/brain/v1/me"), params);
+  expect([response.status, (await response.json()).code]).toEqual([503, "api_not_configured"]);
+  vi.stubEnv("BRAIN_API_URL", "https://api.example");
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
+  response = await GET(new NextRequest("http://127.0.0.1:3001/api/brain/v1/me"), params);
+  expect([response.status, (await response.json()).code]).toEqual([502, "api_unreachable"]);
+});
 const demoParams = { params: Promise.resolve({ path: ["v1", "workspace"] }) };
 function demoRequest(options: { method?: string; persona?: string; cookie?: boolean; origin?: string; body?: string } = {}) {
   const headers: Record<string, string> = {};

@@ -40,14 +40,14 @@ AUTH0_AUDIENCE=API_IDENTIFIER
 AUTH0_ORG_ID=ORGANIZATION_ID
 SUPABASE_URL=https://SUPABASE_PROJECT.supabase.co
 SUPABASE_SECRET_KEY=SUPABASE_SERVER_SECRET_KEY
-AUDIT_SIGNING_KEY_FILE=PATH_TO_RUNTIME_SIGNING_KEY
+AUDIT_SIGNING_KEY=ED25519_PEM_PRIVATE_KEY
 WEB_ORIGIN=https://WEB_PROJECT.vercel.app
 API_ORIGIN=https://API_PROJECT.vercel.app
 ```
 
 Keep the trailing slash on `AUTH0_ISSUER`. Provision the Supabase schema and active organization directory members using [live sources and sign-in](live-sources-and-sign-in.md).
 
-`AUDIT_SIGNING_KEY_FILE` must point to a readable PEM private key in the running function. Setting a path in Vercel does not create or package the key. Provision the key through your private deployment process before enabling the API. The committed configuration packages the native module only. Do not commit private keys.
+`AUDIT_SIGNING_KEY` holds the Ed25519 PEM private key itself (Vercel has no place for a key file). Add it as a **Sensitive** variable; line breaks may be pasted as real newlines or written as `\n`. Generate one with `openssl genpkey -algorithm ed25519`. `AUDIT_SIGNING_KEY_FILE` (a path to a PEM in the running function) still works and is used only when `AUDIT_SIGNING_KEY` is unset. Do not commit private keys.
 
 Configure connector credentials separately through [Slack onboarding](slack-onboarding.md) and [live sources](live-sources-and-sign-in.md). Keep `PUBLIC_DEMO` disabled for this signed-in API. A public demo requires its own API and the web host's separate `DEMO_API_URL`.
 
