@@ -163,7 +163,7 @@ loads no env file. Sign-ins never reach it, because the website sends Auth0 toke
 | `SUPABASE_URL must be an HTTPS project origin` | The URL isn't `https://…`, or it has a path |
 | `Supabase workspace users failed (401)` / `(404)` / `fetch failed` | Wrong secret key, migrations `002`/`003` missing, or no network |
 | `Invalid persistence configuration` | `AUTH0_ORG_ID` is empty while `SUPABASE_URL` is set |
-| `AUDIT_SIGNING_KEY_FILE is required for durable audit` | No signing key path is set |
+| `AUDIT_SIGNING_KEY or AUDIT_SIGNING_KEY_FILE is required for durable audit` | Neither the key itself (`AUDIT_SIGNING_KEY`, for Vercel) nor a key file path is set |
 | `ENOENT … .pem` | The key path is wrong. It's resolved from the repository root. |
 | `Invalid Auth0 configuration` | `AUTH0_ISSUER` isn't exactly `https://AUTH0_DOMAIN/` (check the trailing slash), or the audience or org is empty |
 

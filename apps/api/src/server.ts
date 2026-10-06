@@ -130,18 +130,23 @@ export function actorTrace(entries: AuditEntry[]): Array<Pick<AuditEntry, "seque
   });
 }
 
+/** The audit signing key: the PEM itself in AUDIT_SIGNING_KEY (for hosts without a place for a key file, such as Vercel; line breaks may be written as \n), or the file at AUDIT_SIGNING_KEY_FILE. */
+function auditSigningKey(requiredBy: string): Buffer {
+  const pem = process.env.AUDIT_SIGNING_KEY?.trim();
+  if (pem) return Buffer.from(pem.replace(/\\n/g, "\n"));
+  const keyPath = process.env.AUDIT_SIGNING_KEY_FILE;
+  if (!keyPath) throw new Error(`AUDIT_SIGNING_KEY or AUDIT_SIGNING_KEY_FILE is required ${requiredBy}`);
+  return readFileSync(keyPath);
+}
+
 async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
   if (persistence) {
-    const keyPath = process.env.AUDIT_SIGNING_KEY_FILE;
-    if (!keyPath) throw new Error("AUDIT_SIGNING_KEY_FILE is required for durable audit");
-    return new AuditLog({ orgId: persistence.orgId, signingKey: readFileSync(keyPath), initial: await persistence.loadAudit(),
+    return new AuditLog({ orgId: persistence.orgId, signingKey: auditSigningKey("for durable audit"), initial: await persistence.loadAudit(),
       persist: (kind, value) => persistence.appendAudit(kind, value) });
   }
   const path = process.env.AUDIT_LOG_PATH;
   if (!path) return new AuditLog();
-  const keyPath = process.env.AUDIT_SIGNING_KEY_FILE;
-  if (!keyPath) throw new Error("AUDIT_SIGNING_KEY_FILE is required with AUDIT_LOG_PATH");
-  return new AuditLog({ store: new FileAuditStore(path), signingKey: readFileSync(keyPath) });
+  return new AuditLog({ store: new FileAuditStore(path), signingKey: auditSigningKey("with AUDIT_LOG_PATH") });
 }
 
 export async function createApiServer(options: ApiServerOptions = {}): Promise<ApiServer> {
