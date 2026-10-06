@@ -193,7 +193,7 @@ describe("chatLlmFromEnv", () => {
     expect(tokenhub?.provider).toBe("tokenhub");
     expect(tokenhub?.endpoint).toBe("https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions");
     expect(() => chatLlmFromEnv({ LLM_PROVIDER: "other", LLM_API_KEY: "key", LLM_MODEL: "model" }))
-      .toThrow("LLM_PROVIDER must be hunyuan, tokenhub or groq");
+      .toThrow("LLM_PROVIDER must be hunyuan, tokenhub, groq, anthropic, openai or openai_compatible");
     expect(() => chatLlmFromEnv({ LLM_API_KEY: "key", LLM_MODEL: "model" })).toThrow("LLM_PROVIDER");
   });
 
@@ -205,5 +205,58 @@ describe("chatLlmFromEnv", () => {
       .toBe("https://llm.example.test/openai/v1/chat/completions");
     expect(() => chatLlmFromEnv({ ...base, LLM_BASE_URL: "http://llm.example.test/v1" })).toThrow("LLM_BASE_URL");
     expect(() => chatLlmFromEnv({ ...base, LLM_MAX_TOKENS: "0" })).toThrow("LLM_MAX_TOKENS");
+  });
+});
+
+describe("Anthropic and OpenAI providers", () => {
+  const messages = (content: unknown[], extra: Record<string, unknown> = {}) =>
+    new Response(JSON.stringify({ type: "message", role: "assistant", content, stop_reason: "end_turn",
+      usage: { input_tokens: 40, output_tokens: 10 }, ...extra }), { status: 200 });
+
+  it("calls Anthropic's Messages API and joins its text blocks, leaving thinking out", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => messages([
+      { type: "thinking", thinking: "hmm" }, { type: "text", text: "At 2 PM. " }, { type: "text", text: "[jira:PAY-101:0]" }]));
+    const client = new ChatLlm({ provider: "anthropic", apiKey: "sk-ant-secret", model: "claude-sonnet-5-5", fetch: fetcher as typeof fetch });
+    const result = await client.generateWithUsage(context, "When is cutover?");
+    expect(result).toEqual({ text: "At 2 PM. [jira:PAY-101:0]", usage: { prompt: 40, completion: 10, total: 50 } });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+    expect(init.headers).toEqual({ "x-api-key": "sk-ant-secret", "anthropic-version": "2023-06-01", "Content-Type": "application/json" });
+    const body = JSON.parse(init.body as string);
+    expect(body.model).toBe("claude-sonnet-5-5");
+    expect(body.max_tokens).toBe(1500);
+    expect(typeof body.system).toBe("string");
+    expect(body.messages).toHaveLength(1);
+    expect(JSON.parse(body.messages[0].content)).toEqual({ question: "When is cutover?", context });
+  });
+
+  it("treats a cut-off or refused Anthropic answer as a failed call that is still counted", async () => {
+    const cut = new ChatLlm({ provider: "anthropic", apiKey: "k", model: "m",
+      fetch: (async () => messages([{ type: "text", text: "part" }], { stop_reason: "max_tokens" })) as typeof fetch });
+    await expect(cut.generate(context, "q")).rejects.toMatchObject({ usage: { total: 50 } });
+    const refused = new ChatLlm({ provider: "anthropic", apiKey: "k", model: "m",
+      fetch: (async () => new Response("{}", { status: 401 })) as typeof fetch });
+    await expect(refused.generate(context, "q")).rejects.toThrow("Model request refused");
+    const limited = new ChatLlm({ provider: "anthropic", apiKey: "k", model: "m",
+      fetch: (async () => new Response("{}", { status: 429 })) as typeof fetch });
+    await expect(limited.generate(context, "q")).rejects.toBeInstanceOf(ModelUnavailable);
+  });
+
+  it("sends OpenAI max_completion_tokens, and compatible servers max_tokens at their own address", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "ok [jira:PAY-101:0]" }));
+    await new ChatLlm({ provider: "openai", apiKey: "sk", model: "gpt-x", fetch: fetcher as typeof fetch }).generate(context, "q");
+    expect(fetcher.mock.calls[0][0]).toBe("https://api.openai.com/v1/chat/completions");
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toMatchObject({ max_completion_tokens: 1500 });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).not.toHaveProperty("max_tokens");
+    await new ChatLlm({ provider: "openai_compatible", apiKey: "sk", model: "llama", baseUrl: "https://llm.example.com/v1/",
+      fetch: fetcher as typeof fetch }).generate(context, "q");
+    expect(fetcher.mock.calls[1][0]).toBe("https://llm.example.com/v1/chat/completions");
+    expect(JSON.parse(fetcher.mock.calls[1][1].body as string)).toMatchObject({ max_tokens: 1500 });
+    expect(() => new ChatLlm({ provider: "openai_compatible", apiKey: "sk", model: "llama" })).toThrow("Invalid model configuration");
+  });
+
+  it("can be chosen with LLM_PROVIDER", () => {
+    expect(chatLlmFromEnv({ LLM_PROVIDER: "anthropic", LLM_API_KEY: "k", LLM_MODEL: "m" })?.provider).toBe("anthropic");
+    expect(() => chatLlmFromEnv({ LLM_PROVIDER: "nope", LLM_API_KEY: "k", LLM_MODEL: "m" })).toThrow("LLM_PROVIDER must be");
   });
 });

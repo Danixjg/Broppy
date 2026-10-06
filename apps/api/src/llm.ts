@@ -1,6 +1,8 @@
 import type { LlmClient } from "@brain/retrieval";
 
-export type LlmProvider = "hunyuan" | "tokenhub" | "groq";
+export type LlmProvider = "hunyuan" | "tokenhub" | "groq" | "anthropic" | "openai" | "openai_compatible";
+/** Providers an organization's admin can choose in settings. The others are for the operator's own settings (env vars). */
+export const ORG_PROVIDERS = ["anthropic", "openai", "openai_compatible"] as const;
 export type UnavailableReason = "budget" | "daily_limit" | "rate_limited" | "meter";
 
 /** The model can't be used right now, so the caller answers without it. */
@@ -34,10 +36,16 @@ export const REQUEST_TIMEOUT_MS = 60_000;
 // answers use only our context; TokenHub is Tencent's international model service. Sampling stays at each model's
 // default: OpenAI recommends temperature 1.0 for gpt-oss, and forcing 0 can make a reasoning model loop. A fixed seed
 // was tried on Groq and didn't make the same question get the same answer, so answers vary from run to run.
-const PRESETS: Record<LlmProvider, { baseUrl: string; extra: Record<string, unknown> }> = {
-  hunyuan: { baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", extra: { enable_enhancement: false } },
-  tokenhub: { baseUrl: "https://tokenhub-intl.tencentcloudmaas.com/v1", extra: {} },
-  groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {} }
+// Anthropic speaks its own Messages API. OpenAI's newer models refuse max_tokens and want max_completion_tokens, which
+// other OpenAI-compatible servers (Azure, vLLM, Ollama and the like) may not know, so only "openai" itself sends that.
+const PRESETS: Record<LlmProvider, { baseUrl?: string; extra: Record<string, unknown>; format: "chat" | "messages";
+  limitField: "max_tokens" | "max_completion_tokens" }> = {
+  hunyuan: { baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", extra: { enable_enhancement: false }, format: "chat", limitField: "max_tokens" },
+  tokenhub: { baseUrl: "https://tokenhub-intl.tencentcloudmaas.com/v1", extra: {}, format: "chat", limitField: "max_tokens" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", extra: {}, format: "chat", limitField: "max_tokens" },
+  anthropic: { baseUrl: "https://api.anthropic.com", extra: {}, format: "messages", limitField: "max_tokens" },
+  openai: { baseUrl: "https://api.openai.com/v1", extra: {}, format: "chat", limitField: "max_completion_tokens" },
+  openai_compatible: { extra: {}, format: "chat", limitField: "max_tokens" }
 };
 
 // The model may reword lightly (D64): the answer checker (packages/retrieval/src/grounding.ts) keeps a line only when
@@ -61,6 +69,16 @@ const SYSTEM = [
 /** For a provider that doesn't report usage: about three characters a token, rounded up, so the count errs high. */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 3);
 const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+function anthropicUsage(result: unknown): TokenUsage | undefined {
+  const usage = result && typeof result === "object" && "usage" in result && result.usage &&
+    typeof result.usage === "object" ? result.usage : undefined;
+  return usage && "input_tokens" in usage && "output_tokens" in usage && count(usage.input_tokens) &&
+    count(usage.output_tokens)
+    ? { prompt: usage.input_tokens as number, completion: usage.output_tokens as number,
+      total: (usage.input_tokens as number) + (usage.output_tokens as number) }
+    : undefined;
+}
 
 function reportedUsage(result: unknown): TokenUsage | undefined {
   const usage = result && typeof result === "object" && "usage" in result && result.usage &&
@@ -90,13 +108,17 @@ export class ChatLlm implements LlmClient {
   private readonly timeoutMs: number;
   private readonly fetcher: typeof fetch;
 
+  private get messages() { return PRESETS[this.options.provider].format === "messages"; }
+
   constructor(private readonly options: ChatLlmOptions) {
     if (!Object.hasOwn(PRESETS, options.provider)) throw new Error("Invalid model provider");
     if (!options.apiKey.trim() || !options.model.trim() || /[\r\n]/.test(options.apiKey)) {
       throw new Error("Invalid model configuration");
     }
     this.provider = options.provider;
-    this.endpoint = `${(options.baseUrl ?? PRESETS[options.provider].baseUrl).replace(/\/+$/, "")}/chat/completions`;
+    const base = options.baseUrl ?? PRESETS[options.provider].baseUrl;
+    if (!base) throw new Error("Invalid model configuration");
+    this.endpoint = `${base.replace(/\/+$/, "")}${this.messages ? "/v1/messages" : "/chat/completions"}`;
     this.maxTokens = options.maxTokens ?? 1500;
     this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
     this.fetcher = options.fetch ?? fetch;
@@ -126,10 +148,9 @@ export class ChatLlm implements LlmClient {
     try {
       response = await this.fetcher(this.endpoint, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.options.apiKey}`,
-          "Content-Type": "application/json"
-        },
+        headers: this.messages
+          ? { "x-api-key": this.options.apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" }
+          : { "Authorization": `Bearer ${this.options.apiKey}`, "Content-Type": "application/json" },
         body,
         redirect: "error",
         signal: AbortSignal.timeout(this.timeoutMs)
@@ -157,8 +178,16 @@ export class ChatLlm implements LlmClient {
     // The answer, reasoning included, as the provider counted it, or estimated from what came back.
     const prompt = estimateTokens(body);
     const completion = estimateTokens(raw);
-    const usage = reportedUsage(result) ?? { prompt, completion, total: prompt + completion };
+    const usage = (this.messages ? anthropicUsage(result) : reportedUsage(result)) ?? { prompt, completion, total: prompt + completion };
     const invalid = (message = "Invalid model response") => new ModelCallError(message, usage);
+    const content = this.messages ? this.parseMessages(result, invalid) : this.parseChat(result, invalid);
+    // A reasoning model may think aloud in <think> tags or a separate field; only the answer counts.
+    const text = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    if (!text) throw invalid();
+    return { text, usage };
+  }
+
+  private parseChat(result: unknown, invalid: (message?: string) => ModelCallError): string {
     if (!result || typeof result !== "object" || !("choices" in result) ||
       !Array.isArray(result.choices) || result.choices.length !== 1) {
       throw invalid();
@@ -174,25 +203,36 @@ export class ChatLlm implements LlmClient {
       !("content" in choice.message) || typeof choice.message.content !== "string") {
       throw invalid();
     }
-    // A reasoning model may think aloud in <think> tags or a separate field; only the answer counts.
-    const text = choice.message.content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-    if (!text) throw invalid();
-    return { text, usage };
+    return choice.message.content;
+  }
+
+  /** Anthropic's answer is a list of blocks; the text blocks are the answer and thinking blocks are left out. */
+  private parseMessages(result: unknown, invalid: (message?: string) => ModelCallError): string {
+    if (!result || typeof result !== "object" || !("role" in result) || result.role !== "assistant" ||
+      !("content" in result) || !Array.isArray(result.content) || !("stop_reason" in result)) {
+      throw invalid();
+    }
+    if (result.stop_reason === "max_tokens") throw invalid("Model answer cut off at LLM_MAX_TOKENS");
+    if (result.stop_reason !== "end_turn" && result.stop_reason !== "stop_sequence") throw invalid();
+    return result.content.flatMap((block: unknown) => block && typeof block === "object" && "type" in block &&
+      block.type === "text" && "text" in block && typeof block.text === "string" ? [block.text] : []).join("");
   }
 
   private request(context: Array<{ citation: string; text: string }>, question: string): string {
+    const preset = PRESETS[this.provider];
+    const user = { role: "user", content: JSON.stringify({
+      question,
+      context: context.map(({ citation, text }) => ({ citation, text }))
+    }) };
+    if (preset.format === "messages") {
+      return JSON.stringify({ model: this.options.model, max_tokens: this.maxTokens, system: SYSTEM, messages: [user] });
+    }
     return JSON.stringify({
       model: this.options.model,
       stream: false,
-      max_tokens: this.maxTokens,
-      ...PRESETS[this.provider].extra,
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: JSON.stringify({
-          question,
-          context: context.map(({ citation, text }) => ({ citation, text }))
-        }) }
-      ]
+      [preset.limitField]: this.maxTokens,
+      ...preset.extra,
+      messages: [{ role: "system", content: SYSTEM }, user]
     });
   }
 }
@@ -231,15 +271,38 @@ export function chatLlmFromEnv(env: NodeJS.ProcessEnv = process.env, fetcher?: t
   const legacy = Boolean(env.HUNYUAN_API_KEY || env.HUNYUAN_MODEL);
   if (!legacy && !env.LLM_PROVIDER && !env.LLM_API_KEY && !env.LLM_MODEL) return undefined;
   const provider = env.LLM_PROVIDER || (legacy ? "hunyuan" : undefined);
-  if (provider !== "hunyuan" && provider !== "tokenhub" && provider !== "groq") {
-    throw new Error("LLM_PROVIDER must be hunyuan, tokenhub or groq");
+  if (provider === undefined || !Object.hasOwn(PRESETS, provider)) {
+    throw new Error("LLM_PROVIDER must be hunyuan, tokenhub, groq, anthropic, openai or openai_compatible");
   }
   return new ChatLlm({
-    provider,
+    provider: provider as LlmProvider,
     apiKey: env.LLM_API_KEY || (provider === "hunyuan" ? env.HUNYUAN_API_KEY : undefined) || "",
     model: env.LLM_MODEL || (provider === "hunyuan" ? env.HUNYUAN_MODEL : undefined) || "",
     baseUrl: baseUrlFromEnv(env.LLM_BASE_URL),
     maxTokens: positiveInteger(env.LLM_MAX_TOKENS, "LLM_MAX_TOKENS"),
     fetch: fetcher
   });
+}
+
+/**
+ * An address an administrator typed in settings. This server will call it, so it must be HTTPS and must not point at
+ * this machine or a private network. (A name that resolves to a private address is not caught here.)
+ */
+export function publicHttpsBaseUrl(value: unknown): string {
+  let url: URL;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new Error("Invalid model address");
+  }
+  const host = url.hostname.toLowerCase();
+  const octets = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)?.slice(1).map(Number);
+  const privateV4 = octets && (octets[0] === 0 || octets[0] === 10 || octets[0] === 127 || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) ||
+    (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168));
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || host.startsWith("[") ||
+    privateV4 || host === "localhost" || !host.includes(".") || /\.(localhost|local|internal|lan)$/.test(host)) {
+    throw new Error("Invalid model address");
+  }
+  return `${url.origin}${url.pathname}`;
 }
