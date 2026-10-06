@@ -149,7 +149,9 @@ loads no env file. Sign-ins never reach it, because the website sends Auth0 toke
 | Logout shows an Auth0 error about the logout URL | **Allowed Logout URLs** doesn't contain the exact `APP_BASE_URL` value | Add `http://127.0.0.1:3001` |
 | The workspace says "You are signed in, but the workspace API did not accept your account" (401) | The API rejected a valid session. In order of likelihood: 1. The API was started with `pnpm dev` instead of `pnpm dev:sso`. 2. `AUTH0_ISSUER`, `AUTH0_AUDIENCE` or `AUTH0_ORG_ID` differ between the token and the API. 3. The user's `sub` isn't in `workspace_users` for that org, or the row has `active = false`. | Check each in order. The workspace shows **Log out**, so you can switch to a seeded user. |
 | "Your sign-in session has ended. Log in again." (401) | The web session cookie is gone or expired, or `AUTH0_SECRET` changed | Log in again |
-| 502 "Workspace request failed; sign in again or check API availability" | The API isn't running at `BRAIN_API_URL`, or the access token expired and couldn't be refreshed (**Allow Offline Access** is off) | Start `pnpm dev:sso`; turn on offline access; log out and in |
+| 401 `token_unavailable` | The session has no API access token (offline access is off, or the audience is wrong) | Turn on offline access; log out and in |
+| 503 `api_not_configured` | `BRAIN_API_URL` is not set on the Vercel web project | Set it to the deployed API origin and redeploy |
+| 502 `api_unreachable` | The API is not running at `BRAIN_API_URL`, or Vercel answered with a redirect (deployment protection) | Check the API deployment and the URL |
 | 503 "Workspace API audience and organization are not configured" | `AUTH0_AUDIENCE` or `AUTH0_ORG_ID` is empty for the web host | Set both and restart the web host |
 
 ### API startup errors (`pnpm dev:sso`)

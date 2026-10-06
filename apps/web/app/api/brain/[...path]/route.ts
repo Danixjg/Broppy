@@ -6,6 +6,8 @@ type Context = { params: Promise<{ path: string[] }> };
 
 const signedOut = { error: "Your sign-in session has ended. Log in again.", code: "signed_out" };
 // One message for every API rejection cause, so configuration and directory details are not revealed.
+const tokenUnavailable = { error: "Your sign-in is missing the access token for the workspace API. Log out and log in again; if it persists, check Auth0 offline access and the API audience.", code: "token_unavailable" };
+const apiNotConfigured = { error: "BRAIN_API_URL is not set on this deployment, so the web app does not know where the workspace API is.", code: "api_not_configured" };
 const accountRejected = { error: "You are signed in, but the workspace API did not accept your account. " +
   "Ask an administrator to check the API's Auth0 settings and your workspace directory entry.", code: "account_rejected" };
 const demoRejected = { error: "The demo API did not accept this persona. It must run as the public demo " +
@@ -64,8 +66,14 @@ async function forward(request: NextRequest, context: Context) {
   }
   const outbound = await outgoing(request, context);
   if (outbound instanceof Response) return outbound;
+  // On Vercel there is no API on localhost, so a missing BRAIN_API_URL is a configuration error, not an unreachable API.
+  if (!process.env.BRAIN_API_URL && process.env.VERCEL) return Response.json(apiNotConfigured, { status: 503, headers: { "cache-control": "no-store" } });
+  let token: string;
+  try { ({ token } = await auth0.getAccessToken()); } catch (error) {
+    console.error("brain proxy: no access token for the API", error instanceof Error ? error.name : "unknown");
+    return Response.json(tokenUnavailable, { status: 401, headers: { "cache-control": "no-store" } });
+  }
   try {
-    const { token } = await auth0.getAccessToken();
     const response = await fetch(new URL(outbound.path, process.env.BRAIN_API_URL ?? "http://127.0.0.1:3000"), {
       method: request.method, redirect: "error", cache: "no-store",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: outbound.body,
@@ -75,8 +83,10 @@ async function forward(request: NextRequest, context: Context) {
       return Response.json(accountRejected, { status: 401, headers: { "cache-control": "no-store" } });
     }
     return new Response(response.body, { status: response.status, headers: JSON_NO_STORE });
-  } catch {
-    return Response.json({ error: "Workspace request failed; sign in again or check API availability" }, { status: 502 });
+  } catch (error) {
+    // The name and cause code say whether this was a timeout, a refused connection or a redirect, without revealing the URL.
+    console.error("brain proxy: API request failed", error instanceof Error ? error.name : "unknown", (error as { cause?: { code?: string } })?.cause?.code ?? "");
+    return Response.json({ error: "The workspace API could not be reached. Check that BRAIN_API_URL points at the deployed API and that it is running.", code: "api_unreachable" }, { status: 502, headers: { "cache-control": "no-store" } });
   }
 }
 export { forward as GET, forward as POST, forward as PUT, forward as DELETE };
