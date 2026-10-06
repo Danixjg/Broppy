@@ -38,6 +38,12 @@ describe("scoreMessage", () => {
   it("recognises a Slack mention as the owner", () => {
     expect(scoreMessage("Action: <@UDAVID> to update the runbook by tomorrow", people, posted).assignee?.slackId).toBe("UDAVID");
   });
+  it("binds first-person commitments to the sender rather than a later named person", () => {
+    const text = "I will ask Maya to increase replicas by Friday";
+    expect(scoreMessage(text, people, posted, 0.6, "UDAVID").assignee?.slackId).toBe("UDAVID");
+    expect(scoreMessage(text, people, posted).assignee).toBeUndefined();
+    expect(scoreMessage("I will increase replicas by Friday", people, posted, 0.6, "UMAYA").suggest).toBe(true);
+  });
 });
 
 describe("parseDue", () => {

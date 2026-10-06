@@ -1,3 +1,5 @@
 {
+  "buildCommand": "bash ../../scripts/build-slack.sh",
+  "functions": { "api/index.ts": { "includeFiles": "../../packages/rust-core/brain-core.node" } },
   "rewrites": [{ "source": "/slack/:path*", "destination": "/api" }]
 }

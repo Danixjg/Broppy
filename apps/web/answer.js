@@ -206,8 +206,13 @@ export function auditSummary(entry) {
     case "sync_failed": return `Sync failed for ${source}`;
     case "connection_created": return `${data.reconnected ? "Reconnected" : "Connected"} ${source}`;
     case "connection_removed": return `Disconnected ${source}`;
+    case "user_connection_created": return `Connected a personal ${source} account`;
+    case "user_connection_removed": return `Disconnected a personal ${source} account`;
     case "scope_changed": return `Changed what ${source} imports: ${text(data.mode) || "all"}${data.futureOnly ? ", only what is new" : ""}`;
     case "task_created": return `Created ${doc} from ${text(data.fromDocId)}`;
+    case "jira_issue_created_from_slack": return `Created Jira issue ${text(data.key)} from Slack`;
+    case "jira_comment_added_from_slack": return `Added a comment to Jira issue ${text(data.key)} from Slack`;
+    case "commitment_reviewed": return `Reviewed the commitment in ${text(data.fromDocId)}: ${text(data.action)}, revision ${count(data.revision)}`;
     case "task_status_changed": return `Marked ${doc} ${text(data.status)}`;
     case "tier_narrowed": return `Narrowed ${doc} to the ${text(data.tier)} tier`;
     case "native_permission_changed": return `Changed the source permissions of ${doc}`;

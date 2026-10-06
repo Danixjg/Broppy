@@ -2,7 +2,8 @@ import generatedDocuments from "../../../data/generated/documents.json" with { t
 import generatedGroups from "../../../data/generated/persona-groups.json" with { type: "json" };
 import documents from "../../../data/mock/documents.json" with { type: "json" };
 import users from "../../../data/mock/users.json" with { type: "json" };
-import type { NativePermission, Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import type { NativePermission, ProviderCheckpoint, Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import { core } from "@brain/rust-core";
 import { withLinks } from "./links.js";
 
 export { linkFromUrl, linksIn, withLinks } from "./links.js";
@@ -24,7 +25,7 @@ export interface ImportScope { mode?: ImportMode; containers?: string[]; ids?: s
 
 /** True when the scope selects nothing, so no request to the provider is needed. */
 export function selectsNothing(scope: ImportScope = {}): boolean {
-  return scope.mode === "none" || (scope.mode === "selected" && !scope.containers?.length && !scope.ids?.length);
+  return core<boolean>("policy.selectsNothing", { scope });
 }
 
 export interface Container { id: string; name: string; }
@@ -36,7 +37,7 @@ export interface Connector {
   readonly source: Source;
   listItems(): Promise<SourceDocument[]>;
   listIds(): Promise<string[]>;
-  listUpdatedSince(cursor: number): Promise<{ ids: string[]; cursor: number }>;
+  listUpdatedSince(cursor: number, checkpoint?: ProviderCheckpoint): Promise<{ ids: string[]; cursor: number; checkpoint?: ProviderCheckpoint }>;
   fetchContent(id: string): Promise<string | undefined>;
   fetchDocument(id: string): Promise<SourceDocument | undefined>;
   fetchPermissions(id: string): Promise<SourcePermission | undefined>;
@@ -48,60 +49,15 @@ export interface Connector {
 }
 
 export function nativeAllows(user: User, permission: SourcePermission): boolean {
-  if (user.contractor && !permission.users.includes(user.email)) return false;
-  const brainAllows = permission.public ||
-    permission.users.includes(user.email) ||
-    permission.groups.some(group => user.groups.includes(group));
-  if (!brainAllows || !permission.native) return false;
-
-  const native = permission.native;
-  const email = user.platformIdentities?.[native.source];
-  if (!email) return false;
-  switch (native.source) {
-    case "slack":
-      return (!user.contractor && native.visibility === "public") || native.members.includes(email);
-    case "jira":
-      return native.projectViewers.includes(email) &&
-        (!native.issueViewers || native.issueViewers.includes(email));
-    case "confluence":
-      return native.spaceViewers.includes(email) &&
-        (!native.pageViewers || native.pageViewers.includes(email));
-    case "drive":
-      return native.owner === email || native.sharedUsers.includes(email);
-  }
+  return core<boolean>("policy.nativeAllows", { user, permission });
 }
 
 function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
-function subset(next: string[], current: string[]): boolean {
-  return next.every(value => current.includes(value));
-}
-
-function restrictionSubset(next: string[] | undefined, current: string[] | undefined): boolean {
-  return current === undefined || (next !== undefined && subset(next, current));
-}
-
 function nativeSubset(next: NativePermission, current: NativePermission): boolean {
-  if (next.source !== current.source) return false;
-  switch (current.source) {
-    case "slack":
-      return next.source === "slack" && next.channelId === current.channelId &&
-        (current.visibility === "public" ||
-          (next.visibility === "private" && subset(next.members, current.members)));
-    case "jira":
-      return next.source === "jira" && next.projectKey === current.projectKey &&
-        subset(next.projectViewers, current.projectViewers) &&
-        restrictionSubset(next.issueViewers, current.issueViewers);
-    case "confluence":
-      return next.source === "confluence" && next.spaceKey === current.spaceKey &&
-        subset(next.spaceViewers, current.spaceViewers) &&
-        restrictionSubset(next.pageViewers, current.pageViewers);
-    case "drive":
-      return next.source === "drive" && next.fileId === current.fileId &&
-        next.owner === current.owner && subset(next.sharedUsers, current.sharedUsers);
-  }
+  return core<boolean>("policy.nativeSubset", { next, current });
 }
 
 export class MockConnector implements Connector {
@@ -152,7 +108,7 @@ export class MockConnector implements Connector {
     return [...this.docs.keys()].sort();
   }
 
-  async listUpdatedSince(cursor: number): Promise<{ ids: string[]; cursor: number }> {
+  async listUpdatedSince(cursor: number, _checkpoint?: ProviderCheckpoint): Promise<{ ids: string[]; cursor: number; checkpoint?: ProviderCheckpoint }> {
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("Invalid cursor");
     return {
       ids: [...new Set(this.events.filter(event => event.cursor > cursor)

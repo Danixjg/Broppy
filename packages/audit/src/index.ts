@@ -1,17 +1,10 @@
-import { createHash, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
+import { createPublicKey, sign, verify, type KeyObject } from "node:crypto";
 import { appendFileSync, existsSync, openSync, readFileSync, closeSync, fsyncSync } from "node:fs";
 import type { AuditEntry, MerkleBatch, MerkleProof } from "@brain/types";
+import { core } from "@brain/rust-core";
 
 const GENESIS = "0".repeat(64);
 const HASH = /^[0-9a-f]{64}$/;
-
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function pair(left: string, right: string): string {
-  return digest(`${left}:${right}`);
-}
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -19,8 +12,9 @@ function canonical(value: unknown): unknown {
   return value;
 }
 
-function entryHash(entry: AuditEntry): string {
-  return digest(JSON.stringify({
+// Existing signatures and hashes require Node's locale ordering and JSON byte representation.
+function entryPayload(entry: AuditEntry): string {
+  return JSON.stringify({
     ...(entry.hashVersion ? { hashVersion: entry.hashVersion } : {}),
     sequence: entry.sequence,
     timestamp: entry.timestamp,
@@ -28,7 +22,11 @@ function entryHash(entry: AuditEntry): string {
     actor: entry.actor,
     data: entry.hashVersion === 2 ? canonical(entry.data) : entry.data,
     previousHash: entry.previousHash
-  }));
+  });
+}
+
+function entryHash(entry: AuditEntry): string {
+  return core<string>("audit.digest", { payload: entryPayload(entry) });
 }
 
 export interface SignedMerkleBatch extends MerkleBatch {
@@ -56,33 +54,7 @@ export class FileAuditStore implements AuditStore {
     const entries: AuditEntry[] = [];
     const batches: SignedMerkleBatch[] = [];
     if (!existsSync(this.path)) return { entries, batches };
-    const content = readFileSync(this.path, "utf8");
-    if (!content) return { entries, batches };
-    if (content && !content.endsWith("\n")) throw new Error("Incomplete audit record");
-    let nextSequence = 1;
-    let nextBatchSequence = 1;
-    for (const line of content.slice(0, -1).split("\n")) {
-      if (!line) throw new Error("Invalid audit record");
-      let record: { kind: string; value: unknown };
-      try {
-        record = JSON.parse(line);
-      } catch {
-        throw new Error("Invalid audit record");
-      }
-      if (record?.kind === "entry") {
-        const entry = record.value as AuditEntry;
-        if (entry?.sequence !== nextSequence++) throw new Error("Invalid audit record order");
-        entries.push(entry);
-      } else if (record?.kind === "batch") {
-        const batch = record.value as SignedMerkleBatch;
-        if (batch?.firstSequence !== nextBatchSequence || batch.lastSequence >= nextSequence) {
-          throw new Error("Invalid audit record order");
-        }
-        nextBatchSequence = batch.lastSequence + 1;
-        batches.push(batch);
-      } else throw new Error("Invalid audit record");
-    }
-    return { entries, batches };
+    return core("audit.parseRecords", { content: readFileSync(this.path, "utf8") });
   }
 
   appendEntry(entry: AuditEntry): void {
@@ -158,16 +130,15 @@ export class AuditLog {
 
   /** The sequence number of the first entry that breaks the chain, or undefined when the chain is intact. */
   firstBrokenSequence(): number | undefined {
-    let previousHash = GENESIS;
-    for (let i = 0; i < this.storedEntries.length; i++) {
-      const entry = this.storedEntries[i];
-      try {
-        if (!entry || entry.sequence !== i + 1 || entry.previousHash !== previousHash ||
-          !HASH.test(entry.hash) || entry.hash !== entryHash(entry)) return i + 1;
-      } catch { return i + 1; }
-      previousHash = entry.hash;
-    }
-    return undefined;
+    const payloads = this.storedEntries.map(entry => {
+      try { return entryPayload(entry); } catch { return null; }
+    });
+    const entries = this.storedEntries.map(entry => ({
+      sequence: typeof entry?.sequence === "number" ? entry.sequence : null,
+      previousHash: typeof entry?.previousHash === "string" ? entry.previousHash : null,
+      hash: typeof entry?.hash === "string" ? entry.hash : null
+    }));
+    return core<number | null>("audit.firstBroken", { entries, payloads }) ?? undefined;
   }
 
   get entries(): AuditEntry[] {
@@ -198,35 +169,14 @@ export class AuditLog {
   }
 
   verifyChain(): boolean {
-    let previousHash = GENESIS;
-    try {
-      for (let i = 0; i < this.storedEntries.length; i++) {
-        const entry = this.storedEntries[i];
-        if (!entry || entry.sequence !== i + 1 || entry.previousHash !== previousHash ||
-          !HASH.test(entry.hash) || entry.hash !== entryHash(entry)) return false;
-        previousHash = entry.hash;
-      }
-    } catch {
-      return false;
-    }
-    return true;
+    try { return this.firstBrokenSequence() === undefined; } catch { return false; }
   }
 
   verifyBatches(): boolean {
-    let nextSequence = 1;
-    let previousRoot = GENESIS;
-    for (const batch of this.storedBatches) {
-      if (!batch || batch.firstSequence !== nextSequence ||
-        !Number.isSafeInteger(batch.lastSequence) || batch.lastSequence < nextSequence ||
-        batch.lastSequence > this.storedEntries.length || !HASH.test(batch.root)) return false;
-      if (batch.previousRoot !== undefined && batch.previousRoot !== previousRoot) return false;
-      previousRoot = batch.root;
-      const leaves = this.storedEntries.slice(nextSequence - 1, batch.lastSequence).map(entry => entry.hash);
-      if (AuditLog.root(leaves) !== batch.root) return false;
-      if (this.verificationKey && !AuditLog.verifyBatchSignature(batch, this.verificationKey)) return false;
-      nextSequence = batch.lastSequence + 1;
-    }
-    return true;
+    return core<boolean>("audit.verifyBatches", {
+      entries: this.storedEntries.map(entry => ({ hash: entry.hash })), batches: this.storedBatches
+    }) &&
+      (!this.verificationKey || this.storedBatches.every(batch => AuditLog.verifyBatchSignature(batch, this.verificationKey!)));
   }
 
   seal(): SignedMerkleBatch | undefined {
@@ -252,42 +202,14 @@ export class AuditLog {
   proof(sequence: number): AuditProof | undefined {
     if (!Number.isSafeInteger(sequence) || sequence < 1) return undefined;
     if (!this.verifyChain() || !this.verifyBatches()) throw new Error("Invalid audit log");
-    const batch = this.storedBatches.find(item => sequence >= item.firstSequence && sequence <= item.lastSequence);
-    if (!batch) return undefined;
-    let level = this.storedEntries.slice(batch.firstSequence - 1, batch.lastSequence).map(entry => entry.hash);
-    let index = sequence - batch.firstSequence;
-    const siblings: MerkleProof["siblings"] = [];
-    while (level.length > 1) {
-      const siblingIndex = index ^ 1;
-      siblings.push({
-        hash: level[siblingIndex] ?? level[index],
-        position: siblingIndex < index ? "left" : "right"
-      });
-      const next: string[] = [];
-      for (let i = 0; i < level.length; i += 2) next.push(pair(level[i], level[i + 1] ?? level[i]));
-      level = next;
-      index = Math.floor(index / 2);
-    }
-    return {
-      sequence,
-      firstSequence: batch.firstSequence,
-      lastSequence: batch.lastSequence,
-      entry: structuredClone(this.storedEntries[sequence - 1]),
-      leaf: this.storedEntries[sequence - 1].hash,
-      root: batch.root,
-      siblings
-    };
+    const proof = core<AuditProof | null>("audit.proof", {
+      entries: this.storedEntries.map(entry => ({ hash: entry.hash })), batches: this.storedBatches, sequence
+    });
+    return proof ? { ...proof, entry: structuredClone(this.storedEntries[sequence - 1]) } : undefined;
   }
 
   static root(leaves: string[]): string {
-    if (!leaves.length) throw new Error("Empty Merkle batch");
-    let level = leaves;
-    while (level.length > 1) {
-      const next: string[] = [];
-      for (let i = 0; i < level.length; i += 2) next.push(pair(level[i], level[i + 1] ?? level[i]));
-      level = next;
-    }
-    return level[0];
+    return core<string>("audit.root", { leaves });
   }
 
   static verifyBatchSignature(batch: SignedMerkleBatch, verificationKey: KeyObject | string | Buffer): boolean {
@@ -303,36 +225,12 @@ export class AuditLog {
   }
 
   static verifyProof(proof: MerkleProof, trusted: string | MerkleBatch): boolean {
-    const item = proof as AuditProof;
-    const trustedRoot = typeof trusted === "string" ? trusted : trusted?.root;
-    if (!item || !HASH.test(trustedRoot) || item.root !== trustedRoot || !HASH.test(item.leaf) ||
-      (typeof trusted !== "string" && (!trusted || item.firstSequence !== trusted.firstSequence ||
-        item.lastSequence !== trusted.lastSequence)) ||
-      !Number.isSafeInteger(item.sequence) || !Number.isSafeInteger(item.firstSequence) ||
-      !Number.isSafeInteger(item.lastSequence) || item.firstSequence < 1 ||
-      item.sequence < item.firstSequence || item.sequence > item.lastSequence ||
-      !item.entry || item.entry.sequence !== item.sequence || item.entry.hash !== item.leaf ||
-      !HASH.test(item.entry.previousHash) ||
-      !Array.isArray(item.siblings)) return false;
     try {
-      if (entryHash(item.entry) !== item.leaf) return false;
+      return core<boolean>("audit.verifyProof", {
+        proof, trusted, payload: entryPayload((proof as AuditProof).entry)
+      });
     } catch {
       return false;
     }
-
-    let current = item.leaf;
-    let index = item.sequence - item.firstSequence;
-    let width = item.lastSequence - item.firstSequence + 1;
-    let depth = 0;
-    while (width > 1) {
-      const sibling = item.siblings[depth++];
-      if (!sibling || !HASH.test(sibling.hash) ||
-        sibling.position !== (index % 2 ? "left" : "right")) return false;
-      if (index % 2 === 0 && index + 1 === width && sibling.hash !== current) return false;
-      current = sibling.position === "left" ? pair(sibling.hash, current) : pair(current, sibling.hash);
-      index = Math.floor(index / 2);
-      width = Math.ceil(width / 2);
-    }
-    return depth === item.siblings.length && current === trustedRoot;
   }
 }

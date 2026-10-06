@@ -29,6 +29,29 @@ describe("JiraAsUser", () => {
     const jira = new JiraAsUser({ authorizationFor: async () => "Bearer t", siteFor: async () => site }, async () => new Response("{}", { status: 403 }));
     await expect(jira.createIssue(maya, { project: "DB", summary: "s", description: "d" })).rejects.toThrow("403");
   });
+
+  it("reads authorized status and the operation marker without exposing the issue description", async () => {
+    const marker = "12345678-1234-1234-1234-123456789abc";
+    let method: string | undefined;
+    const jira = new JiraAsUser({ authorizationFor: async () => "Bearer mine", siteFor: async () => site }, async (_url, init) => {
+      method = init?.method;
+      return Response.json({ fields: { status: { statusCategory: { key: "done" } }, updated: "2026-10-05T09:00:00Z",
+        description: { content: [{ text: `Private source text. Broppy operation: ${marker}` }] } } });
+    });
+    expect(await jira.access(maya, "DB-9")).toEqual({ key: "DB-9", url: "https://acme.atlassian.net/browse/DB-9",
+      statusCategory: "done", providerVersion: "2026-10-05T09:00:00Z", operationMarker: marker });
+    expect(method).toBeUndefined();
+  });
+
+  it("withholds missing and denied issue status and refuses an inactive actor without provider calls", async () => {
+    let calls = 0;
+    const jira = new JiraAsUser({ authorizationFor: async () => "Bearer mine", siteFor: async () => site }, async () => {
+      calls++; return new Response("", { status: 403 });
+    });
+    expect(await jira.access(maya, "DB-9")).toBeUndefined();
+    await expect(jira.access({ ...maya, active: false }, "DB-9")).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
 });
 
 describe("request validation", () => {

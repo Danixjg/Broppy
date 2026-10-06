@@ -5,6 +5,9 @@
 apps/web/dist
 apps/web/public/workspace
 coverage
+.audit
+**/target
+**/*.node
 **/*.log
 # Secrets anywhere in the tree, e.g. infra/tencent/sso.env and the audit signing key
 **/.env

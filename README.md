@@ -2,14 +2,15 @@
 
 # Internal Brain
 
-A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. It runs as a pnpm TypeScript workspace with a Node API and a Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings from Cloudflare Workers AI (`bge-m3`) add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
+A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. A Rust domain core runs behind the Node API. TypeScript supplies service adapters and the Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings from Cloudflare Workers AI (`bge-m3`) add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
 
 ## Run
 
-Use Node with `pnpm` 9.15.0.
+Use Node with `pnpm` 9.15.0 and [Rust installed through rustup](https://rust-lang.org/tools/install/). The repository pins its Rust toolchain. See [Rust build and verification](docs/rust-migration.md).
 
 ```sh
 pnpm install
+pnpm rust:build
 pnpm typecheck
 pnpm test
 ```
@@ -269,6 +270,7 @@ The compliance audit contains question and answer text and source identifiers, s
 ## Documentation
 
 - [Architecture](docs/architecture.md): how the brief's requirements are met, and the pipeline with the five points that matter most.
+- [Rust domain core](docs/rust-migration.md): native build, migrated modules, state ownership, and verification.
 - [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
 - [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
 - [Decisions](decisions.md): every choice, the options considered and the trade-offs.

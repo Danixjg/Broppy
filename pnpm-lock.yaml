@@ -35,6 +35,9 @@ importers:
       '@brain/retrieval':
         specifier: workspace:*
         version: link:../../packages/retrieval
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../../packages/rust-core
       '@brain/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -44,6 +47,9 @@ importers:
 
   apps/slack:
     dependencies:
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../../packages/rust-core
       '@vercel/functions':
         specifier: ^3.9.11
         version: 3.9.11
@@ -102,12 +108,18 @@ importers:
 
   packages/audit:
     dependencies:
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../rust-core
       '@brain/types':
         specifier: workspace:*
         version: link:../types
 
   packages/connectors:
     dependencies:
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../rust-core
       '@brain/types':
         specifier: workspace:*
         version: link:../types
@@ -117,6 +129,9 @@ importers:
       '@brain/connectors':
         specifier: workspace:*
         version: link:../connectors
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../rust-core
       '@brain/types':
         specifier: workspace:*
         version: link:../types
@@ -126,9 +141,14 @@ importers:
 
   packages/retrieval:
     dependencies:
+      '@brain/rust-core':
+        specifier: workspace:*
+        version: link:../rust-core
       '@brain/types':
         specifier: workspace:*
         version: link:../types
+
+  packages/rust-core: {}
 
   packages/types: {}
 

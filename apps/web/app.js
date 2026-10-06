@@ -2,10 +2,12 @@ import { narrowerPermissionError } from "./permissions.js";
 import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 import { showMoreLabel, visibleItems } from "./lists.js";
 import { chosenProject } from "./projects.js";
+import { linkedTask } from "./links.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
-const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [] });
+const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [], commitments: [], owners: [], capabilities: {} });
+let deepLinkApplied = false;
 const state = { docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 // The lists opened in full since the last search, project or person change.
@@ -105,6 +107,7 @@ function setView(view, { load = true } = {}) {
 }
 function resetIdentity() {
   state.identity++;
+  deepLinkApplied = false;
   state.docs = []; state.workspace = emptyWorkspace(); state.project = null; expandedLists.clear(); state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
   for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
@@ -141,7 +144,7 @@ async function initAuth() {
   updateAuthUi("Loading sign-in configuration…");
   try {
     const response = await fetch("/api/session", { cache: "no-store" });
-    if (response.status === 401) { location.assign("/auth/login"); return; }
+    if (response.status === 401) { location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname + location.search })}`); return; }
     if (!response.ok) throw new Error("SSO session is unavailable.");
     if ((await response.json()).demo === true) {
       state.authMode = "demo";
@@ -247,11 +250,11 @@ function openTask(doc, quotes = [], options = {}) {
     if (!isDemoAddress(target.url)) wrap.append(" ", sourceLink(target.url, target.source));
   } else appendText(wrap, "p", "muted", "No linked page or file that you can open.");
   if (documentStatus(doc) === "done") appendText(wrap, "p", "muted", "This task is done.");
-  else {
+  else if (state.workspace.capabilities.markDone === true) {
     const done = node("button", "secondary-button", "Mark done"); done.type = "button";
     done.addEventListener("click", () => markDone(doc, done));
     wrap.append(done);
-  }
+  } else wrap.append(sourceLink(doc.url, "jira"));
   box.append(wrap);
 }
 async function markDone(doc, button) {
@@ -268,25 +271,85 @@ async function markDone(doc, button) {
 // person may open, and only when creating the task here is possible; with live sources it links to Jira instead.
 function renderSuggestions() {
   const box = $("suggestion"); clear(box);
-  const items = state.workspace.suggestions.filter(item => inProject(item.threadDocId) && docById(item.threadDocId));
-  if (!items.length) { appendText(box, "p", "empty", "No agreement in these threads is waiting for a task."); return; }
+  const items = state.workspace.commitments.filter(item => inProject(item.threadDocId) && docById(item.threadDocId));
+  if (!items.length) { appendText(box, "p", "empty", "No commitment is awaiting review in your accessible, imported threads."); return; }
   for (const item of items) {
-    const card = node("div", "agreement");
-    appendText(card, "strong", "", `Agreement in ${docById(item.threadDocId).title}`);
+    const card = node("div", "agreement"); card.dataset.proposalId = item.id; card.tabIndex = -1;
+    appendText(card, "strong", "", `Commitment in ${docById(item.threadDocId).title}`);
     appendText(card, "blockquote", "", item.sentence);
-    if (item.canCreate) {
-      const button = node("button", "", `Create Jira task in ${item.project} ↗`); button.type = "button";
-      button.addEventListener("click", () => createTask(item, button));
-      card.append(button);
+    if (item.permalink) card.append(externalLink(item.permalink, "Open exact Slack message ↗"));
+    else appendText(card, "p", "muted", "Legacy thread evidence. An exact message reference is unavailable.");
+    if (item.status !== "pending") {
+      appendText(card, "p", "", `${item.status === "created" ? "Created" : "Linked to"} ${safeText(item.issueTitle)}.`);
+      const open = node("button", "text-button", "Open linked Jira task"); open.type = "button";
+      open.addEventListener("click", () => { const doc = docById(item.issueDocId); if (doc) openTask(doc); });
+      card.append(open); box.append(card); continue;
+    }
+    appendText(card, "p", "muted", item.notice);
+    if (item.importNotice) appendText(card, "p", "muted", item.importNotice);
+    const form = node("form", "commitment-review");
+    const summaryLabel = node("label", "", "Summary"); const summary = node("input", ""); summary.value = item.summary; summary.maxLength = 200; summary.required = true;
+    summaryLabel.append(summary);
+    const ownerLabel = node("label", "", "Owner"); const owner = node("select", "");
+    const unknown = node("option", "", "Unknown / unassigned"); unknown.value = ""; owner.append(unknown);
+    for (const person of state.workspace.owners) { const option = node("option", "", person.name); option.value = person.slackId; owner.append(option); }
+    if (item.ownerSlackId && !state.workspace.owners.some(person => person.slackId === item.ownerSlackId)) {
+      const unresolved = node("option", "", "Source owner unresolved"); unresolved.value = item.ownerSlackId; owner.append(unresolved);
+    }
+    owner.value = item.ownerSlackId || ""; ownerLabel.append(owner);
+    const dueLabel = node("label", "", "Due date (blank means unknown)"); const due = node("input", ""); due.type = "date"; due.value = item.dueDate || ""; dueLabel.append(due);
+    const save = node("button", "secondary-button", "Save review"); save.type = "submit";
+    form.append(summaryLabel, ownerLabel, dueLabel, save);
+    const dirty = () => { create.disabled = summary.value !== item.summary || owner.value !== (item.ownerSlackId || "") || due.value !== (item.dueDate || ""); };
+    form.addEventListener("submit", event => { event.preventDefault(); reviewCommitment(item,
+      { action: "edit", summary: summary.value, ownerSlackId: owner.value, dueDate: due.value }, save); });
+    card.append(form);
+    const create = node("button", "", `Create Jira task in ${item.project} ↗`); create.type = "button";
+    for (const field of [summary, owner, due]) field.addEventListener("input", dirty);
+    if (item.canCreate && state.workspace.capabilities.createTask === true) {
+      create.addEventListener("click", () => createTask(item, create)); card.append(create);
     } else if (item.jiraUrl) card.append(externalLink(item.jiraUrl, `Open ${item.project} in Jira ↗`));
+    const dismiss = node("button", "text-button", "Dismiss"); dismiss.type = "button";
+    dismiss.addEventListener("click", () => reviewCommitment(item, { action: "dismiss" }, dismiss)); card.append(dismiss);
+    if (item.candidates?.length) {
+      appendText(card, "p", "muted", "Possible existing work. Similarity requires your review.");
+      for (const candidate of item.candidates) {
+        const row = node("div", "candidate-review");
+        row.append(externalLink(candidate.url, candidate.title));
+        const link = node("button", "secondary-button", "Link existing"); link.type = "button";
+        link.addEventListener("click", () => reviewCommitment(item, { action: "link", issueDocId: candidate.docId }, link));
+        row.append(link); card.append(row);
+      }
+    } else appendText(card, "p", "muted", "No title or text match found in the visible project sources. This does not establish that work is untracked.");
+    const visibleIssues = state.docs.filter(doc => doc.source === "jira" && doc.metadata?.project === item.project);
+    if (visibleIssues.length) {
+      const label = node("label", "commitment-review", "Review another visible Jira issue"); const select = node("select", "");
+      const placeholder = node("option", "", "Choose an issue"); placeholder.value = ""; select.append(placeholder);
+      for (const issue of visibleIssues) { const option = node("option", "", issue.title); option.value = issue.docId; select.append(option); }
+      const review = node("button", "text-button", "Open selected issue"); review.type = "button"; review.disabled = true;
+      review.addEventListener("click", () => { const doc = docById(select.value); if (doc) openTask(doc); });
+      const link = node("button", "secondary-button", "Link selected issue"); link.type = "button"; link.disabled = true;
+      select.addEventListener("change", () => { review.disabled = !select.value; link.disabled = !select.value; });
+      link.addEventListener("click", () => reviewCommitment(item, { action: "link", issueDocId: select.value }, link));
+      label.append(select, review, link); card.append(label);
+    }
     box.append(card);
   }
+}
+async function reviewCommitment(item, command, button) {
+  const generation = state.identity; button.disabled = true;
+  try {
+    await post("/v1/commitments/review", { id: item.id, revision: item.revision, ...command });
+    if (generation !== state.identity) return;
+    await loadWorkspace();
+    if (generation === state.identity) $("globalStatus").textContent = command.action === "edit" ? "Review saved. Create or link after reviewing the saved fields." : "Commitment review saved.";
+  } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }
 }
 async function createTask(item, button) {
   const generation = state.identity;
   button.disabled = true; $("globalStatus").textContent = "Creating the Jira task…";
   try {
-    const result = await post("/v1/tasks", { threadDocId: item.threadDocId, sentence: item.sentence });
+    const result = await post("/v1/tasks", { threadDocId: item.threadDocId, sentence: item.sentence, proposalId: item.id, revision: item.revision });
     if (generation !== state.identity) return;
     await loadWorkspace();
     if (generation !== state.identity) return;
@@ -497,8 +560,13 @@ async function loadWorkspace() {
       projects: list(result.projects).filter(project => typeof project.key === "string" && typeof project.name === "string" && Array.isArray(project.docIds)),
       latest: list(result.latest).filter(item => typeof item.docId === "string" && Array.isArray(item.reasons)),
       duplicates: list(result.duplicates).filter(item => typeof item.keep === "string" && typeof item.other === "string" && Array.isArray(item.reasons) && Array.isArray(item.onlyInKeep) && Array.isArray(item.onlyInOther)),
-      suggestions: list(result.suggestions).filter(item => typeof item.threadDocId === "string" && typeof item.sentence === "string" && typeof item.project === "string")
+      suggestions: list(result.suggestions).filter(item => typeof item.threadDocId === "string" && typeof item.sentence === "string" && typeof item.project === "string"),
+      commitments: list(result.commitments).filter(item => typeof item.id === "string" && typeof item.threadDocId === "string" && typeof item.sentence === "string"),
+      owners: list(result.owners).filter(item => typeof item.slackId === "string" && typeof item.name === "string"),
+      capabilities: result.capabilities || {}
     };
+    $("workspaceMode").textContent = state.workspace.capabilities.mode === "live" ? "Live workspace" :
+      state.workspace.capabilities.mode === "demo" ? "Demo workspace" : "Workspace";
     const onScreen = state.project;
     chooseProject();
     // A reload after an action leaves the lists as the person had them, unless their project is gone.
@@ -506,15 +574,46 @@ async function loadWorkspace() {
     renderWorkspace();
     if (role() === "admin") await loadNativePermissions();
     if (generation !== state.identity) return;
-    $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.`;
+    $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.${result.importNotice ? ` ${result.importNotice}` : ""}`;
     if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, state.selectedQuotes); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; state.selectedQuotes = []; } }
     applyLandingPreference();
+    applyDeepLink();
     if (!state.landingApplied) {
       state.landingApplied = true;
       if ($("landingPreference").value !== "master" || window.innerWidth <= 700) requestAnimationFrame(focusLanding);
     }
     return true;
   } catch (error) { if (generation === state.identity) $("workspaceNotice").textContent = `Workspace unavailable: ${error.message}`; return false; }
+}
+function applyDeepLink() {
+  if (deepLinkApplied) return;
+  const params = new URLSearchParams(location.search);
+  if (!["task", "ask", "doc", "proposal", "project"].some(key => params.has(key))) return;
+  deepLinkApplied = true;
+  const project = params.get("project");
+  if (project && !state.workspace.projects.some(item => item.key === project)) {
+    $("globalStatus").textContent = "The linked project is unavailable to this identity."; return;
+  }
+  const proposal = state.workspace.commitments.find(item => item.id === params.get("proposal"));
+  const requested = params.get("doc");
+  const doc = requested ? docById(requested) : proposal?.issueDocId ? docById(proposal.issueDocId) : linkedTask(state.docs, params.get("task"));
+  const containing = doc && state.workspace.projects.find(item => item.docIds.includes(doc.docId));
+  if (project || containing) { state.project = project || containing.key; renderWorkspace(); }
+  if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, [], { focus: true });
+  else if (proposal) {
+    const containing = state.workspace.projects.find(item => item.docIds.includes(proposal.threadDocId));
+    if (containing) { state.project = containing.key; renderWorkspace(); }
+    const card = [...$("suggestion").children].find(item => item.dataset.proposalId === proposal.id);
+    if (card) { card.focus(); reveal(card); }
+  } else if (params.has("task")) {
+    $("search").value = params.get("task").slice(0, 200); renderWorkspace();
+    $("globalStatus").textContent = "Searching your accessible sources for the linked task title.";
+  } else if (params.has("doc") || params.has("proposal")) $("globalStatus").textContent = "The linked item is unavailable to this identity.";
+  const question = params.get("ask");
+  if (question && question.length <= 500) {
+    if (!project) { state.project = null; renderWorkspace(); }
+    $("question").value = question; $("queryForm").requestSubmit();
+  }
 }
 // The answer's sources, numbered as its lines cite them. Each opens in the workspace with its quoted lines marked.
 function renderCitations(parent, sources, lines) {
@@ -613,7 +712,7 @@ async function ask(question, target, displayQuestion = false) {
   const generation = state.identity;
   const stop = showPending(target, "Checking permissions and sources…");
   let result;
-  try { result = await post("/v1/query", { question }); } finally { stop(); }
+  try { result = await post("/v1/query", { question, ...(state.project ? { project: state.project } : {}) }); } finally { stop(); }
   if (generation !== state.identity) return null;
   renderAnswer(target, result, displayQuestion ? question : "");
   if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
@@ -843,6 +942,7 @@ $("catchUp").addEventListener("click", async () => {
       const list = node("ul", ""); for (const line of Array.isArray(result.lines) ? result.lines : []) appendText(list, "li", "", line);
       target.append(list);
     } else renderAnswer(target, { ...result.answer, traceId: result.traceId }, `Asked: ${safeText(result.question)}`);
+    if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
   } catch (error) { if (generation === state.identity) target.textContent = error.message; }
   finally { stop(); }
 });
@@ -896,6 +996,6 @@ $("retrySync").addEventListener("click", async () => {
   try { await post("/v1/admin/sync", {}); if (generation !== state.identity || role() !== "admin") return; await Promise.all([loadHealth(), loadWorkspace()]); $("healthStatus").textContent = "Connector sync complete."; }
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
 });
-$("loginButton").addEventListener("click", () => location.assign("/auth/login"));
+$("loginButton").addEventListener("click", () => location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname + location.search })}`));
 $("logoutButton").addEventListener("click", () => location.assign(state.authMode === "demo" ? "/demo/exit" : "/auth/logout"));
 initAuth();

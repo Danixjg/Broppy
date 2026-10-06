@@ -1,7 +1,6 @@
 import { formatDue } from "./score.js";
 import type { BroppyAnswer } from "./broppy.js";
 
-/** What a button carries back to us. Slack signs the whole interaction, so the value can't be forged by a click. */
 export interface Suggestion {
   /** Title */
   t: string;
@@ -24,25 +23,28 @@ export interface Suggestion {
 const text = (value: string) => ({ type: "mrkdwn", text: value });
 const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export function suggestionBlocks(s: Suggestion, assigneeName: string, openUrl: string) {
+export function suggestionBlocks(s: Suggestion, assigneeName: string, openUrl: string, reference: { id: string; revision: number }, candidates: Array<{ issueKey: string; issueUrl: string }> = [], sourcePointer?: string, audience: string[] = []) {
   const line = ["Looks like a task: *" + escape(s.t) + "*", escape(assigneeName),
     ...(s.d ? [`due ${formatDue(s.d)}`] : []), `Jira project ${s.p}`].join(" · ");
   return [
-    { type: "section", text: text(line) },
+    { type: "section", text: text(line + "\nJira receives the reviewed summary, owner, and due date." + (sourcePointer ? "\nApproved source pointer: " + escape(sourcePointer) : "")
+      + "\nDeclared Jira recipients: " + (audience.length ? audience.map(id => `<@${id}>`).join(", ") : "No approved audience. Creation is disabled.")) },
     {
       type: "actions", block_id: "task_suggestion",
       elements: [
-        { type: "button", action_id: "track_task", style: "primary", text: { type: "plain_text", text: "Track in Jira" }, value: JSON.stringify(s) },
+        { type: "button", action_id: "track_task", style: "primary", text: { type: "plain_text", text: "Track in Jira" }, value: JSON.stringify(reference) },
+        { type: "button", action_id: "edit_task", text: { type: "plain_text", text: "Edit" }, value: JSON.stringify(reference) },
         { type: "button", action_id: "open_in_broppy", text: { type: "plain_text", text: "Open in Broppy ↗" }, url: openUrl },
-        { type: "button", action_id: "dismiss_task", text: { type: "plain_text", text: "Not a task" }, value: JSON.stringify(s) }
+        { type: "button", action_id: "dismiss_task", text: { type: "plain_text", text: "Not a task" }, value: JSON.stringify(reference) }
       ]
-    }
+    },
+    ...candidates.map(candidate => ({ type: "actions", elements: [{ type: "button", action_id: "link_task", text: { type: "plain_text", text: `Link ${candidate.issueKey}` }, value: JSON.stringify({ ...reference, issueKey: candidate.issueKey }) }] }))
   ];
 }
 
 export function trackedLine(key: string, url: string, trackedBy: string, assigneeName: string, due: string | undefined,
   openUrl: string, existing: boolean): string {
-  const head = existing ? `Added to <${url}|${key}>, which already tracks this` : `Tracked as <${url}|${key}>`;
+  const head = existing ? `Linked to <${url}|${key}>` : `Tracked as <${url}|${key}>`;
   return [`${head} by <@${trackedBy}>`, escape(assigneeName), ...(due ? [`due ${formatDue(due)}`] : []),
     `<${openUrl}|Open in Broppy ↗>`].join(" · ");
 }

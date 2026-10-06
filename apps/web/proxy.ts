@@ -13,7 +13,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
   if (path.startsWith("/workspace/") && !demo && !await auth0.getSession(request)) {
-    return NextResponse.redirect(new URL("/auth/login", process.env.APP_BASE_URL));
+    const login = new URL("/auth/login", process.env.APP_BASE_URL);
+    login.searchParams.set("returnTo", request.nextUrl.pathname + request.nextUrl.search);
+    return NextResponse.redirect(login);
   }
   return await auth0.middleware(request);
 }

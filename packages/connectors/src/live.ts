@@ -1,12 +1,20 @@
 import { createHash } from "node:crypto";
 import { MockConnector, selectsNothing, type Change, type Container, type ImportScope } from "./index.js";
-import { linkFromUrl, withLinks } from "./links.js";
-import type { AuthorizationProvider, Source, SourceDocument, SourcePermission, User } from "@brain/types";
+import { linkFromUrl, withLinks, type LinkOrigins } from "./links.js";
+import type { AuthorizationProvider, ProviderCheckpoint, SlackMessageEvidence, Source, SourceDocument, SourcePermission, User } from "@brain/types";
 
 /** The provider refused our own credential. That says nothing about the item, so it must never read as "deleted". */
 export class CredentialRejected extends Error {
   constructor(source: Source) { super(`${source} credential was rejected; reconnect the source`); }
 }
+
+export class SourceAccessUnavailable extends Error {
+  constructor(source: Source, cause: unknown) {
+    super(`${source} access check is unavailable`, { cause });
+  }
+}
+
+type SourceAccess = { kind: "allowed" } | { kind: "denied" } | { kind: "unavailable"; cause: unknown };
 
 // A full pass every twelfth poll; and at most five requests at a time per item, to stay inside providers' rate limits.
 const FULL_POLL_EVERY = 12;
@@ -31,6 +39,7 @@ export type LiveSettings = {
   cloudId?: string;
   discover?: boolean;
   authorization?: AuthorizationProvider;
+  linkOrigins?: LinkOrigins;
 };
 
 type LiveConfig = Record<Source, LiveSettings>;
@@ -57,17 +66,17 @@ function adf(value: unknown): string {
 }
 
 // Links in a Jira description: link marks on text, and inline, block or embedded cards.
-function adfLinks(value: unknown): string[] {
+function adfLinks(value: unknown, origins: LinkOrigins): string[] {
   const node = optional(value);
   const marks = Array.isArray(node.marks) ? node.marks.map(optional) : [];
   const urls = [text(optional(node.attrs).url), ...marks.filter(mark => mark.type === "link").map(mark => text(optional(mark.attrs).href))];
-  return [...urls.filter(Boolean).map(linkFromUrl).filter((link): link is string => Boolean(link)),
-    ...(Array.isArray(node.content) ? node.content.flatMap(adfLinks) : [])];
+  return [...urls.filter(Boolean).map(value => linkFromUrl(value, origins)).filter((link): link is string => Boolean(link)),
+    ...(Array.isArray(node.content) ? node.content.flatMap(value => adfLinks(value, origins)) : [])];
 }
 
 // Links in a Confluence page's storage format, read before the markup is stripped: hrefs and Jira issue macros.
-function storageLinks(value: string): string[] {
-  const hrefs = [...value.matchAll(/href="([^"]+)"/g)].map(match => linkFromUrl(match[1].replace(/&amp;/g, "&")));
+function storageLinks(value: string, origins: LinkOrigins): string[] {
+  const hrefs = [...value.matchAll(/href="([^"]+)"/g)].map(match => linkFromUrl(match[1].replace(/&amp;/g, "&"), origins));
   const keys = [...value.matchAll(/<ac:parameter ac:name="key">([A-Z][A-Z0-9]{1,9}-\d+)<\/ac:parameter>/g)]
     .map(match => `jira:${match[1]}`);
   return [...hrefs.filter((link): link is string => Boolean(link)), ...keys];
@@ -79,9 +88,10 @@ function plainHtml(value: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-function version(updatedAt: string, content: string): number {
-  const digest = createHash("sha256").update(updatedAt).update("\0").update(content).digest();
-  return digest.readUIntBE(0, 6) + 1;
+function version(updatedAt: string, content: string, messages?: SlackMessageEvidence[]): number {
+  const hash = createHash("sha256").update(updatedAt).update("\0").update(content);
+  if (messages) hash.update(JSON.stringify(messages.map(({ permalink: _permalink, ...message }) => message)));
+  return hash.digest().readUIntBE(0, 6) + 1;
 }
 
 /** A deliberately bounded live connector: configured IDs, delegated user credentials,
@@ -91,6 +101,8 @@ export class LiveConnector extends MockConnector {
   private scope: ImportScope = {};
   private origin = "";
   private seen = new Map<string, number>();
+  private jiraVersions = new Map<string, string>();
+  private readonly permalinks = new Map<string, string>();
 
   constructor(source: Source, private readonly settings: LiveSettings,
     private readonly users: readonly User[], private readonly transport: typeof fetch = fetch,
@@ -128,6 +140,11 @@ export class LiveConnector extends MockConnector {
       throw new Error("Unknown source item");
     }
     return docId.slice(prefix.length);
+  }
+
+  private linkOrigins(): LinkOrigins {
+    return { ...this.settings.linkOrigins,
+      ...(["jira", "confluence"].includes(this.source) ? { jira: [this.origin], confluence: [this.origin] } : {}) };
   }
 
   private async get(path: string, authorization: string, attempt = 0): Promise<unknown | undefined> {
@@ -273,7 +290,7 @@ export class LiveConnector extends MockConnector {
     return value;
   }
 
-  private async read(id: string, authorization: string): Promise<{ title: string; content: string; updatedAt: string; url: string; metadata: Record<string, string>; links?: string[] } | undefined> {
+  private async read(id: string, authorization: string, includePermalinks = false): Promise<{ title: string; content: string; updatedAt: string; url: string; metadata: Record<string, string>; links?: string[]; slackMessages?: SlackMessageEvidence[] } | undefined> {
     const escaped = encodeURIComponent(id);
     if (this.source === "slack") {
       const info = await this.get(`/api/conversations.info?channel=${escaped}`, authorization);
@@ -288,15 +305,42 @@ export class LiveConnector extends MockConnector {
       const messages = await this.slackMessages("conversations.history", id, authorization);
       const replies: Record<string, unknown>[] = [];
       for (const message of messages) if (Number(message.reply_count) > 0) {
-        replies.push(...await this.slackMessages("conversations.replies", id, authorization, text(message.ts)));
+        replies.push(...(await this.slackMessages("conversations.replies", id, authorization, text(message.ts)))
+          .map(reply => ({ ...reply, thread_ts: text(reply.thread_ts) || text(message.ts) })));
       }
-      const all = [...new Map([...messages, ...replies].map(message => [text(message.ts), message])).values()];
-      const content = all.map(item => text(object(item).text)).filter(Boolean).join("\n");
-      const updatedAt = new Date(Number(text(object(messages[0] ?? {}).ts) || 0) * 1000 ||
-        Number(channel.created) * 1000 || Date.now()).toISOString();
+      const all = [...new Map([...messages, ...replies].map(message => [text(message.ts), message])).values()]
+        .filter(message => /^\d+(?:\.\d+)?$/.test(text(message.ts)) && text(message.text))
+        .sort((a, b) => Number(a.ts) - Number(b.ts));
+      const teamId = text(channel.context_team_id) || text(channel.team_id);
+      const evidence: SlackMessageEvidence[] = all.map(message => ({
+        teamId, channelId: id, threadTs: text(message.thread_ts) || text(message.ts), messageTs: text(message.ts),
+        authorSlackId: text(message.user), text: text(message.text),
+        updatedAt: new Date(Math.max(Number(message.ts), Number(optional(message.edited).ts) || 0) * 1000).toISOString()
+      }));
+      if (includePermalinks) {
+        for (let start = 0; start < evidence.length; start += CHECKS_AT_ONCE) {
+          await Promise.all(evidence.slice(start, start + CHECKS_AT_ONCE).map(async message => {
+            const cacheKey = `${teamId}:${id}:${message.messageTs}`;
+            let permalink = this.permalinks.get(cacheKey);
+            if (!permalink) {
+              const result = optional(await this.get(`/api/chat.getPermalink?${new URLSearchParams({ channel: id, message_ts: message.messageTs })}`, authorization));
+              const value = text(result.permalink);
+              if (result.ok === true && /^https:\/\/[^/]+\.slack\.com\/archives\//.test(value)) {
+                permalink = value;
+                this.permalinks.set(cacheKey, value);
+              }
+            }
+            if (permalink) message.permalink = permalink;
+          }));
+        }
+      }
+      const content = evidence.map(message => message.text).join("\n");
+      const updatedAt = new Date(Math.max(Number(channel.created) * 1000 || 0,
+        ...evidence.map(message => Date.parse(message.updatedAt)))).toISOString();
       return { title: `#${text(channel.name) || id}`, content, updatedAt,
         url: `https://app.slack.com/client/${encodeURIComponent(text(channel.context_team_id) || "")}/${escaped}`,
-        metadata: { channel: text(channel.name), sourceStatus: channel.is_private === true ? "private" : "public" } };
+        metadata: { channel: text(channel.name), slackTeamId: teamId, sourceStatus: channel.is_private === true ? "private" : "public" },
+        slackMessages: evidence };
     }
     if (this.source === "jira") {
       const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks`, authorization);
@@ -310,7 +354,7 @@ export class LiveConnector extends MockConnector {
       }).filter(key => /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(key)).map(key => `jira:${key}`);
       return { title: text(fields.summary) || id, content: adf(fields.description), updatedAt,
         url: `${this.origin}/browse/${escaped}`, metadata: { status: text(object(fields.status ?? {}).name), project: text(object(fields.project ?? {}).key) },
-        links: [...issueLinks, ...adfLinks(fields.description)] };
+        links: [...issueLinks, ...adfLinks(fields.description, this.linkOrigins())] };
     }
     if (this.source === "confluence") {
       const result = await this.get(`/wiki/api/v2/pages/${escaped}?body-format=storage&include-labels=true`, authorization);
@@ -326,7 +370,7 @@ export class LiveConnector extends MockConnector {
       return { title: text(page.title) || id, content: plainHtml(text(storage.value)),
         updatedAt: text(changed.createdAt), url: `${this.origin}/wiki/pages/viewpage.action?pageId=${escaped}`,
         metadata: { status: text(page.status), space: text(page.spaceId), ...(master ? { label: "master" } : {}) },
-        links: storageLinks(text(storage.value)) };
+        links: storageLinks(text(storage.value), this.linkOrigins()) };
     }
     const metadata = await this.get(`/drive/v3/files/${escaped}?fields=id,name,mimeType,modifiedTime,webViewLink,trashed&supportsAllDrives=true`, authorization);
     if (!metadata) return undefined;
@@ -351,10 +395,30 @@ export class LiveConnector extends MockConnector {
    * item. A share or restriction changes no version, so that full pass is what brings permission changes into the index
    * (within an hour at five-minute polls); every answer still rechecks access at the source. Removed items are found by
    * sync's ID pass. */
-  override async listUpdatedSince(cursor: number): Promise<{ ids: string[]; cursor: number }> {
+  override async listUpdatedSince(cursor: number, checkpoint?: ProviderCheckpoint): Promise<{ ids: string[]; cursor: number; checkpoint?: ProviderCheckpoint }> {
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("Invalid cursor");
-    this.pollCursor++;
+    this.pollCursor = cursor + 1;
     const ids = await this.listIds();
+    if (this.source === "jira") {
+      const previous = checkpoint?.source === "jira" ? new Map(Object.entries(checkpoint.observedVersions)) : this.jiraVersions;
+      const reconcile = cursor === 0 || this.pollCursor % FULL_POLL_EVERY === 0;
+      const next = new Map<string, string>();
+      const changed = new Set<string>();
+      const authorization = await this.serviceAuthorization();
+      for (let i = 0; i < ids.length; i += CHECKS_AT_ONCE) {
+        await Promise.all(ids.slice(i, i + CHECKS_AT_ONCE).map(async docId => {
+          const result = await this.get(`/rest/api/3/issue/${encodeURIComponent(this.nativeId(docId))}?fields=updated`, authorization);
+          if (!result) { changed.add(docId); return; }
+          const updated = text(optional(object(result).fields).updated);
+          if (!Number.isFinite(Date.parse(updated))) throw new Error("Invalid Jira change metadata");
+          next.set(docId, updated);
+          if (reconcile || previous.get(docId) !== updated) changed.add(docId);
+        }));
+      }
+      this.jiraVersions = next;
+      return { ids: ids.filter(id => changed.has(id)), cursor: this.pollCursor,
+        checkpoint: { source: "jira", observedVersions: Object.fromEntries(next) } };
+    }
     const previous = cursor === 0 || this.pollCursor % FULL_POLL_EVERY === 0 ? new Map<string, number>() : this.seen;
     const next = new Map<string, number>();
     const changed: string[] = [];
@@ -375,30 +439,33 @@ export class LiveConnector extends MockConnector {
   }
   override async fetchDocument(docId: string): Promise<SourceDocument | undefined> {
     const id = this.nativeId(docId);
-    const read = await this.read(id, await this.serviceAuthorization());
+    const read = await this.read(id, await this.serviceAuthorization(), true);
     if (!read || (this.source !== "slack" && this.scope.since && read.updatedAt < this.scope.since)) return undefined;
     const permissions = await this.fetchPermissions(docId);
     if (!permissions?.users.length) return undefined;
     const content = read.content.trim();
     if (!content || !read.updatedAt || !Number.isFinite(Date.parse(read.updatedAt))) return undefined;
     return withLinks({ docId, source: this.source, sourceNativeId: id, title: read.title,
-      content, url: read.url, updatedAt: read.updatedAt, version: version(read.updatedAt, content),
-      metadata: read.metadata, permissions, tier: "internal", links: read.links ?? [] });
+      content, url: read.url, updatedAt: read.updatedAt, version: version(read.updatedAt, content, read.slackMessages),
+      metadata: read.metadata, permissions, tier: "internal", links: read.links ?? [],
+      ...(read.slackMessages ? { slackMessages: read.slackMessages } : {}) }, this.linkOrigins());
   }
   override async fetchContent(docId: string): Promise<string | undefined> {
     return (await this.fetchDocument(docId))?.content;
   }
   override async fetchVersion(docId: string): Promise<number | undefined> {
     const read = await this.read(this.nativeId(docId), await this.serviceAuthorization());
-    return read?.updatedAt ? version(read.updatedAt, read.content.trim()) : undefined;
+    return read?.updatedAt ? version(read.updatedAt, read.content.trim(), read.slackMessages) : undefined;
   }
   override async fetchPermissions(docId: string): Promise<SourcePermission | undefined> {
     const id = this.nativeId(docId);
     const allowed: string[] = [];
     for (let i = 0; i < this.users.length; i += CHECKS_AT_ONCE) {
       const batch = this.users.slice(i, i + CHECKS_AT_ONCE);
-      const checks = await Promise.all(batch.map(user => this.checkAccess(user, docId)));
-      allowed.push(...batch.filter((_, index) => checks[index]).map(user => user.email));
+      const checks = await Promise.all(batch.map(user => this.access(user, docId)));
+      const unavailable = checks.find(check => check.kind === "unavailable");
+      if (unavailable?.kind === "unavailable") throw new SourceAccessUnavailable(this.source, unavailable.cause);
+      allowed.push(...batch.filter((_, index) => checks[index].kind === "allowed").map(user => user.email));
     }
     const native: SourcePermission["native"] = this.source === "slack"
       ? { source: "slack", channelId: id, visibility: "private", members: allowed }
@@ -411,12 +478,21 @@ export class LiveConnector extends MockConnector {
   }
   override getPermissions(docId: string): Promise<SourcePermission | undefined> { return this.fetchPermissions(docId); }
   override async checkAccess(user: User, docId: string): Promise<boolean> {
-    const authorization = await this.settings.authorization?.(user.id) ?? this.settings.userAuthorizations[user.id];
-    if (!user.platformIdentities?.[this.source] || !authorization || user.active === false) return false;
+    const result = await this.access(user, docId);
+    if (result.kind === "unavailable") throw new SourceAccessUnavailable(this.source, result.cause);
+    return result.kind === "allowed";
+  }
+
+  private async access(user: User, docId: string): Promise<SourceAccess> {
     const id = this.nativeId(docId);
-    // Every check uses the user's delegated credential against the live source.
-    try { return Boolean(await this.read(id, authorization)); }
-    catch { return false; }
+    if (!user.platformIdentities?.[this.source] || user.active === false) return { kind: "denied" };
+    try {
+      const authorization = await this.settings.authorization?.(user.id) ?? this.settings.userAuthorizations[user.id];
+      if (!authorization) return { kind: "denied" };
+      return { kind: await this.read(id, authorization) ? "allowed" : "denied" };
+    } catch (cause) {
+      return { kind: "unavailable", cause };
+    }
   }
   override subscribe(_callback: (change: Change) => void): () => void { return () => undefined; }
   override subscribeToChanges(callback: (change: Change) => void): () => void { return this.subscribe(callback); }
@@ -428,10 +504,12 @@ export function liveConnectorsFromEnv(users: readonly User[], env: NodeJS.Proces
   if (!config || typeof config !== "object" || sources.some(source => !config[source])) {
     throw new Error("LIVE_SOURCES_JSON must configure all four sources");
   }
+  const linkOrigins: LinkOrigins = { jira: config.jira.baseUrl ? [config.jira.baseUrl] : [],
+    confluence: config.confluence.baseUrl ? [config.confluence.baseUrl] : [], slack: config.slack.linkOrigins?.slack ?? [] };
   return {
-    slack: new LiveConnector("slack", config.slack, users),
-    jira: new LiveConnector("jira", config.jira, users),
-    confluence: new LiveConnector("confluence", config.confluence, users),
-    drive: new LiveConnector("drive", config.drive, users)
+    slack: new LiveConnector("slack", { ...config.slack, linkOrigins }, users),
+    jira: new LiveConnector("jira", { ...config.jira, linkOrigins }, users),
+    confluence: new LiveConnector("confluence", { ...config.confluence, linkOrigins }, users),
+    drive: new LiveConnector("drive", { ...config.drive, linkOrigins }, users)
   };
 }

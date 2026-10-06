@@ -27,4 +27,14 @@ describe("BroppyClient", () => {
     expect(await client.comment("m@x.test", "DB-9", "t")).toBe(false);
     expect(seen).toEqual(["https://api.test/v1/service/jira/issue", "https://api.test/v1/service/jira/comment"]);
   });
+  it("resolves active actors and reads a minimal issue observation through authorized service routes", async () => {
+    const seen: any[] = [];
+    const client = new BroppyClient("https://api.test", "s".repeat(32), async (url, init) => {
+      seen.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify(String(url).endsWith("/actor") ? { active: true } : { key: "DB-9", url: "https://j/DB-9", statusCategory: "done", providerVersion: "2026-10-05T12:00:00Z", operationMarker: "marker" }));
+    });
+    expect(await client.actor("maya@x.test")).toEqual({ active: true });
+    expect(await client.issueAccess("maya@x.test", "DB-9")).toEqual({ key: "DB-9", url: "https://j/DB-9", statusCategory: "done", providerVersion: "2026-10-05T12:00:00Z", operationMarker: "marker" });
+    expect(seen).toEqual([{ url: "https://api.test/v1/service/actor", body: {} }, { url: "https://api.test/v1/service/jira/access", body: { key: "DB-9" } }]);
+  });
 });

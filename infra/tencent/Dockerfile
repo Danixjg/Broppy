@@ -1,6 +1,13 @@
 # The Internal Brain API. Build from the repository root:
 #   docker build -f infra/tencent/Dockerfile .
-FROM node:22-slim
+FROM rust:1.99.0-slim-bookworm AS rust-core
+WORKDIR /build
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates crates
+COPY tools/anchor tools/anchor
+RUN cargo build --locked --release -p brain-core --features node
+
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
@@ -13,6 +20,7 @@ COPY packages/audit/package.json packages/audit/
 COPY packages/connectors/package.json packages/connectors/
 COPY packages/fga-adapter/package.json packages/fga-adapter/
 COPY packages/retrieval/package.json packages/retrieval/
+COPY packages/rust-core/package.json packages/rust-core/
 COPY packages/types/package.json packages/types/
 RUN pnpm install --frozen-lockfile --filter internal-brain --filter "@brain/api..."
 
@@ -20,6 +28,7 @@ RUN pnpm install --frozen-lockfile --filter internal-brain --filter "@brain/api.
 COPY tsconfig.json ./
 COPY data/mock data/mock
 COPY packages packages
+COPY --from=rust-core /build/target/release/libbrain_core.so packages/rust-core/brain-core.node
 COPY apps/api apps/api
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 # The model usage counts live here, on a volume; a new volume takes this folder's owner.

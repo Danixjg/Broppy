@@ -1,5 +1,5 @@
 import { BroppyClient, type BroppyApi } from "./broppy.js";
-import { JiraClient, type JiraApi } from "./jira.js";
+import type { JiraApi } from "./jira.js";
 import { SlackWebApi, type SlackApi } from "./slack.js";
 import { DEFAULT_THRESHOLD, type Person } from "./score.js";
 import { MemoryTaskStore, SupabaseTaskStore, type TaskStore } from "./store.js";
@@ -7,7 +7,7 @@ import { MemoryTaskStore, SupabaseTaskStore, type TaskStore } from "./store.js";
 export interface Deps {
   signingSecret: string;
   slack: SlackApi;
-  jira: JiraApi;
+  jira?: JiraApi;
   broppy: BroppyApi;
   store: TaskStore;
   people: Person[];
@@ -19,6 +19,10 @@ export interface Deps {
   /** Runs work after the HTTP response is sent (Vercel's waitUntil). */
   defer: (work: Promise<unknown>) => void;
   now: () => Date;
+  destinations?: Array<{ channel: string; project: string; allowedSlackIds: string[]; disclosureFields: Array<"summary" | "permalink"> }>;
+  completionPolicies?: Array<{ channel: string; project: string; allowedSlackIds: string[] }>;
+  workerToken?: string;
+  jiraBaseUrl?: string;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -47,13 +51,15 @@ export function depsFromEnv(env: NodeJS.ProcessEnv, defer: Deps["defer"]): Deps 
   return {
     signingSecret: required(env, "SLACK_SIGNING_SECRET"),
     slack: new SlackWebApi(required(env, "SLACK_BOT_TOKEN")),
-    jira: new JiraClient(required(env, "JIRA_BASE_URL"), required(env, "JIRA_EMAIL"), required(env, "JIRA_API_TOKEN")),
     broppy: new BroppyClient(required(env, "BROPPY_API_URL"), required(env, "SLACK_SERVICE_TOKEN")),
     store, people,
     channelProjects: json<Record<string, string>>(env, "SLACK_CHANNEL_PROJECTS_JSON", {}),
     defaultProject: required(env, "JIRA_DEFAULT_PROJECT"),
     threshold: env.TASK_SCORE_THRESHOLD ? Number(env.TASK_SCORE_THRESHOLD) : DEFAULT_THRESHOLD,
     webUrl: required(env, "BROPPY_WEB_URL").replace(/\/$/, ""),
+    destinations: json(env, "SLACK_JIRA_DESTINATIONS_JSON", []),
+    completionPolicies: json(env, "SLACK_COMPLETION_POLICY_JSON", []),
+    workerToken: env.SLACK_WORKER_TOKEN?.trim(), jiraBaseUrl: required(env, "JIRA_BASE_URL").replace(/\/$/, ""),
     defer, now: () => new Date()
   };
 }

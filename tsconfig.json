@@ -20,7 +20,8 @@
   "include": [
     "apps/**/*.ts",
     "packages/**/*.ts",
-    "data/**/*.ts"
+    "data/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "exclude": [
     "apps/web",

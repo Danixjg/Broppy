@@ -41,7 +41,7 @@ export function Shell() {
           <Input id="search" type="search" placeholder="Search documents, threads, tasks…" autoComplete="off" />
           <kbd aria-hidden="true">⌘ K</kbd>
         </label>
-        <Badge variant="secondary" className="environment-badge"><span className="live-dot" /> Demo workspace</Badge>
+        <Badge variant="secondary" className="environment-badge"><span className="live-dot" /><span id="workspaceMode">Loading workspace</span></Badge>
         <label id="demoIdentity" className="identity">Viewing as
           <select id="user">
             <option value="ravi">Ravi</option><option value="maya">Maya</option><option value="alex">Alex</option>
