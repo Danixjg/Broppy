@@ -5,6 +5,9 @@ dist/
 *.env
 *.log
 coverage/
+.audit/
+target/
+*.node
 *.tsbuildinfo
 *Zone.Identifier
 graphify-out/

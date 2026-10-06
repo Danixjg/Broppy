@@ -9,6 +9,21 @@ export interface IssueInput {
   dueDate?: string;
 }
 
+export interface JiraIssueAccess {
+  key: string;
+  url: string;
+  statusCategory: "new" | "indeterminate" | "done";
+  providerVersion: string;
+  operationMarker?: string;
+}
+
+function descriptionText(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const node = value as Record<string, unknown>;
+  return [typeof node.text === "string" ? node.text : "",
+    ...(Array.isArray(node.content) ? node.content.map(descriptionText) : [])].filter(Boolean).join("\n");
+}
+
 const adf = (text: string) => ({
   type: "doc", version: 1,
   content: text.split("\n\n").map(paragraph => ({ type: "paragraph", content: [{ type: "text", text: paragraph }] }))
@@ -33,7 +48,7 @@ export function parseComment(input: Record<string, unknown>): { key: string; tex
 
 /**
  * Jira writes made with the person's own connection, so they are the creator and Jira applies their permissions.
- * Their token never leaves the API. Returns undefined when they haven't connected Jira, so the caller can fall back.
+ * Their token never leaves the API. Returns undefined when they have not connected Jira.
  */
 export class JiraAsUser {
   constructor(private readonly oauth: Pick<SourceOAuth, "authorizationFor" | "siteFor">, private readonly transport: typeof fetch = fetch) {}
@@ -65,5 +80,24 @@ export class JiraAsUser {
 
   async comment(user: User, key: string, text: string): Promise<boolean> {
     return Boolean(await this.request(user, `issue/${encodeURIComponent(key)}/comment`, { body: adf(text) }));
+  }
+
+  async access(user: User, key: string): Promise<JiraIssueAccess | undefined> {
+    if (!/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(key) || user.active === false) throw new Error("Invalid issue");
+    const [authorization, site] = await Promise.all([this.oauth.authorizationFor(user.id, "jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return undefined;
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status,updated,description`, {
+      headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error"
+    });
+    if (response.status === 403 || response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`Jira access check failed (${response.status})`);
+    const payload = await response.json();
+    const category = payload?.fields?.status?.statusCategory?.key;
+    const providerVersion = payload?.fields?.updated;
+    if (!["new", "indeterminate", "done"].includes(category) || typeof providerVersion !== "string" ||
+      !Number.isFinite(Date.parse(providerVersion))) throw new Error("Invalid Jira status");
+    const operationMarker = descriptionText(payload.fields.description).match(/Broppy operation: ([a-f\d-]{36})\b/i)?.[1];
+    return { key, url: `${site.baseUrl}/browse/${key}`, statusCategory: category, providerVersion,
+      ...(operationMarker ? { operationMarker } : {}) };
   }
 }

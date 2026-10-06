@@ -29,6 +29,13 @@ async function start() {
 }
 
 describe("API authorization and trace", () => {
+  it("keeps Slack bot status separate and refuses demo installation mutations", async () => {
+    const { request } = await start();
+    expect(await request("/v1/admin/slack-installation","maya")).toEqual({ status: 200, body: { state: "not_installed", configured: false } });
+    expect((await request("/v1/admin/slack-installation/authorize","maya",{ method: "POST" })).status).toBe(503);
+    expect((await request("/v1/admin/slack-installation","ravi")).status).toBe(403);
+  });
+
   it("requires an explicit demo-auth switch when Auth0 is absent", async () => {
     const previous = process.env.ALLOW_DEMO_AUTH;
     delete process.env.ALLOW_DEMO_AUTH;

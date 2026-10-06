@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-008 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-010 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -349,3 +349,462 @@ $$;
 
 revoke all on function public.begin_oauth_flow(text,text,text,text,text,text,text,integer), public.consume_oauth_flow(text,text) from public, anon, authenticated;
 grant execute on function public.begin_oauth_flow(text,text,text,text,text,text,text,integer), public.consume_oauth_flow(text,text) to service_role;
+
+create table public.slack_task_links (
+  org_id text not null,
+  project text not null,
+  fingerprint text not null,
+  title text not null,
+  tokens text[] not null,
+  issue_key text not null,
+  issue_url text not null,
+  assignee_slack_id text not null,
+  tracked_by text not null,
+  channel text not null,
+  message_ts text not null,
+  mention_count integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (org_id, project, fingerprint)
+);
+create index slack_task_links_recent on public.slack_task_links (org_id, project, updated_at desc);
+
+create table public.slack_claims (
+  org_id text not null,
+  key text not null,
+  claimed_at timestamptz not null default now(),
+  primary key (org_id, key)
+);
+
+alter table public.slack_task_links enable row level security;
+alter table public.slack_claims enable row level security;
+revoke all on public.slack_task_links, public.slack_claims from public, anon, authenticated;
+grant select, insert, update on public.slack_task_links to service_role;
+grant select, insert, delete on public.slack_claims to service_role;
+
+create function public.record_slack_task_repeat(organization text, project_key text, task_fingerprint text,
+  repeat_channel text, repeat_ts text)
+returns void language sql security invoker set search_path = '' as $$
+  update public.slack_task_links
+    set mention_count = mention_count + 1, updated_at = now(), channel = repeat_channel, message_ts = repeat_ts
+    where org_id = organization and project = project_key and fingerprint = task_fingerprint;
+$$;
+revoke all on function public.record_slack_task_repeat(text,text,text,text,text) from public, anon, authenticated;
+grant execute on function public.record_slack_task_repeat(text,text,text,text,text) to service_role;
+
+begin;
+
+alter table public.slack_task_links add column source jsonb not null default '{}'::jsonb;
+alter table public.slack_task_links add column operation_id uuid;
+alter table public.slack_task_links add column title_fingerprint text;
+update public.slack_task_links set title_fingerprint=fingerprint;
+create index slack_task_links_exact_title on public.slack_task_links(org_id,project,title_fingerprint,created_at);
+
+create table public.slack_task_proposals (
+  org_id text not null,
+  id uuid not null,
+  source_key text not null,
+  revision integer not null check (revision >= 1),
+  status text not null check (status in ('pending','dismissed','linked','created')),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (org_id,id),
+  unique (org_id,source_key)
+);
+
+create table public.slack_task_operations (
+  org_id text not null,
+  id uuid not null,
+  project text not null,
+  fingerprint text not null,
+  proposal_id uuid not null,
+  state text not null check (state in ('reserved','creating','remote_succeeded','linked','notifying','notified','uncertain','refused')),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (org_id,id),
+  unique (org_id,project,fingerprint),
+  foreign key (org_id,proposal_id) references public.slack_task_proposals(org_id,id)
+);
+
+create table public.slack_link_operations (
+  org_id text not null,
+  id uuid not null,
+  project text not null,
+  fingerprint text not null,
+  proposal_id uuid not null,
+  state text not null check (state in ('remote_succeeded','linked','notifying','notified')),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (org_id,id),
+  unique (org_id,proposal_id),
+  foreign key (org_id,proposal_id) references public.slack_task_proposals(org_id,id)
+);
+
+create table public.slack_legacy_fences (
+  org_id text not null,
+  project text not null,
+  fingerprint text not null,
+  channel text not null,
+  message_ts text not null,
+  created_at timestamptz not null default now(),
+  primary key (org_id,project,fingerprint,channel,message_ts)
+);
+
+create table public.slack_task_sightings (
+  org_id text not null,
+  project text not null,
+  fingerprint text not null,
+  channel text not null,
+  message_ts text not null,
+  created_at timestamptz not null default now(),
+  primary key (org_id,project,fingerprint,channel,message_ts),
+  foreign key (org_id,project,fingerprint) references public.slack_task_links(org_id,project,fingerprint)
+);
+
+create table public.slack_completion_observations (
+  org_id text not null,
+  project text not null,
+  fingerprint text not null,
+  category text not null check (category in ('new','indeterminate','done')),
+  provider_version text not null,
+  updated_at timestamptz not null default now(),
+  primary key (org_id,project,fingerprint)
+);
+
+create table public.slack_completion_feedback (
+  org_id text not null,
+  id uuid not null,
+  project text not null,
+  fingerprint text not null,
+  state text not null check (state in ('pending','sending','delivered','uncertain')),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (org_id,id),
+  unique (org_id,project,fingerprint)
+);
+
+insert into public.slack_task_proposals (org_id,id,source_key,revision,status,payload)
+select org_id, md5('legacy:' || org_id || ':' || project || ':' || fingerprint)::uuid,
+  jsonb_build_array('',channel,message_ts)::text, 1, 'linked',
+  jsonb_build_object('id',md5('legacy:' || org_id || ':' || project || ':' || fingerprint)::uuid,
+    'revision',1,'status','linked','issueKey',issue_key,'issueUrl',issue_url,'reviewerSlackId',tracked_by,
+    'suggestion',jsonb_build_object('t',title,'a',assignee_slack_id,'p',project,'c',channel,'ts',message_ts,'s',''))
+from public.slack_task_links on conflict do nothing;
+
+create function public.save_slack_proposal(organization text, proposal jsonb, expected_revision integer default null)
+returns boolean language plpgsql security invoker set search_path = '' as $$
+declare current_row public.slack_task_proposals; origin text; target_proposal_id uuid;
+begin
+  target_proposal_id := (proposal->>'id')::uuid;
+  origin := jsonb_build_array(coalesce(proposal->>'teamId',''),proposal#>>'{suggestion,c}',proposal#>>'{suggestion,ts}')::text;
+  if expected_revision is null then
+    if (proposal->>'revision')::integer <> 1 then return false; end if;
+    insert into public.slack_task_proposals(org_id,id,source_key,revision,status,payload)
+      values (organization,target_proposal_id,origin,1,proposal->>'status',proposal) on conflict do nothing;
+    return found;
+  end if;
+  select * into current_row from public.slack_task_proposals where org_id=organization and id=target_proposal_id for update;
+  if not found or current_row.revision<>expected_revision or (proposal->>'revision')::integer<>expected_revision+1 or current_row.status<>'pending' or current_row.source_key<>origin then return false; end if;
+  if current_row.payload->'teamId' is distinct from proposal->'teamId'
+    or current_row.payload->'authorSlackId' is distinct from proposal->'authorSlackId'
+    or current_row.payload->'permalink' is distinct from proposal->'permalink'
+    or current_row.payload->'reviewerSlackId' is distinct from proposal->'reviewerSlackId'
+    or current_row.payload#>'{suggestion,s}' is distinct from proposal#>'{suggestion,s}'
+    or current_row.payload#>'{suggestion,th}' is distinct from proposal#>'{suggestion,th}' then return false; end if;
+  if exists (select 1 from public.slack_task_operations where org_id=organization and slack_task_operations.proposal_id=target_proposal_id and (state<>'refused' or payload ? 'issueKey'))
+    or exists (select 1 from public.slack_link_operations where org_id=organization and slack_link_operations.proposal_id=target_proposal_id) then return false; end if;
+  delete from public.slack_task_operations where org_id=organization and slack_task_operations.proposal_id=target_proposal_id and state='refused' and not (payload ? 'issueKey');
+  update public.slack_task_proposals set revision=expected_revision+1,status=proposal->>'status',payload=proposal,updated_at=now() where org_id=organization and id=target_proposal_id;
+  return true;
+end $$;
+
+create function public.complete_slack_proposal(organization text, proposal_id uuid, expected_revision integer, operation_id uuid,
+  task_fingerprint text, reviewed_by text, reviewed_at text)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare stored public.slack_task_proposals; op public.slack_task_operations; result jsonb; next_status text;
+begin
+  select * into stored from public.slack_task_proposals where org_id=organization and id=proposal_id for update;
+  if not found or stored.status<>'pending' or stored.revision<>expected_revision then return null; end if;
+  select * into op from public.slack_task_operations where org_id=organization and id=operation_id;
+  if not found then select * into op from public.slack_link_operations where org_id=organization and id=operation_id; end if;
+  if not found or op.state not in ('remote_succeeded','linked','notifying','notified') or op.project<>stored.payload#>>'{suggestion,p}'
+    or op.fingerprint<>task_fingerprint or not (op.payload ? 'issueKey') or not (op.payload ? 'issueUrl')
+    or (op.proposal_id=proposal_id and (op.payload->>'proposalRevision')::integer<>expected_revision) then return null; end if;
+  next_status := case when op.proposal_id<>proposal_id or (op.payload->>'existing')::boolean then 'linked' else 'created' end;
+  result := stored.payload || jsonb_build_object('revision',expected_revision+1,'status',next_status,'operationId',operation_id,
+    'issueKey',op.payload->>'issueKey','issueUrl',op.payload->>'issueUrl','reviewedBy',reviewed_by,'reviewedAt',reviewed_at);
+  update public.slack_task_proposals set revision=expected_revision+1,status=next_status,payload=result,updated_at=now() where org_id=organization and id=proposal_id;
+  return result;
+end $$;
+
+create function public.reserve_slack_operation(organization text, proposal_id uuid, expected_revision integer,
+  operation_id uuid, task_fingerprint text, actor_slack_id text, existing_issue jsonb default null)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare stored public.slack_task_proposals; result jsonb; project_key text; operation_state text;
+begin
+  select * into stored from public.slack_task_proposals where org_id=organization and id=proposal_id for update;
+  if not found or stored.revision<>expected_revision or stored.status<>'pending' then return null; end if;
+  select payload into result from public.slack_link_operations where org_id=organization and slack_link_operations.proposal_id=reserve_slack_operation.proposal_id;
+  if found then return result; end if;
+  project_key := stored.payload#>>'{suggestion,p}';
+  operation_state := case when existing_issue is null then 'reserved' else 'remote_succeeded' end;
+  if existing_issue is null and exists (select 1 from public.slack_claims where org_id=organization and key='track:' || (stored.payload#>>'{suggestion,c}') || ':' || (stored.payload#>>'{suggestion,ts}')) then
+    insert into public.slack_legacy_fences(org_id,project,fingerprint,channel,message_ts)
+      values (organization,project_key,task_fingerprint,stored.payload#>>'{suggestion,c}',stored.payload#>>'{suggestion,ts}') on conflict do nothing;
+  end if;
+  if existing_issue is null and exists (select 1 from public.slack_legacy_fences where org_id=organization and project=project_key and fingerprint=task_fingerprint) then operation_state := 'uncertain'; end if;
+  result := jsonb_build_object('id',operation_id,'project',project_key,'fingerprint',task_fingerprint,
+    'proposalId',proposal_id,'proposalRevision',expected_revision,'proposal',stored.payload,'actorSlackId',actor_slack_id,
+    'state',operation_state,'existing',existing_issue is not null);
+  if existing_issue is not null then result := result || jsonb_build_object('issueKey',existing_issue->>'key','issueUrl',existing_issue->>'url'); end if;
+  insert into public.slack_task_operations(org_id,id,project,fingerprint,proposal_id,state,payload)
+    values (organization,operation_id,project_key,task_fingerprint,proposal_id,operation_state,result) on conflict (org_id,project,fingerprint) do nothing;
+  if operation_state='uncertain' then
+    update public.slack_task_operations set state='uncertain',payload=payload || '{"state":"uncertain"}'::jsonb,updated_at=now()
+      where org_id=organization and project=project_key and fingerprint=task_fingerprint and state in ('reserved','refused');
+  end if;
+  select payload into result from public.slack_task_operations where org_id=organization and project=project_key and fingerprint=task_fingerprint;
+  return result;
+end $$;
+
+create function public.reserve_slack_link_operation(organization text, proposal_id uuid, expected_revision integer,
+  operation_id uuid, task_fingerprint text, actor_slack_id text, existing_issue jsonb)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare stored public.slack_task_proposals; owned public.slack_task_operations; result jsonb;
+begin
+  select * into stored from public.slack_task_proposals where org_id=organization and id=proposal_id for update;
+  if not found or stored.revision<>expected_revision or stored.status<>'pending' or existing_issue is null
+    or coalesce(jsonb_typeof(existing_issue->'key'),'')<>'string' or coalesce(jsonb_typeof(existing_issue->'url'),'')<>'string' then return null; end if;
+  select payload into result from public.slack_link_operations where org_id=organization and slack_link_operations.proposal_id=reserve_slack_link_operation.proposal_id;
+  if found then
+    if result->>'issueKey'=existing_issue->>'key' and (result->>'proposalRevision')::integer=expected_revision then return result; end if;
+    return null;
+  end if;
+  select * into owned from public.slack_task_operations where org_id=organization and slack_task_operations.proposal_id=reserve_slack_link_operation.proposal_id for update;
+  if found then
+    if owned.state<>'refused' or owned.payload ? 'issueKey' then return null; end if;
+    delete from public.slack_task_operations where org_id=organization and id=owned.id;
+  end if;
+  result := jsonb_build_object('id',operation_id,'project',stored.payload#>>'{suggestion,p}','fingerprint',task_fingerprint,
+    'proposalId',proposal_id,'proposalRevision',expected_revision,'proposal',stored.payload,'actorSlackId',actor_slack_id,
+    'state','remote_succeeded','existing',true,'kind','link','issueKey',existing_issue->>'key','issueUrl',existing_issue->>'url');
+  insert into public.slack_link_operations(org_id,id,project,fingerprint,proposal_id,state,payload)
+    values (organization,operation_id,stored.payload#>>'{suggestion,p}',task_fingerprint,proposal_id,'remote_succeeded',result);
+  return result;
+end $$;
+
+create function public.advance_slack_operation(organization text, operation_id uuid, expected_state text, patch jsonb)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare result jsonb; stored public.slack_task_operations; is_link boolean := false;
+begin
+  select * into stored from public.slack_task_operations where org_id=organization and id=operation_id and state=expected_state for update;
+  if not found then
+    select * into stored from public.slack_link_operations where org_id=organization and id=operation_id and state=expected_state for update;
+    if not found then return null; end if;
+    is_link := true;
+  end if;
+  if is_link then
+    if patch ? 'state' and patch->>'state' not in ('remote_succeeded','linked','notifying','notified') then return null; end if;
+    update public.slack_link_operations set payload=payload || patch || jsonb_build_object('id',id),state=coalesce(patch->>'state',state),updated_at=now()
+      where org_id=organization and id=operation_id returning payload into result;
+    return result;
+  end if;
+  if patch->>'state'='creating' and expected_state in ('reserved','refused') and exists
+    (select 1 from public.slack_legacy_fences where org_id=organization and project=stored.project and fingerprint=stored.fingerprint) then
+    update public.slack_task_operations set state='uncertain',payload=payload || '{"state":"uncertain"}'::jsonb,updated_at=now() where org_id=organization and id=operation_id;
+    return null;
+  end if;
+  update public.slack_task_operations set payload=payload || patch || jsonb_build_object('id',id),state=coalesce(patch->>'state',state),updated_at=now()
+    where org_id=organization and id=operation_id returning payload into result;
+  return result;
+end $$;
+
+create or replace function public.record_slack_task_repeat(organization text, project_key text, task_fingerprint text, repeat_channel text, repeat_ts text)
+returns void language plpgsql security invoker set search_path = '' as $$
+begin
+  if exists (select 1 from public.slack_task_links where org_id=organization and project=project_key and fingerprint=task_fingerprint and channel=repeat_channel and message_ts=repeat_ts) then return; end if;
+  insert into public.slack_task_sightings(org_id,project,fingerprint,channel,message_ts) values (organization,project_key,task_fingerprint,repeat_channel,repeat_ts) on conflict do nothing;
+  if found then
+    update public.slack_task_links set mention_count=mention_count+1,updated_at=now() where org_id=organization and project=project_key and fingerprint=task_fingerprint;
+  end if;
+end $$;
+
+create function public.observe_slack_completion(organization text, task_link jsonb, observation jsonb, delivery_id uuid)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare previous text; project_key text; task_fingerprint text; new_category text; result jsonb;
+begin
+  project_key := task_link->>'project'; task_fingerprint := task_link->>'fingerprint'; new_category := observation->>'statusCategory';
+  perform 1 from public.slack_task_links where org_id=organization and project=project_key and fingerprint=task_fingerprint for update;
+  if not found then return; end if;
+  select category into previous from public.slack_completion_observations where org_id=organization and project=project_key and fingerprint=task_fingerprint;
+  insert into public.slack_completion_observations(org_id,project,fingerprint,category,provider_version)
+    values (organization,project_key,task_fingerprint,new_category,observation->>'providerVersion')
+    on conflict (org_id,project,fingerprint) do update set category=excluded.category,provider_version=excluded.provider_version,updated_at=now();
+  update public.slack_task_links set updated_at=now() where org_id=organization and project=project_key and fingerprint=task_fingerprint;
+  if previous is null or previous='done' or new_category<>'done' then return; end if;
+  result := jsonb_build_object('id',delivery_id,'link',task_link,'providerVersion',observation->>'providerVersion','state','pending');
+  insert into public.slack_completion_feedback(org_id,id,project,fingerprint,state,payload)
+    values (organization,delivery_id,project_key,task_fingerprint,'pending',result) on conflict (org_id,project,fingerprint) do nothing;
+end $$;
+
+create function public.advance_slack_feedback(organization text, delivery_id uuid, expected_state text, patch jsonb)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare result jsonb;
+begin
+  update public.slack_completion_feedback set payload=payload || patch || jsonb_build_object('id',id),state=coalesce(patch->>'state',state),updated_at=now()
+    where org_id=organization and id=delivery_id and state=expected_state returning payload into result;
+  return result;
+end $$;
+
+alter table public.slack_task_proposals enable row level security;
+alter table public.slack_task_operations enable row level security;
+alter table public.slack_link_operations enable row level security;
+alter table public.slack_legacy_fences enable row level security;
+alter table public.slack_task_sightings enable row level security;
+alter table public.slack_completion_observations enable row level security;
+alter table public.slack_completion_feedback enable row level security;
+revoke all on public.slack_task_proposals,public.slack_task_operations,public.slack_link_operations,public.slack_legacy_fences,public.slack_task_sightings,public.slack_completion_observations,public.slack_completion_feedback from public,anon,authenticated;
+grant delete on public.slack_task_operations to service_role;
+grant select,insert,update on public.slack_task_proposals,public.slack_task_operations,public.slack_link_operations,public.slack_legacy_fences,public.slack_task_sightings,public.slack_completion_observations,public.slack_completion_feedback to service_role;
+revoke all on function public.save_slack_proposal(text,jsonb,integer),public.complete_slack_proposal(text,uuid,integer,uuid,text,text,text),public.reserve_slack_operation(text,uuid,integer,uuid,text,text,jsonb),public.reserve_slack_link_operation(text,uuid,integer,uuid,text,text,jsonb),public.advance_slack_operation(text,uuid,text,jsonb),public.record_slack_task_repeat(text,text,text,text,text),public.observe_slack_completion(text,jsonb,jsonb,uuid),public.advance_slack_feedback(text,uuid,text,jsonb) from public,anon,authenticated;
+grant execute on function public.save_slack_proposal(text,jsonb,integer),public.complete_slack_proposal(text,uuid,integer,uuid,text,text,text),public.reserve_slack_operation(text,uuid,integer,uuid,text,text,jsonb),public.reserve_slack_link_operation(text,uuid,integer,uuid,text,text,jsonb),public.advance_slack_operation(text,uuid,text,jsonb),public.record_slack_task_repeat(text,text,text,text,text),public.observe_slack_completion(text,jsonb,jsonb,uuid),public.advance_slack_feedback(text,uuid,text,jsonb) to service_role;
+
+commit;
+
+create table public.slack_install_attempts (
+  attempt_id bigint generated always as identity primary key,
+  org_id text not null,
+  app_id text not null,
+  state_hash text not null unique check (state_hash ~ '^[a-f0-9]{64}$'),
+  person text not null,
+  person_sub text not null,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  completed_at timestamptz
+);
+create index slack_install_attempts_org_app on public.slack_install_attempts(org_id, app_id);
+create index slack_install_attempts_expiry on public.slack_install_attempts(expires_at);
+create table public.slack_installations (
+  app_id text not null,
+  team_id text not null,
+  org_id text not null,
+  team_name text not null,
+  bot_user_id text not null,
+  scopes text[] not null,
+  lifecycle text not null check (lifecycle in ('active','disconnected','uninstalled')),
+  generation bigint not null check (generation > 0),
+  installed_at timestamptz not null,
+  last_attempt_id bigint not null,
+  secret_id uuid,
+  primary key (app_id, team_id),
+  unique (org_id, app_id),
+  check ((lifecycle = 'active') = (secret_id is not null))
+);
+alter table public.slack_install_attempts enable row level security;
+alter table public.slack_installations enable row level security;
+revoke all on public.slack_install_attempts, public.slack_installations from public, anon, authenticated;
+grant select, insert, update, delete on public.slack_install_attempts, public.slack_installations to service_role;
+grant usage, select on sequence public.slack_install_attempts_attempt_id_seq to service_role;
+
+create function public.begin_slack_install(organization text, application text, state_hash text, person text, person_sub text)
+returns void language plpgsql security invoker set search_path = '' as $$
+begin
+  if organization = '' or application = '' or person = '' or person_sub = '' then raise exception 'Invalid install actor'; end if;
+  delete from public.slack_install_attempts where expires_at < now();
+  insert into public.slack_install_attempts(org_id,app_id,state_hash,person,person_sub,expires_at)
+    values(organization,application,state_hash,person,person_sub,now() + interval '10 minutes');
+end $$;
+create function public.consume_slack_install(organization text, application text, state_hash text)
+returns jsonb language sql security invoker set search_path = '' as $$
+  with taken as (
+    update public.slack_install_attempts a set consumed_at=now()
+    where a.org_id=organization and a.app_id=application and a.state_hash=consume_slack_install.state_hash
+      and a.expires_at > now() and a.consumed_at is null returning a.*
+  ) select pg_catalog.jsonb_build_object('attemptId',attempt_id,'orgId',org_id,'appId',app_id,'person',person,'personSub',person_sub) from taken;
+$$;
+create function public.slack_install_status(organization text, application text)
+returns jsonb language sql security invoker set search_path = '' as $$
+  select pg_catalog.jsonb_build_object('state',lifecycle,'teamId',team_id,'teamName',team_name,'generation',generation,'installedAt',installed_at)
+  from public.slack_installations where org_id=organization and app_id=application;
+$$;
+create function public.publish_slack_install(organization text, application text, attempt bigint, workspace text, workspace_name text,
+  bot_user text, granted_scopes text[], bundle jsonb)
+returns boolean language plpgsql security invoker set search_path = '' as $$
+declare old public.slack_installations; owned_secret uuid;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('slack/team/' || application || '/' || workspace, 0));
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('slack/org/' || application || '/' || organization, 0));
+  if not exists (select 1 from public.slack_install_attempts a where a.attempt_id=attempt and a.org_id=organization and a.app_id=application
+    and a.consumed_at is not null and a.completed_at is null and a.expires_at > now()) then return false; end if;
+  select * into old from public.slack_installations where org_id=organization and app_id=application for update;
+  if old.app_id is not null and (old.team_id <> workspace or old.last_attempt_id >= attempt) then return false; end if;
+  if exists(select 1 from public.slack_installations where app_id=application and team_id=workspace and org_id <> organization) then return false; end if;
+  if workspace = '' or bot_user = '' or pg_catalog.jsonb_typeof(bundle) <> 'object'
+    or bundle->'runtime'->>'orgId' is distinct from organization
+    or bundle->>'accessToken' is null or bundle->>'accessToken' = '' or pg_catalog.jsonb_typeof(bundle->'runtime') <> 'object' then
+    raise exception 'Invalid install bundle';
+  end if;
+  select vault.create_secret(bundle::text) into owned_secret;
+  insert into public.slack_installations(app_id,team_id,org_id,team_name,bot_user_id,scopes,lifecycle,generation,installed_at,last_attempt_id,secret_id)
+    values(application,workspace,organization,workspace_name,bot_user,granted_scopes,'active',coalesce(old.generation,0)+1,now(),attempt,owned_secret)
+    on conflict(org_id,app_id) do update set team_name=excluded.team_name,bot_user_id=excluded.bot_user_id,scopes=excluded.scopes,
+      lifecycle='active',generation=excluded.generation,installed_at=excluded.installed_at,last_attempt_id=excluded.last_attempt_id,secret_id=excluded.secret_id;
+  delete from vault.secrets where id=old.secret_id;
+  update public.slack_install_attempts set completed_at=now() where attempt_id=attempt;
+  return true;
+end $$;
+create function public.resolve_slack_install(application text, workspace text)
+returns jsonb language sql security invoker set search_path = '' as $$
+  select pg_catalog.jsonb_build_object('appId',i.app_id,'teamId',i.team_id,'orgId',i.org_id,'botUserId',i.bot_user_id,
+    'generation',i.generation,'accessToken',s.decrypted_secret::jsonb->>'accessToken','runtime',s.decrypted_secret::jsonb->'runtime')
+  from public.slack_installations i join vault.decrypted_secrets s on s.id=i.secret_id
+  where i.app_id=application and i.team_id=workspace and i.lifecycle='active';
+$$;
+create function public.current_slack_install(application text, workspace text, expected_generation bigint)
+returns boolean language sql security invoker set search_path = '' as $$
+  select exists(select 1 from public.slack_installations where app_id=application and team_id=workspace and lifecycle='active' and generation=expected_generation);
+$$;
+create function public.refresh_slack_runtime(organization text, application text, expected_generation bigint, runtime jsonb)
+returns boolean language plpgsql security invoker set search_path = '' as $$
+declare old public.slack_installations; bundle jsonb; owned_secret uuid;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('slack/org/' || application || '/' || organization, 0));
+  select * into old from public.slack_installations where org_id=organization and app_id=application for update;
+  if old.lifecycle <> 'active' or old.generation <> expected_generation or old.app_id is null then return false; end if;
+  if runtime->>'orgId' is distinct from organization or pg_catalog.jsonb_typeof(runtime) <> 'object' then raise exception 'Invalid runtime'; end if;
+  select s.decrypted_secret::jsonb into bundle from vault.decrypted_secrets s where s.id=old.secret_id;
+  if bundle is null then raise exception 'Missing owned secret'; end if;
+  select vault.create_secret(pg_catalog.jsonb_set(bundle,'{runtime}',runtime)::text) into owned_secret;
+  update public.slack_installations set secret_id=owned_secret,generation=generation+1 where app_id=application and org_id=organization;
+  delete from vault.secrets where id=old.secret_id;
+  return true;
+end $$;
+create function public.deactivate_slack_install(organization text, application text, workspace text, expected_generation bigint, reason text)
+returns boolean language plpgsql security invoker set search_path = '' as $$
+declare old public.slack_installations;
+begin
+  if reason not in ('disconnected','uninstalled') then raise exception 'Invalid lifecycle'; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('slack/org/' || application || '/' || organization, 0));
+  select * into old from public.slack_installations where org_id=organization and app_id=application and team_id=workspace for update;
+  if old.app_id is null or old.generation <> expected_generation or old.lifecycle <> 'active' then return false; end if;
+  update public.slack_installations set lifecycle=reason,generation=generation+1,secret_id=null where org_id=organization and app_id=application;
+  update public.slack_install_attempts set expires_at=now() where org_id=organization and app_id=application and completed_at is null;
+  delete from vault.secrets where id=old.secret_id;
+  return true;
+end $$;
+revoke all on function public.begin_slack_install(text,text,text,text,text), public.consume_slack_install(text,text,text),
+  public.slack_install_status(text,text), public.publish_slack_install(text,text,bigint,text,text,text,text[],jsonb),
+  public.resolve_slack_install(text,text), public.current_slack_install(text,text,bigint),
+  public.refresh_slack_runtime(text,text,bigint,jsonb), public.deactivate_slack_install(text,text,text,bigint,text) from public, anon, authenticated;
+grant execute on function public.begin_slack_install(text,text,text,text,text), public.consume_slack_install(text,text,text),
+  public.slack_install_status(text,text), public.publish_slack_install(text,text,bigint,text,text,text,text[],jsonb),
+  public.resolve_slack_install(text,text), public.current_slack_install(text,text,bigint),
+  public.refresh_slack_runtime(text,text,bigint,jsonb), public.deactivate_slack_install(text,text,text,bigint,text) to service_role;
+
+create index slack_task_links_team_poll on public.slack_task_links (org_id, (source->>'teamId'), updated_at);
+create index slack_task_links_team_title on public.slack_task_links (org_id, (source->>'teamId'), project, title_fingerprint, created_at);
+create index slack_feedback_team_pending on public.slack_completion_feedback (org_id, (payload->'link'->>'teamId'), created_at) where state <> 'delivered';

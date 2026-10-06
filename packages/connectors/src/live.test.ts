@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { nativeAllows } from "./index.js";
-import { CredentialRejected, LiveConnector } from "./live.js";
+import { CredentialRejected, LiveConnector, SourceAccessUnavailable } from "./live.js";
 import type { Source, User } from "@brain/types";
 
 const user: User = { id: "ravi", name: "Ravi", email: "ravi@example.test", auth0Sub: "auth0|ravi",
@@ -69,6 +69,54 @@ it("discovers all Slack pages and imports every history page and thread reply", 
   expect(doc?.content).toContain("Older history"); expect(doc?.content).toContain("Thread decision");
 });
 
+it("preserves exact Slack message evidence and counts an edit or reply in an older thread as fresh", async () => {
+  let reply = "Agreed: Maya will rotate keys.";
+  let edited = "1700000004.000000";
+  const transport = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("info")) return Response.json({ ok: true, channel: { name: "payments", created: 1700000000, context_team_id: "T123" } });
+    if (url.pathname.endsWith("getPermalink")) return Response.json({ ok: true,
+      permalink: `https://acme.slack.com/archives/C123/p${url.searchParams.get("message_ts")!.replace(".", "")}` });
+    if (url.pathname.endsWith("replies")) return Response.json({ ok: true, messages: [
+      { ts: "1700000001.000000", text: "Original discussion", user: "U1" },
+      { ts: "1700000003.000000", text: reply, user: "U2", edited: { ts: edited } }
+    ] });
+    return Response.json({ ok: true, messages: [{ ts: "1700000002.000000", text: "Newer thread", user: "U3" },
+      { ts: "1700000001.000000", text: "Original discussion", user: "U1", reply_count: 1 }] });
+  });
+  const connector = new LiveConnector("slack", { ids: ["C123"], serviceAuthorization: "Bearer service",
+    userAuthorizations: { ravi: "Bearer user" } }, [user], transport, async () => undefined);
+  const first = await connector.fetchDocument("slack:C123");
+  expect(first?.updatedAt).toBe(new Date(1700000004 * 1000).toISOString());
+  expect(first?.slackMessages?.find(message => message.messageTs === "1700000003.000000")).toEqual({
+    teamId: "T123", channelId: "C123", threadTs: "1700000001.000000", messageTs: "1700000003.000000",
+    authorSlackId: "U2", text: reply, updatedAt: new Date(1700000004 * 1000).toISOString(),
+    permalink: "https://acme.slack.com/archives/C123/p1700000003000000"
+  });
+  expect(await connector.fetchVersion("slack:C123")).toBe(first?.version);
+  reply = "Agreed: Maya will rotate production keys.";
+  edited = "1700000005.000000";
+  const next = await connector.fetchDocument("slack:C123");
+  expect(next?.version).not.toBe(first?.version);
+  expect(next?.updatedAt).toBe(new Date(1700000005 * 1000).toISOString());
+});
+
+it("restores Jira metadata checkpoints and leaves unchanged issue content unread until permission reconciliation", async () => {
+  const requests: URL[] = [];
+  const settings = { ids: ["PAY-101"], baseUrl: "https://atlassian.example.test/", serviceAuthorization: "Bearer service", userAuthorizations: {} };
+  const transport = vi.fn(async (input: RequestInfo | URL) => {
+    requests.push(new URL(String(input)));
+    return Response.json({ fields: { updated: "2026-10-05T09:00:00Z" } });
+  });
+  const connector = new LiveConnector("jira", settings, [], transport);
+  const first = await connector.listUpdatedSince(0);
+  expect(first.ids).toEqual(["jira:PAY-101"]);
+  const restarted = new LiveConnector("jira", settings, [], transport);
+  expect((await restarted.listUpdatedSince(first.cursor, first.checkpoint)).ids).toEqual([]);
+  expect(requests.map(url => url.searchParams.get("fields"))).toEqual(["updated", "updated"]);
+  expect((await restarted.listUpdatedSince(11, first.checkpoint)).ids).toEqual(["jira:PAY-101"]);
+});
+
 describe("live connector failure handling", () => {
   const settings = { ids: ["PAY-101"], baseUrl: "https://atlassian.example.test/",
     serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" } };
@@ -90,13 +138,13 @@ describe("live connector failure handling", () => {
     expect(await slack("channel_not_found").fetchDocument("slack:C1")).toBeUndefined();
   });
 
-  it("still reads 404 as gone, and a user's rejected credential as no access", async () => {
+  it("reads 404 as gone and preserves confirmed permissions when a delegated credential needs reconnection", async () => {
     const gone = new LiveConnector("jira", settings, [user],
       vi.fn(async () => new Response("", { status: 404 })) as typeof fetch, instant);
     expect(await gone.fetchDocument("jira:PAY-101")).toBeUndefined();
     const rejected = new LiveConnector("jira", settings, [user],
       vi.fn(async () => new Response("", { status: 401 })) as typeof fetch, instant);
-    expect(await rejected.checkAccess(user, "jira:PAY-101")).toBe(false);
+    await expect(rejected.checkAccess(user, "jira:PAY-101")).rejects.toBeInstanceOf(SourceAccessUnavailable);
   });
 
   it("retries a dropped connection with backoff, then gives up", async () => {
@@ -226,7 +274,7 @@ describe("live connector scope", () => {
   });
 });
 
-it("collects links from what each live source already returns, with no extra requests", async () => {
+it("collects relationships within connected source sites", async () => {
   const responses: Record<"slack" | "jira" | "confluence", (url: URL) => unknown> = {
     slack: url => url.pathname.endsWith("info")
       ? { ok: true, channel: { name: "payments", created: 1700000000, context_team_id: "T123" } }
@@ -258,7 +306,8 @@ it("collects links from what each live source already returns, with no extra req
       return Response.json(responses[source](url));
     });
     const connector = new LiveConnector(source, { ids: [ids[source]], baseUrl: "https://atlassian.example.test/",
-      serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" } }, [user], transport as typeof fetch);
+      serviceAuthorization: "Bearer service", userAuthorizations: { ravi: "Bearer user" },
+      linkOrigins: { jira: ["https://atlassian.example.test"], slack: ["https://acme.slack.com"] } }, [user], transport as typeof fetch);
     const doc = await connector.fetchDocument(`${source}:${ids[source]}`);
     expect(doc?.links, source).toEqual(expected[source]);
     if (source === "jira") {

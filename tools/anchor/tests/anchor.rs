@@ -48,7 +48,7 @@ fn deleted_batches_are_caught_even_when_the_rest_still_verifies() {
     brain_anchor::publish(&log, &key, &anchors).unwrap();
     // A log that simply stops after batch 2 is internally valid; only the anchor shows the loss.
     let text = fs::read_to_string(&log).unwrap();
-    let last_batch = text.lines().filter(|l| l.contains("\"kind\":\"batch\"")).last().unwrap().to_string();
+    let last_batch = text.lines().rfind(|l| l.contains("\"kind\":\"batch\"")).unwrap().to_string();
     let kept: Vec<String> = text.lines().filter(|l| *l != last_batch).map(String::from).collect();
     fs::write(&log, kept.join("\n") + "\n").unwrap();
     let problems = brain_anchor::verify(&log, &key, &anchors).unwrap_err();

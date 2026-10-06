@@ -303,17 +303,72 @@ describe("A held-out set of lines", () => {
   });
 });
 
-// What the rules can't see yet. Each test states the right behaviour and fails today; it.fails turns red once fixed.
-describe("Known gaps", () => {
-  it.fails("leaves out a line that swaps who did what within one sentence", () => {
+describe("Actor roles and action timing", () => {
+  it.each([
+    ["Maya assigns David to rotate production keys.", "David assigns Maya to rotate production keys."],
+    ["Maya assigns David to rotate production keys.", "david assigns maya to rotate production keys."],
+    ["maya assigns david to rotate production keys.", "david assigns maya to rotate production keys."],
+    ["Maya notifies David about production keys.", "David notifies Maya about production keys."],
+    ["Maya will ship production keys.", "Maya shipped production keys."],
+    ["Maya ships production keys.", "Maya shipped production keys."],
+    ["Maya cut production keys.", "Maya will cut production keys."],
+    ["Maya will rotate production keys.", "Maya rotates production keys."],
+    ["Agreed: Maya will rotate production keys.", "Maya is rotating production keys."],
+    ["Agreed: Maya will rotate production keys.", "Maya currently rotates production keys."],
+    ["Agreed: Maya will rotate production keys.", "Maya rotates production keys now."],
+    ["Maya assigns David to rotate production keys.", "David is assigned by Maya to rotate production keys, and Maya rotates production keys."],
+    ["Maya will rotate production keys.", "Maya rotated production keys."],
+    ["Maya rotated production keys.", "Maya will rotate production keys."],
+    ["Maya rotates production keys.", "Maya rotated production keys."],
+    ["Maya is rotating production keys.", "Maya has rotated production keys."],
+    ["She assigns him to rotate production keys.", "He assigns her to rotate production keys."],
+    ["I will rotate production keys.", "You will rotate production keys."],
+    ["My team will rotate production keys.", "Your team will rotate production keys."],
+    ["Maya will rotate production keys.", "She will rotate production keys."],
+    ["Maya will rotate production keys.", "Production keys will be rotated."],
+    ["Maya will rotate production keys.", "will rotate production keys."],
+    ["Maya does not assign David to rotate production keys.", "Maya assigns David not to rotate production keys."],
+    ["Maya will not rotate production keys.", "Maya will rotate production keys."],
+    ["Maya won't rotate production keys.", "Maya doesn't rotate production keys."],
+    ["Maya didn't rotate production keys.", "Maya won't rotate production keys."],
+    ["Maya assigns David to rotate production keys.", "David was assigned by Maya to rotate production keys."]
+  ])("leaves out a changed role or timing in %s", (source, claim) => {
+    const [given, texts] = passage(source);
+    const result = checkAnswer(`${claim} [confluence:notes:0]`, given, texts);
+    expect(result.answer).toEqual({ text: NO_RESULT, citations: [] });
+    expect(result.report.removed).toHaveLength(1);
+  });
+
+  it.each([
+    ["Maya assigns David to rotate production keys.", "David is assigned by Maya to rotate production keys."],
+    ["Maya will rotate production keys.", "Production keys will be rotated by Maya."],
+    ["Maya rotated production keys.", "Production keys were rotated by Maya."],
+    ["Maya rotates production keys.", "Production keys are rotated by Maya."],
+    ["She assigns him to rotate production keys.", "He is assigned by her to rotate production keys."],
+    ["Maya will not rotate production keys.", "Production keys will not be rotated by Maya."],
+    ["Maya won't rotate production keys.", "Production keys will not be rotated by Maya."],
+    ["Maya will ship production keys.", "Production keys will be shipped by Maya."],
+    ["Maya notifies David about production keys.", "David is notified by Maya about production keys."]
+  ])("keeps a faithful passive paraphrase of %s", (source, claim) => {
+    const [given, texts] = passage(source);
+    expectVerdict(`${claim} [confluence:notes:0]`, "reworded", given, texts);
+    expectVerdict(`${source} [confluence:notes:0]`, "quoted", given, texts);
+  });
+
+  it("leaves out a line that swaps who did what within one sentence", () => {
     const [given, texts] = passage("Ravi asked Maya for the replica numbers.");
     expect(REMOVALS.has(verdict("Maya asked Ravi for the replica numbers. [confluence:notes:0]", given, texts))).toBe(true);
   });
+
+  it("leaves out a line that reads a requirement as done", () => {
+    expect(REMOVALS.has(verdict("SEC-44 failover verification is complete. [jira:PAY-101:0]"))).toBe(true);
+  });
+});
+
+// What the rules can't see yet. Each test states the right behaviour and fails today; it.fails turns red once fixed.
+describe("Known gaps", () => {
   it.fails("leaves out a line that turns cause and effect around", () => {
     expect(REMOVALS.has(verdict("Replica lag stays above five minutes because the final wave of the database migration cannot start. [jira:DB-15:0]"))).toBe(true);
-  });
-  it.fails("leaves out a line that reads a requirement as done", () => {
-    expect(REMOVALS.has(verdict("SEC-44 failover verification is complete. [jira:PAY-101:0]"))).toBe(true);
   });
   it.fails("leaves out a line that puts two steps in the opposite order", () => {
     expect(REMOVALS.has(verdict("Move traffic in stages, then finish the PAY-101 and SEC-44 failover checks. [drive:cutover-plan:0]"))).toBe(true);

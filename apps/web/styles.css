@@ -1209,3 +1209,7 @@ td button {
   color:var(--muted-foreground, #61717f);
   font-size:.7rem;
 }
+.commitment-review { display:grid; gap:.55rem; margin:.75rem 0; }
+.commitment-review label { display:grid; gap:.25rem; font-size:.8rem; }
+.commitment-review input, .commitment-review select { width:100%; padding:.45rem; border:1px solid #c8d3dc; border-radius:.35rem; }
+.candidate-review { display:grid; gap:.35rem; margin:.6rem 0; }

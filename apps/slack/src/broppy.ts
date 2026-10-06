@@ -17,10 +17,13 @@ export interface BroppyApi {
   /** Comments as the person; false when they haven't connected Jira. */
   comment(slackEmail: string, key: string, text: string): Promise<boolean>;
   ask(slackEmail: string, question: string): Promise<BroppyAnswer>;
+  actor(slackEmail: string): Promise<{ active: true }>;
+  issueAccess(slackEmail: string, key: string): Promise<{ key: string; url: string; statusCategory: "new" | "indeterminate" | "done"; providerVersion: string; operationMarker?: string }>;
 }
 
 /** The API found no active Broppy user for this Slack user. */
 export class NotLinkedError extends Error {}
+export class JiraRefusedError extends Error {}
 
 /**
  * Asks the Broppy API as the Slack user's own Broppy user. It sends the shared service secret and the email Slack holds for the user;
@@ -46,6 +49,7 @@ export class BroppyClient implements BroppyApi {
     const response = await this.post("/v1/service/jira/issue", slackEmail, issue, 15_000);
     if (response.status === 409) return undefined;
     if (response.status === 401) throw new NotLinkedError();
+    if (!response.ok && response.status >= 400 && response.status < 500) throw new JiraRefusedError(`Broppy Jira issue refused (${response.status})`);
     if (!response.ok) throw new Error(`Broppy Jira issue failed (${response.status})`);
     const payload: any = await response.json();
     if (typeof payload.key !== "string" || typeof payload.url !== "string") throw new Error("Broppy returned no issue");
@@ -58,6 +62,24 @@ export class BroppyClient implements BroppyApi {
     if (response.status === 401) throw new NotLinkedError();
     if (!response.ok) throw new Error(`Broppy Jira comment failed (${response.status})`);
     return true;
+  }
+
+  async actor(slackEmail: string): Promise<{ active: true }> {
+    const response = await this.post("/v1/service/actor", slackEmail, {});
+    if (response.status === 401) throw new NotLinkedError();
+    if (!response.ok) throw new JiraRefusedError(`Broppy actor refused (${response.status})`);
+    const payload: any = await response.json();
+    if (payload.active !== true) throw new NotLinkedError();
+    return { active: true };
+  }
+
+  async issueAccess(slackEmail: string, key: string) {
+    const response = await this.post("/v1/service/jira/access", slackEmail, { key });
+    if (response.status === 401) throw new NotLinkedError();
+    if (!response.ok) throw new JiraRefusedError(`Broppy Jira access refused (${response.status})`);
+    const payload: any = await response.json();
+    if (payload.key !== key || typeof payload.url !== "string" || typeof payload.providerVersion !== "string" || !["new", "indeterminate", "done"].includes(payload.statusCategory)) throw new Error("Invalid Jira access result");
+    return { key, url: payload.url as string, providerVersion: payload.providerVersion as string, statusCategory: payload.statusCategory as "new" | "indeterminate" | "done", ...(typeof payload.operationMarker === "string" ? { operationMarker: payload.operationMarker } : {}) };
   }
 
   async ask(slackEmail: string, question: string): Promise<BroppyAnswer> {

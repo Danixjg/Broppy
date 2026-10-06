@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/brain-core", "tools/anchor"]
+default-members = ["crates/brain-core"]
+resolver = "2"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

@@ -10,7 +10,7 @@ there, a rewrite or deletion of the log no longer matches it.
 It has no network code and never sees the private key. It takes the **public** key only.
 
 ```sh
-cd tools/anchor && cargo build --release        # not part of the pnpm workspace
+cargo build --locked --release -p brain-anchor # from the repository root
 
 # publish, from a checkout of the separate anchor repository
 brain-anchor publish --log /path/to/audit.jsonl --pubkey audit.pub.pem --anchors anchors.jsonl

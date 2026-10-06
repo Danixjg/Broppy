@@ -1,7 +1,7 @@
 // Judges the generated corpus by the app's own rules: its access check, link reader, search words and workspace
 // functions are imported, never copied, so the data is checked exactly as the app will read it.
 import {
-  agreementSummary, duplicatesFor, projectOf, projectsFor, sentences, tracked, type WorkspaceDocument
+  agreementSummary, duplicatesFor, projectsOf, projectsFor, sentences, tracked, type WorkspaceDocument
 } from "../../apps/api/src/workspace.js";
 import { linkFromUrl, linksIn, withLinks } from "../../packages/connectors/src/index.js";
 import { FgaAdapter } from "../../packages/fga-adapter/src/index.js";
@@ -17,6 +17,7 @@ import {
 } from "./rules.js";
 import { LONG_SENTENCE, REPEAT_LIMIT, normalizeSentence, wordCount } from "./write.js";
 
+const DATA_ORIGINS = { jira: ["https://jira.example"], confluence: ["https://confluence.example"], slack: ["https://slack.example"] };
 const NOW = new Date(FIXTURE_NOW);
 const DRIVE_TARGETS: Record<string, number> = {
   [MIME_TYPES.doc]: 70, [MIME_TYPES.sheet]: 40, [MIME_TYPES.slides]: 30, [MIME_TYPES.pdf]: 11
@@ -34,9 +35,10 @@ export function validateCorpus(corpus: Built, scale: Scale): string[] {
   const personas = personaUsers(corpus);
   const fga = new FgaAdapter();
   for (const doc of docs) fga.upsert(doc);
+  const docIds = docs.map(doc => doc.docId);
   const views = new Map(personas.map(user =>
-    [user.id as PersonaId, new Set(docs.filter(doc => fga.check(user, doc.docId, NOW).allowed).map(doc => doc.docId))]));
-  const workspace = docs.map(doc => withLinks(doc) as SourceDocument & WorkspaceDocument);
+    [user.id as PersonaId, new Set(fga.batchCheck(user, docIds, NOW).filter(decision => decision.allowed).map(decision => decision.docId))]));
+  const workspace = docs.map(doc => withLinks(doc, DATA_ORIGINS) as SourceDocument & WorkspaceDocument);
 
   checkFormats(docs, corpus, report);
   checkLinks(docs, byId, report);
@@ -92,7 +94,9 @@ function checkFormats(docs: readonly SourceDocument[], corpus: Built, report: Re
     const { source, metadata } = doc;
     if ("orgId" in doc || "deletedAt" in doc) report(where, "has orgId or deletedAt");
     if (!doc.title.trim() || doc.title !== doc.title.trim()) report(where, "empty or padded title");
-    if (linkFromUrl(doc.url) !== doc.docId) report(where, `url ${doc.url} does not resolve to the item`);
+    const providerUrl = source === "drive" ? doc.url.replace(/^https:\/\/docs\.example\//, "https://docs.google.com/")
+      .replace(/^https:\/\/drive\.example\//, "https://drive.google.com/") : doc.url;
+    if (linkFromUrl(providerUrl, DATA_ORIGINS) !== doc.docId) report(where, `url ${doc.url} does not resolve to the item`);
     if (doc.docId !== `${source}:${doc.sourceNativeId}`) report(where, "sourceNativeId does not match the docId");
     if (!native || native.source !== source) report(where, "native permission missing or for another source");
     if (!Number.isInteger(doc.version) || doc.version < 1 || doc.version > 12) report(where, `version ${doc.version} out of range`);
@@ -189,7 +193,7 @@ function checkLinks(docs: readonly SourceDocument[], byId: ReadonlyMap<string, S
     const declared = doc.links ?? [];
     if (declared.includes(doc.docId)) report(doc.docId, "links to itself");
     if (declared.join("\n") !== sortedUnique(declared).join("\n")) report(doc.docId, "links are not sorted or repeat");
-    for (const target of [...declared, ...linksIn(doc.content).filter(id => id !== doc.docId)]) {
+    for (const target of [...declared, ...linksIn(doc.content, DATA_ORIGINS).filter(id => id !== doc.docId)]) {
       if (!byId.has(target)) report(doc.docId, `links to ${target}, which does not exist`);
     }
   }
@@ -326,11 +330,14 @@ function checkWorkspace(docs: readonly SourceDocument[], workspace: ReadonlyArra
     for (const pair of intended) if (!actual.has(pair)) report("duplicates", `intended pair not found: ${pair}`);
   }
   const issues = workspace.filter(doc => doc.source === "jira");
+  const threads = workspace.filter(doc => doc.source === "slack");
+  const assignments = projectsOf(threads, issues);
+  const projectByThread = new Map(threads.map((thread, index) => [thread, assignments[index]]));
   for (const project of projects) {
     const own = issues.filter(doc => doc.metadata.project === project.key);
     let total = 0;
     let trackedCount = 0;
-    for (const thread of workspace.filter(doc => doc.source === "slack" && projectOf(doc, issues) === project.key)) {
+    for (const thread of threads.filter(doc => projectByThread.get(doc) === project.key)) {
       for (const sentence of sentences(thread.content)) {
         if (!agreementSummary(sentence)) continue;
         total++;

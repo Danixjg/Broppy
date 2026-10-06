@@ -1,0 +1,29 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: corepack prepare pnpm@9.15.0 --activate
+      - run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm rust:check
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm --filter @brain/web build:workspace
+      - run: npm install --prefix /tmp/broppy-playwright --no-audit --no-fund --ignore-scripts playwright@1.63.0
+      - run: node /tmp/broppy-playwright/node_modules/playwright/cli.js install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/broppy-playwright/browsers
+      - run: node tools/check-workspace.mjs
+        env:
+          BROPPY_PLAYWRIGHT_MODULE: /tmp/broppy-playwright/node_modules/playwright/index.mjs
+          PLAYWRIGHT_BROWSERS_PATH: /tmp/broppy-playwright/browsers
+      - run: pnpm rust:smoke

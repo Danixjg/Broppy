@@ -8,6 +8,7 @@
     "./live": "./src/live.ts"
   },
   "dependencies": {
+    "@brain/rust-core": "workspace:*",
     "@brain/types": "workspace:*"
   }
 }

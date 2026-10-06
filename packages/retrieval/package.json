@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@brain/rust-core": "workspace:*",
     "@brain/types": "workspace:*"
   }
 }

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@brain/rust-core": "workspace:*",
     "@vercel/functions": "^3.9.11"
   }
 }

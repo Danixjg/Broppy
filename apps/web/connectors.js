@@ -57,8 +57,41 @@ function scopeControls(connection) {
   form.append(picker, futureLabel, document.createElement("br"), sinceLabel, document.createElement("br"), save);
   return form;
 }
+const callbackMessages = {
+  installed: "Broppy was added to Slack.", denied: "Slack installation was cancelled.",
+  failed: "Broppy could not be added to Slack. Try again.", conflict: "That Slack workspace could not be connected to this organization. Contact your administrator.",
+  unsupported: "This Slack app configuration is not supported. Ask your administrator to disable token rotation and use a workspace installation."
+};
+const callbackOutcome = new URLSearchParams(location.search).get("slack_install");
+if (callbackMessages[callbackOutcome]) status.textContent = callbackMessages[callbackOutcome];
+async function botAction(verb, method, generation) {
+  try {
+    const result = await request(`/v1/admin/slack-installation${verb ? `/${verb}` : ""}`, method,
+      generation ? { generation } : undefined);
+    if (result.url) { location.assign(result.url); return; }
+    await load();
+  } catch (error) { status.textContent = error.message; }
+}
+function botCard(installation) {
+  const label = document.getElementById("slack-bot-status");
+  const actions = document.getElementById("slack-bot-actions"); actions.replaceChildren();
+  if (installation.state === "not_installed" && !installation.configured) {
+    label.textContent = "Add to Slack is not available in this workspace yet."; return;
+  }
+  label.textContent = installation.state === "active" ? `Connected to ${installation.teamName}.`
+    : installation.state === "not_installed" ? "No Slack workspace connected."
+    : `${installation.teamName} is ${installation.state === "uninstalled" ? "uninstalled from Slack" : "disconnected from Broppy"}.`;
+  const add = element("button", installation.state === "active" ? "Reinstall in Slack" : "Add to Slack");
+  add.onclick = () => botAction("authorize", "POST"); actions.append(add);
+  if (installation.state === "active") {
+    const refresh = element("button", "Refresh workspace settings"); refresh.onclick = () => botAction("refresh", "POST", installation.generation);
+    const disconnect = element("button", "Disconnect from Broppy"); disconnect.onclick = () => botAction("", "DELETE", installation.generation);
+    actions.append(refresh, disconnect);
+  }
+}
 async function load() {
-  const [result, progress] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs")]);
+  const [result, progress, installation] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs"), request("/v1/admin/slack-installation")]);
+  botCard(installation);
   const container = document.getElementById("connections");
   // Avoid replacing an admin's scope edits while polling progress.
   if (!container.contains(document.activeElement)) {

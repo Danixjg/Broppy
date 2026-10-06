@@ -1,3 +1,5 @@
+import { SlackInstallationOAuth } from "./slack-installation.js";
+import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { SourceOAuth } from "./source-oauth.js";
 import { Persistence } from "./persistence.js";
 import { searchAudit } from "./audit-search.js";
@@ -11,6 +13,7 @@ import { modelsFromEnv } from "./llm-budget.js";
 import { UserDirectory } from "./user-directory.js";
 import { ServiceActor } from "./service-actor.js";
 import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
+import { SupabaseTaskStore } from "../../slack/src/store.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
 import { MockConnector, loadMockCorpus, type ImportScope } from "@brain/connectors";
 import { AuditLog, FileAuditStore } from "@brain/audit";
@@ -59,7 +62,7 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 // Settings that connect real identities or data. A public demo must run without all of them.
 const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
   "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
-  "FGA_CLIENT_SECRET"];
+  "FGA_CLIENT_SECRET", "SLACK_APP_ID", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_REGISTRY_URL", "SLACK_REGISTRY_SECRET_KEY"];
 
 /**
  * The mock data the API serves. The demo API serves the hand-written items and the generated company; the SSO API keeps
@@ -160,17 +163,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
   if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
   if (oauthConfigs && !persistence) throw new Error("Source OAuth requires Supabase persistence");
+  if ((process.env.SLACK_APP_ID || process.env.SLACK_CLIENT_ID || process.env.SLACK_CLIENT_SECRET) && !hasAuth0) throw new Error("Slack onboarding requires Auth0 and the active user directory");
+  const slackInstallation = directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
   const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
   const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
     (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
       ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
-      authorization: oauth.provider(source)
+      authorization: oauth.provider(source), linkOrigins: oauthConfigs[source].linkOrigins
     }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
   if (connectors && !hasAuth0) {
     throw new Error("Live sources require Auth0 sign-in");
   }
   const brain = options.brain ?? new Brain(models.llm,
-    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined, users, connectors, corpus });
+    { orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined,
+      taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
+        ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
+      slackUserIds: slackUserIdsFromEnv(), users, connectors, corpus });
   // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
   const applySite = async (source: Source) => {
     const connector = connectors?.[source];
@@ -212,6 +220,16 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
+      if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
+        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
+        const outcome = await slackInstallation.callback({ state: url.searchParams.get("state") ?? "", code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+          .catch(() => "failed");
+        const destination = new URL(slackInstallation.returnUrl);
+        destination.searchParams.set("slack_install", outcome);
+        response.writeHead(302, { location: destination.href, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+        response.end(); return;
+      }
+
       const callback = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
@@ -236,7 +254,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // The Slack app acts as the Slack user's own Broppy user, for questions and Jira writes only. Any other request carrying the
       // service header is refused rather than falling back to another identity.
       const service = serviceActor?.present(request) === true;
-      const serviceRoutes = ["/v1/query", "/v1/service/jira/issue", "/v1/service/jira/comment"];
+      const serviceRoutes = ["/v1/query", "/v1/service/actor", "/v1/service/jira/access", "/v1/service/jira/issue", "/v1/service/jira/comment"];
       if (service && !(request.method === "POST" && serviceRoutes.includes(url.pathname))) {
         return await reply(response, 403, { error: "Forbidden" });
       }
@@ -244,6 +262,31 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       const user = await resolve();
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
       actor = user;
+
+      if (url.pathname === "/v1/admin/slack-installation" || url.pathname.startsWith("/v1/admin/slack-installation/")) {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        const route = url.pathname.slice("/v1/admin/slack-installation".length);
+        if (!slackInstallation) return await reply(response, request.method === "GET" && !route ? 200 : 503,
+          request.method === "GET" && !route ? { state: "not_installed", configured: false } : { error: "Add to Slack is not available in this workspace yet." });
+        if (request.method === "GET" && !route) return await reply(response, 200, await slackInstallation.status(user));
+        if (request.method === "POST" && route === "/authorize") return await reply(response, 200, { url: await slackInstallation.begin(user) });
+        if ((request.method === "POST" && route === "/refresh") || (request.method === "DELETE" && !route)) {
+          const input = await body(request);
+          if (typeof input.generation !== "number" || !Number.isSafeInteger(input.generation) || input.generation < 1) return await reply(response, 400, { error: "Reload the Slack installation status and try again." });
+          const changed = request.method === "DELETE" ? await slackInstallation.disconnect(user, input.generation) : await slackInstallation.refresh(user, input.generation);
+          return await reply(response, changed ? 200 : 409, changed ? { ok: true } : { error: "The Slack installation changed. Reload and try again." });
+        }
+        return await reply(response, 404, { error: "Not found" });
+      }
+
+      if (service && url.pathname === "/v1/service/actor") return await reply(response, 200, { active: true });
+      if (service && url.pathname === "/v1/service/jira/access") {
+        if (!jiraAsUser) return await reply(response, 404, { error: "Source OAuth is not configured" });
+        const input = await body(request);
+        if (typeof input.key !== "string" || !/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(input.key)) throw new Error("Invalid issue");
+        const result = await jiraAsUser.access(user, input.key);
+        return await reply(response, result ? 200 : 409, result ?? { error: "Jira access unavailable" });
+      }
 
       // Each person connects their own source accounts; the org-wide admin connection is separate.
       const sources: Source[] = ["slack", "jira", "confluence", "drive"];
@@ -270,8 +313,6 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
       }
 
-      // Jira writes the Slack app makes for a person, with that person's own connection. 409 means they haven't
-      // connected Jira (or no site is known), so the app falls back to its shared account.
       if (service && (url.pathname === "/v1/service/jira/issue" || url.pathname === "/v1/service/jira/comment")) {
         if (!jiraAsUser) return await reply(response, 404, { error: "Source OAuth is not configured" });
         const input = await body(request);
@@ -290,9 +331,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (request.method === "POST" && url.pathname === "/v1/query") {
         const input = await body(request);
         if (typeof input.question !== "string") throw new Error("Invalid question");
+        if (input.project !== undefined && (typeof input.project !== "string" || !input.project || input.project.length > 64)) throw new Error("Invalid project");
         let traceId: string | undefined;
         const answer = await brain.query(user, input.question, id => { traceId = id; },
-          resolve);
+          resolve, { project: input.project as string | undefined });
         return await reply(response, 200, { ...answer, traceId, importNotice: brain.importNotice() });
       }
 
@@ -370,7 +412,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (typeof input.threadDocId !== "string" || typeof input.sentence !== "string" || input.sentence.length > 1000) {
           throw new Error("Invalid task");
         }
-        return await reply(response, 201, await brain.createTask(user, input.threadDocId, input.sentence));
+        if (input.proposalId !== undefined && (typeof input.proposalId !== "string" || !Number.isInteger(input.revision))) throw new Error("Invalid commitment");
+        return await reply(response, 201, await brain.createTask(user, input.threadDocId, input.sentence,
+          typeof input.proposalId === "string" ? { proposalId: input.proposalId, revision: input.revision as number } : undefined));
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/commitments/review") {
+        const input = await body(request);
+        if (typeof input.id !== "string" || !Number.isInteger(input.revision) || (input.revision as number) < 1) throw new Error("Invalid commitment");
+        const base = { id: input.id, revision: input.revision as number };
+        if (input.action === "dismiss") return await reply(response, 200, await brain.reviewCommitment(user, { ...base, action: "dismiss" }));
+        if (input.action === "link" && typeof input.issueDocId === "string") return await reply(response, 200,
+          await brain.reviewCommitment(user, { ...base, action: "link", issueDocId: input.issueDocId }));
+        if (input.action === "edit" && typeof input.summary === "string" && (input.ownerSlackId === undefined || typeof input.ownerSlackId === "string") &&
+          (input.dueDate === undefined || typeof input.dueDate === "string")) return await reply(response, 200, await brain.reviewCommitment(user,
+          { ...base, action: "edit", summary: input.summary, ownerSlackId: input.ownerSlackId as string | undefined, dueDate: input.dueDate as string | undefined }));
+        throw new Error("Invalid commitment");
       }
 
       if (request.method === "POST" && url.pathname === "/v1/tasks/done") {
@@ -524,6 +581,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 409, { error: "This app only reads live sources. Make the change in Jira." });
       }
       if (message === "Already tracked") return await reply(response, 409, { error: "A Jira task already quotes this agreement." });
+      if (message === "Stale commitment revision") return await reply(response, 409, { error: "This commitment changed or is being processed. Reload before reviewing it." });
       if (message === "Unknown document" || message === "Unknown source item" || message === "Unknown user" ||
         message === "Unknown group membership" || message === "Unknown channel membership") {
         return await reply(response, 404, { error: "Not found" });

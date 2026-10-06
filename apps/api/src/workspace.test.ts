@@ -70,11 +70,11 @@ describe("workspace", () => {
   });
 
   it("suggests a Jira task for an agreement in a thread the viewer can open", async () => {
-    expect((await workspaceOf("david")).suggestions).toEqual([{
+    expect((await workspaceOf("david")).suggestions).toEqual([expect.objectContaining({
       threadDocId: "slack:db-migration", project: "DB",
       sentence: "Agreed: Maya raises the replica storage quota before the final wave.",
       summary: "Maya raises the replica storage quota before the final wave", canCreate: true
-    }]);
+    })]);
     expect((await workspaceOf("alex")).suggestions).toEqual([]);
   });
 

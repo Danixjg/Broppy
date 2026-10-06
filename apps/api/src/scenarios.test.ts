@@ -148,7 +148,7 @@ describe.each(["curated", "demo"] as const)("on the %s data", corpus => {
         const brain = new Brain(llm, { corpus });
         await brain.syncAll();
         // As if the source declared it: a link to the chargeback guide, which matches nothing in the question.
-        brain.index.documents.get(from)!.links = ["drive:chargeback-guide"];
+        brain.index.updateLinks(from, ["drive:chargeback-guide"]);
         await brain.query(brain.user("alex")!, "Q3 incident milestones");
         return { sent: sent(), linked: linked(brain.audit.entries) };
       };

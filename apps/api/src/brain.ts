@@ -4,6 +4,8 @@ import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
 import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplicatesFor, latestFor, projectOf, projectsFor,
   sentences, tracked, type Project, type WorkspaceDocument } from "./workspace.js";
 import { createHash, randomUUID } from "node:crypto";
+import { commitmentFingerprint, MemoryTaskStore, proposalId, type Proposal, type TaskStore } from "../../slack/src/store.js";
+import { fingerprint as taskFingerprint, tokens as taskTokens } from "../../slack/src/fingerprint.js";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
@@ -24,6 +26,7 @@ import type {
 } from "@brain/types";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+const reviewQueues = new Map<string, Promise<unknown>>();
 // After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
 // questions don't wait on it meanwhile.
 const EMBEDDING_PAUSE_MS = 5 * 60_000;
@@ -56,8 +59,10 @@ export class Brain {
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
   private embeddingPausedUntil = 0;
+  readonly taskStore: TaskStore;
+  private readonly slackUserIds: Record<string, string>;
 
-  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
+  constructor(llm: LlmClient = new LocalGroundedLlm(), options: { orgId?: string; persistence?: Persistence; audit?: AuditLog; remoteFga?: RemoteFgaAdapter; embedding?: SemanticEmbeddingClient; supabase?: SupabaseIndex; taskStore?: TaskStore; slackUserIds?: Record<string, string>; users?: User[]; connectors?: Record<Source, MockConnector>; corpus?: Corpus | GeneratedItems } = {}) {
     this.orgId = options.orgId ?? "demo-company-a";
     this.persistence = options.persistence;
     const fixture = loadMockCorpus(new Date(), { generated: typeof options.corpus === "object" ? options.corpus : options.corpus === "demo" });
@@ -69,6 +74,8 @@ export class Brain {
     this.remoteFga = options.remoteFga;
     this.embedding = options.embedding;
     this.supabase = options.supabase;
+    this.taskStore = options.taskStore ?? new MemoryTaskStore();
+    this.slackUserIds = { ...options.slackUserIds };
     for (const source of sources) {
       this.states.set(source, { source, cursor: 0 });
       this.connections.set(source, { source, status: "Connected", scope: {} });
@@ -79,7 +86,7 @@ export class Brain {
     const snapshot = await this.persistence?.loadState();
     if (!snapshot) return;
     if (snapshot.orgId !== this.orgId) throw new Error("State organization mismatch");
-    for (const doc of snapshot.documents) this.index.documents.set(doc.docId, doc);
+    this.index.restore(snapshot.documents);
     this.fga.restore(snapshot.grants);
     this.remoteFga?.restoreGrants(this.fga.snapshot().map(([docId, grant]) => ({ docId, ...grant })));
     this.index.restoreSemantic(snapshot.semanticVectors ?? []);
@@ -124,7 +131,12 @@ export class Brain {
   }
 
   async syncAll(): Promise<void> {
-    for (const source of sources) await this.sync(source);
+    const failures: unknown[] = [];
+    for (const source of sources) {
+      try { await this.sync(source); }
+      catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, "Source synchronization failed");
   }
 
   async sync(source: Source): Promise<void> {
@@ -155,7 +167,7 @@ export class Brain {
     const scoped = new Set(await connector.discover(this.connections.get(source)?.scope));
     let run = this.runs.get(source);
     if (!run || run.status === "complete") {
-      const changed = await connector.listUpdatedSince(state.cursor);
+      const changed = await connector.listUpdatedSince(state.cursor, state.providerCheckpoint);
       changed.ids = changed.ids.filter(id => scoped.has(id));
       const liveIds = scoped;
       const missing = [...this.index.documents.values()]
@@ -167,6 +179,7 @@ export class Brain {
         cursorFrom: state.cursor,
         cursorTo: changed.cursor,
         pendingIds: [...new Set([...changed.ids, ...missing])],
+        ...(changed.checkpoint ? { providerCheckpoint: changed.checkpoint } : {}),
         status: "running"
       };
       this.runs.set(source, run);
@@ -234,6 +247,7 @@ export class Brain {
       this.states.set(source, {
         ...state, orgId: this.orgId,
         cursor: run.cursorTo,
+        ...(run.providerCheckpoint ? { providerCheckpoint: run.providerCheckpoint } : {}),
         lastSuccessfulSyncAt: new Date().toISOString()
       });
       this.runs.set(source, { ...run, status: "complete" });
@@ -351,7 +365,7 @@ export class Brain {
       await this.remoteFga?.removeDocument(doc.docId);
       await this.supabase?.purge(doc.docId);
       this.remoteSynced.delete(doc.docId); this.supabaseSynced.delete(doc.docId);
-      this.index.documents.delete(doc.docId);
+      this.index.remove(doc.docId);
     }
     this.runs.delete(source); this.jobs.delete(source);
     this.states.set(source, { source, cursor: 0 });
@@ -362,7 +376,17 @@ export class Brain {
 
   importNotice(): string | undefined {
     const jobs = [...this.jobs.values()].filter(job => job.status === "running");
-    if (!jobs.length) return undefined;
+    const failed = sources.filter(source => this.jobs.get(source)?.status === "failed" ||
+      Boolean(this.jobs.get(source)?.failed) || this.connections.get(source)?.status === "Error" || this.runs.get(source)?.status === "failed");
+    if (failed.length) return `Import or sync failed for ${failed.join(", ")}. Coverage is incomplete; answers and possible gaps may miss material.`;
+    if (!jobs.length) {
+      const partial = sources.some(source => { const scope = this.connections.get(source)?.scope;
+        return this.connections.get(source)?.status === "Not connected" || scope?.mode === "selected" || scope?.mode === "none" ||
+          scope?.futureOnly || Boolean(scope?.since || scope?.ids?.length || scope?.containers?.length);
+      });
+      if (partial) return "Coverage is limited to connected sources and the configured import scope. Older or excluded material may be missing.";
+      return sources.some(source => !this.states.get(source)?.lastSuccessfulSyncAt) ? "Some sources have not completed a successful sync. Coverage is incomplete." : undefined;
+    }
     const total = jobs.reduce((n,j) => n + j.found, 0);
     const done = jobs.reduce((n,j) => n + j.indexed + j.skipped, 0);
     return `Import ${total ? Math.floor(100 * done / total) : 0}% complete — answers may be missing older material`;
@@ -374,10 +398,15 @@ export class Brain {
    */
   async query(user: User, question: string, onTrace?: (traceId: string) => void,
     revalidateUser?: () => Promise<User | undefined>,
-    options: { within?: { project: string; docIds: readonly string[] } } = {}): Promise<QueryAnswer> {
+    options: { project?: string; within?: { project: string; docIds: readonly string[] } } = {}): Promise<QueryAnswer> {
     this.assertOrg(user);
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
+    if (options.project) {
+      const selected = projectsFor(await this.visibleDocuments(user)).find(item => item.key === options.project);
+      if (!selected) throw new Error("Unknown document");
+      options = { within: { project: selected.name, docIds: selected.docIds } };
+    }
     const traceId = randomUUID();
     this.lastTraceIds.set(user.id, traceId);
     onTrace?.(traceId);
@@ -429,7 +458,7 @@ export class Brain {
     }
     // Keep the full local candidate set so denied hits cannot crowd an
     // accessible document out of the authorization pass.
-    const localCandidates = this.index.search(plan.searchText, Number.MAX_SAFE_INTEGER, queryVector);
+    const localCandidates = await this.index.searchAsync(plan.searchText, Number.MAX_SAFE_INTEGER, queryVector);
     let candidates = localCandidates;
     if (this.supabase && queryVector?.length === 1024) {
       try {
@@ -517,7 +546,7 @@ export class Brain {
         docId: indexed.docId,
         chunkId: freshChunk.chunkId,
         title: indexed.title,
-        url: indexed.url,
+        url: freshChunk.sourceUrl ?? indexed.url,
         version: indexed.version,
         updatedAt: indexed.updatedAt,
         lastIndexedAt: indexed.lastIndexedAt,
@@ -680,7 +709,8 @@ export class Brain {
         tier: this.fga.effectiveTier(fresh.docId) ?? fresh.tier,
         version: fresh.version,
         lastIndexedAt: fresh.lastIndexedAt,
-        lastPermissionSyncAt: fresh.lastPermissionSyncAt
+        lastPermissionSyncAt: fresh.lastPermissionSyncAt,
+        ...("slackMessages" in fresh ? { slackMessages: fresh.slackMessages as WorkspaceDocument["slackMessages"] } : {})
       });
     }
     // Links name only what this person may also open, so a link never reveals a hidden item.
@@ -696,25 +726,140 @@ export class Brain {
    */
   async catchUp(user: User, projectKey?: string, onTrace?: (traceId: string) => void,
     revalidateUser?: () => Promise<User | undefined>, now = new Date()): Promise<
-    { kind: "audit"; lines: string[] } | { kind: "question"; question: string; answer: QueryAnswer }> {
+    { kind: "audit"; lines: string[]; importNotice?: string } | { kind: "question"; question: string; answer: QueryAnswer; importNotice?: string }> {
     this.assertOrg(user);
     if (user.role === "compliance") {
       return { kind: "audit", lines: auditSummary(this.audit.entries, this.audit.batches, actor => this.user(actor)?.name ?? actor,
-        now, this.audit.verifyChain() && this.audit.verifyBatches()) };
+        now, this.audit.verifyChain() && this.audit.verifyBatches()), importNotice: this.importNotice() };
     }
     const project = projectKey ? projectsFor(await this.visibleDocuments(user)).find(item => item.key === projectKey) : undefined;
     const question = catchUpQuestion(user, project)!;
     const answer = await this.query(user, question, onTrace, revalidateUser,
       project ? { within: { project: project.name, docIds: project.docIds } } : {});
-    return { kind: "question", question, answer };
+    return { kind: "question", question, answer, importNotice: this.importNotice() };
+  }
+
+  private serializeReview<T>(command: () => Promise<T>): Promise<T> {
+    const next = (reviewQueues.get(this.orgId) ?? Promise.resolve()).catch(() => undefined).then(command);
+    reviewQueues.set(this.orgId, next);
+    void next.catch(() => undefined).then(() => { if (reviewQueues.get(this.orgId) === next) reviewQueues.delete(this.orgId); });
+    return next;
+  }
+
+  private async proposalSource(actor: User, id: string, revision: number): Promise<{ proposal: Proposal; documents: Awaited<ReturnType<Brain["visibleDocuments"]>> }> {
+    this.assertOrg(actor);
+    const proposal = await this.taskStore.getProposal(id);
+    const documents = await this.visibleDocuments(actor);
+    if (!proposal || !this.proposalHasEvidence(proposal, documents)) throw new Error("Unknown document");
+    if (proposal.revision !== revision || proposal.status !== "pending") throw new Error("Stale commitment revision");
+    return { proposal, documents };
+  }
+
+  private proposalHasEvidence(proposal: Proposal, documents: readonly WorkspaceDocument[]): boolean {
+    const thread = documents.find(doc => doc.docId === `slack:${proposal.suggestion.c}` && doc.source === "slack");
+    if (!thread || !proposal.suggestion.s) return false;
+    return thread.slackMessages?.length ? thread.slackMessages.some(message => message.channelId === proposal.suggestion.c &&
+      message.messageTs === proposal.suggestion.ts && (!proposal.teamId || message.teamId === proposal.teamId) &&
+      (!proposal.authorSlackId || message.authorSlackId === proposal.authorSlackId) && message.text.includes(proposal.suggestion.s))
+      : thread.content.includes(proposal.suggestion.s);
+  }
+
+  private slackId(user: User): string | undefined {
+    const id = this.slackUserIds[user.id] ?? user.platformIdentities?.slack;
+    return id && (!this.liveMode || /^[UW][A-Z0-9]+$/.test(id)) ? id : undefined;
+  }
+
+  private async rememberCommitmentLink(actor: User, proposal: Proposal, issueKey: string, issueUrl: string): Promise<void> {
+    const fingerprint = commitmentFingerprint(proposal.id);
+    const titleFingerprint = taskFingerprint(proposal.suggestion.p, proposal.suggestion.t);
+    if ((await this.taskStore.findTask(proposal.suggestion.p, titleFingerprint, []))?.fingerprint === fingerprint) return;
+    await this.taskStore.saveTask({ fingerprint, titleFingerprint: taskFingerprint(proposal.suggestion.p, proposal.suggestion.t),
+      project: proposal.suggestion.p, title: proposal.suggestion.t, tokens: taskTokens(proposal.suggestion.t), issueKey, issueUrl,
+      assigneeSlackId: proposal.suggestion.a, trackedBy: this.slackId(actor) ?? actor.id,
+      channel: proposal.suggestion.c, messageTs: proposal.suggestion.ts, threadTs: proposal.suggestion.th,
+      teamId: proposal.teamId, authorSlackId: proposal.authorSlackId, permalink: proposal.permalink, mentionCount: 1 });
+  }
+
+  async reviewCommitment(actor: User, input: { id: string; revision: number } &
+    ({ action: "edit"; summary: string; ownerSlackId?: string; dueDate?: string } | { action: "dismiss" } | { action: "link"; issueDocId: string })) {
+    return this.serializeReview(async () => {
+      const { proposal, documents } = await this.proposalSource(actor, input.id, input.revision);
+      const next: Proposal = { ...proposal, revision: proposal.revision + 1, reviewedBy: actor.id, reviewedAt: new Date().toISOString() };
+      if (input.action === "edit") {
+        const title = input.summary.trim();
+        if (!title || title.length > 200 || (input.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) ||
+          !Number.isFinite(Date.parse(input.dueDate)) || new Date(input.dueDate).toISOString().slice(0, 10) !== input.dueDate))) throw new Error("Invalid commitment");
+        const owner = input.ownerSlackId?.trim() ?? "";
+        if (owner && !this.users.some(user => user.active !== false && (user.orgId ?? "demo-company-a") === this.orgId &&
+          this.slackId(user) === owner)) throw new Error("Unknown user");
+        next.suggestion = { ...proposal.suggestion, t: title, a: owner, d: input.dueDate || undefined };
+      } else if (input.action === "dismiss") next.status = "dismissed";
+      else {
+        const issue = documents.find(doc => doc.docId === input.issueDocId && doc.source === "jira" && doc.metadata.project === proposal.suggestion.p);
+        if (!issue) throw new Error("Unknown document");
+        next.status = "linked";
+        next.issueKey = issue.docId.slice(5);
+        next.issueUrl = issue.url;
+      }
+      if (!await this.taskStore.saveProposal(next, proposal.revision)) throw new Error("Stale commitment revision");
+      if (input.action === "link") await this.rememberCommitmentLink(actor, next, next.issueKey!, next.issueUrl!);
+      this.audit.append("commitment_reviewed", actor.id, { action: input.action, fromDocId: `slack:${proposal.suggestion.c}`, revision: next.revision });
+      return { id: next.id, revision: next.revision, status: next.status };
+    });
   }
 
   /** Everything the workspace shows, computed from the documents this person may open and nothing else. */
   async workspace(user: User, now = new Date()) {
     const documents = await this.visibleDocuments(user);
     const projects = projectsFor(documents);
+    const stored = await this.taskStore.listProposals();
+    for (const item of agreementsFor(documents, this.liveMode)) {
+      const channel = item.message?.channelId ?? item.threadDocId.slice(6);
+      const ts = item.message?.messageTs ?? createHash("sha256").update(`${item.threadDocId}\0${item.sentence}`).digest("hex");
+      if (stored.some(proposal => proposal.suggestion.c === channel && proposal.suggestion.ts === ts &&
+        (!item.message || !proposal.teamId || proposal.teamId === item.message.teamId))) continue;
+      const owner = item.message && /^I\s/i.test(item.sentence) ? this.users.find(person => person.active !== false &&
+        (person.orgId ?? "demo-company-a") === this.orgId && this.slackId(person) === item.message!.authorSlackId) : undefined;
+      const ownerSlackId = owner ? this.slackId(owner) : undefined;
+      const proposal: Proposal = { id: proposalId(channel, ts, item.message?.teamId), revision: 1,
+        status: "pending", suggestion: { t: item.summary, a: ownerSlackId ?? "", p: item.project, c: channel, ts,
+          th: item.message?.threadTs, s: item.sentence }, ...(item.message ? { teamId: item.message.teamId,
+          authorSlackId: item.message.authorSlackId, permalink: item.message.permalink } : {}) };
+      if (await this.taskStore.saveProposal(proposal)) stored.push(proposal);
+    }
+    const lastSync = this.states.get("jira")?.lastSuccessfulSyncAt;
+    for (const proposal of stored.filter(item => ["linked", "created"].includes(item.status) && item.issueKey)) {
+      const thread = documents.find(doc => doc.docId === `slack:${proposal.suggestion.c}`);
+      const issue = documents.find(doc => doc.docId === `jira:${proposal.issueKey}`);
+      if (thread && issue && this.proposalHasEvidence(proposal, documents)) await this.rememberCommitmentLink(this.user(proposal.reviewedBy ?? "") ?? user, proposal, proposal.issueKey!, issue.url);
+    }
+    const commitments = stored.flatMap(proposal => {
+      const threadDocId = `slack:${proposal.suggestion.c}`;
+      const thread = documents.find(doc => doc.docId === threadDocId && doc.source === "slack");
+      if (!thread || proposal.status === "dismissed" || !this.proposalHasEvidence(proposal, documents)) return [];
+      if (proposal.status === "pending" && tracked(proposal.suggestion.s, documents.filter(doc => doc.source === "jira"))) return [];
+      const linked = proposal.issueKey ? documents.find(doc => doc.docId === `jira:${proposal.issueKey}`) : undefined;
+      if (proposal.issueKey && !linked) return [];
+      const words = new Set(terms(proposal.suggestion.t));
+      const candidates = documents.filter(doc => doc.source === "jira" && doc.metadata.project === proposal.suggestion.p)
+        .map(doc => ({ docId: doc.docId, title: doc.title, url: doc.url, score: terms(doc.title + " " + doc.content).filter(word => words.has(word)).length }))
+        .filter(doc => doc.score >= 2).sort((a, b) => b.score - a.score).slice(0, 5)
+        .map(({ score: _score, ...candidate }) => candidate);
+      const example = documents.find(doc => doc.source === "jira" && doc.metadata.project === proposal.suggestion.p);
+      return [{ id: proposal.id, revision: proposal.revision, status: proposal.status, threadDocId, sentence: proposal.suggestion.s,
+        project: proposal.suggestion.p, summary: proposal.suggestion.t, ownerSlackId: proposal.suggestion.a, dueDate: proposal.suggestion.d,
+        canCreate: !this.liveMode && proposal.status === "pending", permalink: proposal.permalink, candidates,
+        ...(example ? { jiraUrl: example.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${proposal.suggestion.p}`) } : {}),
+        ...(linked ? { issueDocId: linked.docId, issueTitle: linked.title, issueUrl: linked.url } : {}),
+        notice: `Possible untracked commitment. Review visible ${proposal.suggestion.p} Jira candidates before creating work. ` +
+          `Matching covers your accessible, imported sources${lastSync ? ` as of ${lastSync}` : "; no successful Jira sync recorded"}.`,
+        importNotice: this.importNotice() }];
+    });
     return { documents, projects, latest: latestFor(documents, projects, now), duplicates: duplicatesFor(documents, now),
-      suggestions: agreementsFor(documents, this.liveMode) };
+      suggestions: commitments.filter(item => item.status === "pending"), commitments, importNotice: this.importNotice(),
+      capabilities: { mode: this.liveMode ? "live" : "demo", createTask: !this.liveMode, markDone: !this.liveMode },
+      owners: this.users.filter(person => person.active !== false && (person.orgId ?? "demo-company-a") === this.orgId && this.slackId(person))
+        .map(person => ({ slackId: this.slackId(person)!, name: person.name })) };
   }
 
   /**
@@ -722,17 +867,33 @@ export class Brain {
    * title and text come from the agreed sentence alone. It copies the permissions and tier of the project issue it's
    * modelled on (the one the thread links to, else the project's latest), so it is never visible to more people.
    */
-  async createTask(actor: User, threadDocId: string, sentence: string): Promise<{ docId: string; title: string }> {
+  async createTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
+    return this.serializeReview(() => this.createReviewedTask(actor, threadDocId, sentence, approved));
+  }
+
+  private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
     this.assertOrg(actor);
     if (this.liveMode) throw new Error("Live sources are read-only");
-    const documents = await this.visibleDocuments(actor);
+    let reviewed = approved ? await this.proposalSource(actor, approved.proposalId, approved.revision) : undefined;
+    if (reviewed && (`slack:${reviewed.proposal.suggestion.c}` !== threadDocId || reviewed.proposal.suggestion.s !== sentence)) throw new Error("Unknown document");
+    const documents = reviewed?.documents ?? await this.visibleDocuments(actor);
     const thread = documents.find(doc => doc.docId === threadDocId && doc.source === "slack");
     if (!thread) throw new Error("Unknown document");
     const issues = documents.filter(doc => doc.source === "jira");
-    const summary = sentences(thread.content).includes(sentence) ? agreementSummary(sentence) : undefined;
+    const summary = reviewed ? reviewed.proposal.suggestion.t : sentences(thread.content).includes(sentence) ? agreementSummary(sentence) : undefined;
     const project = projectOf(thread, issues);
     if (!summary || !project || !/^[A-Z][A-Z0-9]{0,9}$/.test(project)) throw new Error("Not an agreement in that thread");
-    if (tracked(sentence, issues)) throw new Error("Already tracked");
+    if (!approved && tracked(sentence, issues)) throw new Error("Already tracked");
+    if (!reviewed) {
+      const channel = threadDocId.slice(6);
+      const ts = createHash("sha256").update(`${threadDocId}\0${sentence}`).digest("hex");
+      const existing = (await this.taskStore.listProposals()).find(proposal => proposal.suggestion.c === channel && proposal.suggestion.s === sentence);
+      if (existing && (existing.status !== "pending" || existing.revision !== 1)) throw new Error("Stale commitment revision");
+      const proposal: Proposal = existing ?? { id: proposalId(channel, ts), revision: 1, status: "pending",
+        suggestion: { t: summary, a: "", p: project, c: channel, ts, s: sentence } };
+      if (!existing && !await this.taskStore.saveProposal(proposal)) throw new Error("Stale commitment revision");
+      reviewed = { proposal, documents };
+    }
     const declared = this.index.documents.get(threadDocId)?.links ?? [];
     const inProject = issues.filter(issue => issue.metadata.project === project);
     const model = inProject.find(issue => declared.includes(issue.docId)) ??
@@ -742,15 +903,49 @@ export class Brain {
     const permissions = this.narrowedToThread(modelPermissions, model.tier, threadDocId);
     const numbers = (await this.connectors.jira.listIds()).map(id => id.match(new RegExp(`^jira:${project}-(\\d+)$`))?.[1])
       .filter((value): value is string => Boolean(value)).map(Number);
-    const key = `${project}-${Math.max(0, ...numbers) + 1}`;
+    let operation = await this.taskStore.reserveOperation(reviewed.proposal, `workspace-demo:${actor.id}`);
+    if (!operation || operation.proposalId !== reviewed.proposal.id || operation.proposalRevision !== reviewed.proposal.revision ||
+      operation.actorSlackId !== `workspace-demo:${actor.id}` || operation.existing) throw new Error("Stale commitment revision");
+    const key = operation.issueKey ?? `${project}-${Math.max(0, ...numbers) + 1}`;
     const doc: SourceDocument = {
       docId: `jira:${key}`, source: "jira", sourceNativeId: key, title: `${key} ${summary}`,
       content: `${key} tracks the agreement in ${thread.title}: "${sentence}"`,
-      url: model.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${key}`), version: 1, updatedAt: new Date().toISOString(),
-      metadata: { project, status: "open" }, permissions, tier: model.tier, links: [threadDocId]
+      url: operation.issueUrl ?? model.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${key}`), version: 1, updatedAt: new Date().toISOString(),
+      metadata: { project, status: "open", ...(reviewed?.proposal.suggestion.a ? { ownerSlackId: reviewed.proposal.suggestion.a } : {}),
+        ...(reviewed?.proposal.suggestion.d ? { dueDate: reviewed.proposal.suggestion.d } : {}) }, permissions, tier: model.tier, links: [threadDocId]
     };
-    this.connectors.jira.create(doc);
+    if (operation.state === "reserved" || operation.state === "refused") {
+      if (tracked(sentence, issues)) {
+        await this.taskStore.advanceOperation(operation.id, operation.state, { state: "refused" });
+        throw new Error("Already tracked");
+      }
+      const creating = await this.taskStore.advanceOperation(operation.id, operation.state, { state: "creating", issueKey: key, issueUrl: doc.url });
+      if (!creating) throw new Error("Stale commitment revision");
+      operation = creating;
+      try { this.connectors.jira.create(doc); }
+      catch (error) {
+        await this.taskStore.advanceOperation(operation.id, "creating", { state: "uncertain" });
+        await this.persist();
+        throw error;
+      }
+      await this.persist();
+    } else {
+      const existing = operation.issueKey && await this.connectors.jira.fetchDocument(doc.docId);
+      if (!existing || existing.sourceNativeId !== key || existing.title !== doc.title || existing.content !== doc.content ||
+        existing.url !== doc.url || existing.metadata.project !== project || existing.metadata.ownerSlackId !== doc.metadata.ownerSlackId ||
+        existing.metadata.dueDate !== doc.metadata.dueDate || !existing.links?.includes(threadDocId)) {
+        throw new Error("Mock task outcome needs reconciliation");
+      }
+    }
+    if (operation.state !== "remote_succeeded") {
+      const receipt = await this.taskStore.advanceOperation(operation.id, operation.state, { state: "remote_succeeded", issueKey: key, issueUrl: doc.url });
+      if (!receipt) throw new Error("Mock task outcome needs reconciliation");
+      operation = receipt;
+    }
     await this.sync("jira");
+    const completed = await this.taskStore.completeProposal(reviewed.proposal.id, reviewed.proposal.revision, operation.id, actor.id, new Date().toISOString());
+    if (!completed) throw new Error("Stale commitment revision");
+    await this.rememberCommitmentLink(actor, completed, key, doc.url);
     this.audit.append("task_created", actor.id, { ...this.auditDocument(doc.docId), fromDocId: threadDocId });
     return { docId: doc.docId, title: doc.title };
   }

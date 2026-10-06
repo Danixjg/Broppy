@@ -2,14 +2,15 @@
 
 # Internal Brain
 
-A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. It runs as a pnpm TypeScript workspace with a Node API and a Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings from Cloudflare Workers AI (`bge-m3`) add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
+A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. A Rust domain core runs behind the Node API. TypeScript supplies service adapters and the Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings from Cloudflare Workers AI (`bge-m3`) add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
 
 ## Run
 
-Use Node with `pnpm` 9.15.0.
+Use Node with `pnpm` 9.15.0 and [Rust installed through rustup](https://rust-lang.org/tools/install/). The repository pins its Rust toolchain. See [Rust build and verification](docs/rust-migration.md).
 
 ```sh
 pnpm install
+pnpm rust:build
 pnpm typecheck
 pnpm test
 ```
@@ -252,7 +253,7 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. Optional for Groq; the unused Tencent presets need the file and the budget to start. |
 | `EMBEDDING_PROVIDER`, `EMBEDDING_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `EMBEDDING_TOKEN_BUDGET` | Optional semantic search: `cloudflare`, Workers AI's `bge-m3` (D56), with an API token and the 32-character account ID. It embeds changed chunks and questions as 1024-dimensional vectors. The budget is optional on Cloudflare's free plan; the unused `hunyuan` preset (or the older `HUNYUAN_EMBEDDING_API_KEY`) needs it and `LLM_USAGE_FILE`. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
 | `SLACK_SERVICE_TOKEN` | Optional. Lets the Slack app ask questions as the directory user mapped to a Slack user's email (`platform_identities.slack`), on `POST /v1/query` only. Needs Auth0 and the directory. At least 32 characters. |
-| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations 001–005 (006 adds the Slack app tables). |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations through 010 for Slack customer onboarding. Fresh projects use `infra/supabase/schema.sql`. |
 | `LIVE_SOURCES_JSON` | Selects real HTTP readers for configured Slack channels, Jira issues, Confluence pages, and Google Drive files. All four source entries, provider credentials, and Auth0 sign-in are required. See [setup and limits](docs/live-sources-and-sign-in.md). |
 | `AUDIT_LOG_PATH`, `AUDIT_SIGNING_KEY_FILE` | Together select a flushed JSONL audit file and load a PEM private signing key for Merkle batches. With neither, audit data and roots are in memory. Setting a log path without a key fails startup. |
 | `WEB_ORIGIN` | API `Access-Control-Allow-Origin` value; defaults to `http://127.0.0.1:3001`. CORS allows the demo and Authorization headers. Set server-side web `BRAIN_API_URL` separately. |
@@ -269,6 +270,7 @@ The compliance audit contains question and answer text and source identifiers, s
 ## Documentation
 
 - [Architecture](docs/architecture.md): how the brief's requirements are met, and the pipeline with the five points that matter most.
+- [Rust domain core](docs/rust-migration.md): native build, migrated modules, state ownership, and verification.
 - [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
 - [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
 - [Decisions](decisions.md): every choice, the options considered and the trade-offs.
@@ -279,3 +281,5 @@ History, kept as a record:
 
 - [Five-stage plan](docs/internal-brain-five-stage-plan.md) (26 Sep 2026): the original design.
 - [Repository audit](docs/broppy-audit-batch0.1.md) (30 Sep 2026) and its [implementation notes](docs/audit-batch0.1-implementation.md).
+
+Customer admins add the Slack bot from the separate **Slack bot** card on Connectors. Operators provision the existing Auth0 organization, API, directory, and shared Slack app first. See [Slack customer onboarding](docs/slack-onboarding.md).

@@ -30,6 +30,17 @@ export interface SourcePermission {
   native?: NativePermission;
 }
 
+export interface SlackMessageEvidence {
+  teamId: string;
+  channelId: string;
+  threadTs: string;
+  messageTs: string;
+  authorSlackId: string;
+  permalink?: string;
+  text: string;
+  updatedAt: string;
+}
+
 export interface SourceDocument {
   orgId?: string;
   docId: string;
@@ -46,6 +57,7 @@ export interface SourceDocument {
   /** IDs of the items this one links to, as its source says: issue links, attachments, page links, or keys and links
    * in its text. A link to an ID that names no item goes nowhere. */
   links?: string[];
+  slackMessages?: SlackMessageEvidence[];
   deletedAt?: string;
 }
 
@@ -55,6 +67,7 @@ export interface SourceChunk {
   docId: string;
   text: string;
   embedding: Record<string, number>;
+  sourceUrl?: string;
 }
 
 export interface IndexedDocument extends SourceDocument {
@@ -71,6 +84,12 @@ export interface ConnectorState {
   source: Source;
   cursor: number;
   lastSuccessfulSyncAt?: string;
+  providerCheckpoint?: ProviderCheckpoint;
+}
+
+export interface ProviderCheckpoint {
+  source: Source;
+  observedVersions: Record<string, string>;
 }
 
 export interface SyncRun {
@@ -81,6 +100,7 @@ export interface SyncRun {
   pendingIds: string[];
   status: "running" | "failed" | "complete";
   checkpoint?: string;
+  providerCheckpoint?: ProviderCheckpoint;
 }
 
 export interface SearchCandidate {

@@ -144,6 +144,21 @@ describe("HybridIndex semantic scoring", () => {
 });
 
 describe("HybridIndex relevance", () => {
+  it("keeps Slack message evidence separate and refreshes changed provenance", () => {
+    const index = new HybridIndex();
+    const original = { ...document("slack:C1", "Alice will deploy. Bob will review."), source: "slack" as const,
+      slackMessages: [
+        { teamId: "T1", channelId: "C1", threadTs: "1700000000.000001", messageTs: "1700000000.000001", authorSlackId: "U1", text: "Alice will deploy.", updatedAt: "2026-10-01T00:00:00.000Z", permalink: "https://team.slack.com/archives/C1/p1700000000000001" },
+        { teamId: "T1", channelId: "C1", threadTs: "1700000000.000001", messageTs: "1700000001.000002", authorSlackId: "U2", text: "Bob will review.", updatedAt: "2026-10-01T00:00:01.000Z", permalink: "https://team.slack.com/archives/C1/p1700000001000002" }
+      ] };
+    index.upsert(original);
+    const chunks = index.documents.get(original.docId)!.chunks;
+    expect(chunks.map(chunk => chunk.text)).toEqual(["Alice will deploy.", "Bob will review."]);
+    expect(chunks.map(chunk => chunk.sourceUrl)).toEqual(original.slackMessages.map(message => message.permalink));
+    expect(new Set(chunks.map(chunk => chunk.chunkId)).size).toBe(2);
+    expect(index.upsert({ ...original, slackMessages: original.slackMessages.map(message => ({ ...message, authorSlackId: "U3" })) }).contentChanged).toBe(true);
+  });
+
   it("ignores stopwords and partial words when matching a question", () => {
     const index = new HybridIndex();
     index.upsert(document("vendor", "Vendor checklist: validate the sandbox callbacks before the deadline."));
