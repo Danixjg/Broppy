@@ -274,7 +274,7 @@ The compliance audit contains question and answer text and source identifiers, s
 - [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
 - [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
 - [Decisions](decisions.md): every choice, the options considered and the trade-offs.
-- Setup: [Auth0 sign-in](apps/web/AUTH0.md), [live sources and persistence](docs/live-sources-and-sign-in.md), and [hosting on Tencent Cloud](infra/tencent/README.md).
+- Setup: [Auth0 sign-in](apps/web/AUTH0.md), [live sources and persistence](docs/live-sources-and-sign-in.md), [web and API on Vercel](docs/vercel-deployment.md), and [hosting on Tencent Cloud](infra/tencent/README.md).
 - Diagrams: the sources are in [docs/diagrams](docs/diagrams), with rendered images in [docs/images](docs/images). `pnpm test` checks that each diagram in the docs matches its source and that every link in the docs resolves.
 
 History, kept as a record:
