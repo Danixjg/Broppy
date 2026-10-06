@@ -1,0 +1,11 @@
+{
+  "buildCommand": "bash ../../scripts/build-slack.sh",
+  "functions": {
+    "src/server.ts": {
+      "includeFiles": [
+        "../../packages/rust-core/brain-core.node",
+        "packages/rust-core/brain-core.node"
+      ]
+    }
+  }
+}
