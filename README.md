@@ -253,7 +253,7 @@ All `/v1` routes require either a valid bearer token configured as below or, in 
 | `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. Optional for Groq; the unused Tencent presets need the file and the budget to start. |
 | `EMBEDDING_PROVIDER`, `EMBEDDING_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `EMBEDDING_TOKEN_BUDGET` | Optional semantic search: `cloudflare`, Workers AI's `bge-m3` (D56), with an API token and the 32-character account ID. It embeds changed chunks and questions as 1024-dimensional vectors. The budget is optional on Cloudflare's free plan; the unused `hunyuan` preset (or the older `HUNYUAN_EMBEDDING_API_KEY`) needs it and `LLM_USAGE_FILE`. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
 | `SLACK_SERVICE_TOKEN` | Optional. Lets the Slack app ask questions as the directory user mapped to a Slack user's email (`platform_identities.slack`), on `POST /v1/query` only. Needs Auth0 and the directory. At least 32 characters. |
-| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations 001–005 (006 adds the Slack app tables). |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations through 010 for Slack customer onboarding. Fresh projects use `infra/supabase/schema.sql`. |
 | `LIVE_SOURCES_JSON` | Selects real HTTP readers for configured Slack channels, Jira issues, Confluence pages, and Google Drive files. All four source entries, provider credentials, and Auth0 sign-in are required. See [setup and limits](docs/live-sources-and-sign-in.md). |
 | `AUDIT_LOG_PATH`, `AUDIT_SIGNING_KEY_FILE` | Together select a flushed JSONL audit file and load a PEM private signing key for Merkle batches. With neither, audit data and roots are in memory. Setting a log path without a key fails startup. |
 | `WEB_ORIGIN` | API `Access-Control-Allow-Origin` value; defaults to `http://127.0.0.1:3001`. CORS allows the demo and Authorization headers. Set server-side web `BRAIN_API_URL` separately. |
@@ -281,3 +281,5 @@ History, kept as a record:
 
 - [Five-stage plan](docs/internal-brain-five-stage-plan.md) (26 Sep 2026): the original design.
 - [Repository audit](docs/broppy-audit-batch0.1.md) (30 Sep 2026) and its [implementation notes](docs/audit-batch0.1-implementation.md).
+
+Customer admins add the Slack bot from the separate **Slack bot** card on Connectors. Operators provision the existing Auth0 organization, API, directory, and shared Slack app first. See [Slack customer onboarding](docs/slack-onboarding.md).

@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntil } from "@vercel/functions";
-import { depsFromEnv, type Deps } from "./config.js";
-import { handleSlack } from "./handler.js";
+import { SlackGateway } from "./gateway.js";
 
-let deps: Deps | undefined;
+let gateway: SlackGateway | undefined;
 
 async function rawBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -22,9 +21,9 @@ async function rawBody(request: IncomingMessage): Promise<string> {
  */
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
-    deps ??= depsFromEnv(process.env, waitUntil);
+    gateway ??= SlackGateway.fromEnv(process.env, waitUntil);
     const headers = Object.fromEntries(Object.entries(request.headers).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
-    const result = await handleSlack(deps, {
+    const result = await gateway.handle({
       method: request.method ?? "GET", path: new URL(request.url ?? "/", "http://localhost").pathname, headers,
       rawBody: await rawBody(request)
     });
@@ -34,7 +33,7 @@ export default async function handler(request: IncomingMessage, response: Server
     response.end(JSON.stringify(result.body));
   } catch (error) {
     console.error("slack server failed", error);
-    deps = undefined;
+    gateway = undefined;
     response.statusCode = 500;
     response.end();
   }

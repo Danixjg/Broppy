@@ -1,3 +1,4 @@
+import { SlackInstallationOAuth } from "./slack-installation.js";
 import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { SourceOAuth } from "./source-oauth.js";
 import { Persistence } from "./persistence.js";
@@ -61,7 +62,7 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 // Settings that connect real identities or data. A public demo must run without all of them.
 const REAL_SETTINGS = ["AUTH0_ISSUER", "AUTH0_AUDIENCE", "AUTH0_ORG_ID", "SUPABASE_URL", "SUPABASE_SECRET_KEY",
   "LIVE_SOURCES_JSON", "SOURCE_OAUTH_JSON", "FGA_API_URL", "FGA_STORE_ID", "FGA_MODEL_ID", "FGA_CLIENT_ID",
-  "FGA_CLIENT_SECRET"];
+  "FGA_CLIENT_SECRET", "SLACK_APP_ID", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_REGISTRY_URL", "SLACK_REGISTRY_SECRET_KEY"];
 
 /**
  * The mock data the API serves. The demo API serves the hand-written items and the generated company; the SSO API keeps
@@ -162,6 +163,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
   if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
   if (oauthConfigs && !persistence) throw new Error("Source OAuth requires Supabase persistence");
+  if ((process.env.SLACK_APP_ID || process.env.SLACK_CLIENT_ID || process.env.SLACK_CLIENT_SECRET) && !hasAuth0) throw new Error("Slack onboarding requires Auth0 and the active user directory");
+  const slackInstallation = directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
   const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
   const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
     (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
@@ -217,6 +220,16 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
+      if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
+        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
+        const outcome = await slackInstallation.callback({ state: url.searchParams.get("state") ?? "", code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+          .catch(() => "failed");
+        const destination = new URL(slackInstallation.returnUrl);
+        destination.searchParams.set("slack_install", outcome);
+        response.writeHead(302, { location: destination.href, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+        response.end(); return;
+      }
+
       const callback = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
@@ -249,6 +262,22 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       const user = await resolve();
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
       actor = user;
+
+      if (url.pathname === "/v1/admin/slack-installation" || url.pathname.startsWith("/v1/admin/slack-installation/")) {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        const route = url.pathname.slice("/v1/admin/slack-installation".length);
+        if (!slackInstallation) return await reply(response, request.method === "GET" && !route ? 200 : 503,
+          request.method === "GET" && !route ? { state: "not_installed", configured: false } : { error: "Add to Slack is not available in this workspace yet." });
+        if (request.method === "GET" && !route) return await reply(response, 200, await slackInstallation.status(user));
+        if (request.method === "POST" && route === "/authorize") return await reply(response, 200, { url: await slackInstallation.begin(user) });
+        if ((request.method === "POST" && route === "/refresh") || (request.method === "DELETE" && !route)) {
+          const input = await body(request);
+          if (typeof input.generation !== "number" || !Number.isSafeInteger(input.generation) || input.generation < 1) return await reply(response, 400, { error: "Reload the Slack installation status and try again." });
+          const changed = request.method === "DELETE" ? await slackInstallation.disconnect(user, input.generation) : await slackInstallation.refresh(user, input.generation);
+          return await reply(response, changed ? 200 : 409, changed ? { ok: true } : { error: "The Slack installation changed. Reload and try again." });
+        }
+        return await reply(response, 404, { error: "Not found" });
+      }
 
       if (service && url.pathname === "/v1/service/actor") return await reply(response, 200, { active: true });
       if (service && url.pathname === "/v1/service/jira/access") {

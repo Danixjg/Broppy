@@ -1,3 +1,4 @@
+import { InactiveInstallationError, requireCurrent, sameTeam } from "./runtime.js";
 import { timingSafeEqual } from "node:crypto";
 import { reconcileOperation, validIssueUrl } from "./actions.js";
 import type { Deps } from "./config.js";
@@ -8,8 +9,10 @@ import { mayDiscloseIssue } from "./disclosure.js";
 export async function runCompletionFeedback(deps: Deps, limit = 25): Promise<{ observed: number; delivered: number; withheld: number }> {
   const bound = Math.min(50, Math.max(1, Math.trunc(limit)));
   const result = { observed: 0, delivered: 0, withheld: 0 };
-  for (const link of await deps.store.listTasks(bound)) {
+  for (const link of await deps.store.listTasks(bound, deps.workspace?.teamId)) {
+    if (!sameTeam(deps.workspace, link.teamId)) { result.withheld++; continue; }
     try {
+      await requireCurrent(deps.workspace);
       const email = await deps.slack.userEmail(link.trackedBy);
       if (!email) continue;
       const issue = await deps.broppy.issueAccess(email, link.issueKey);
@@ -18,8 +21,10 @@ export async function runCompletionFeedback(deps: Deps, limit = 25): Promise<{ o
       result.observed++;
     } catch { result.withheld++; }
   }
-  for (const job of await deps.store.pendingFeedback(bound)) {
+  for (const job of await deps.store.pendingFeedback(bound, deps.workspace?.teamId)) {
+    if (!sameTeam(deps.workspace, job.link.teamId)) { result.withheld++; continue; }
     try {
+      await requireCurrent(deps.workspace);
       if (!await mayDiscloseIssue(deps, job.link, "completion")) { result.withheld++; continue; }
       if (job.state === "sending" || job.state === "uncertain") {
         const ts = await deps.slack.findMessage?.(job.link.channel, job.link.threadTs ?? job.link.messageTs, job.id);
@@ -28,12 +33,13 @@ export async function runCompletionFeedback(deps: Deps, limit = 25): Promise<{ o
       }
       if (!await deps.store.advanceFeedback(job.id, "pending", { state: "sending" })) continue;
       try {
+        await requireCurrent(deps.workspace);
         const sent = await deps.slack.postMessage({ channel: job.link.channel, thread_ts: job.link.threadTs ?? job.link.messageTs,
           text: `Completed: <${job.link.issueUrl}|${job.link.issueKey}>.`, client_msg_id: job.id });
         await deps.store.advanceFeedback(job.id, "sending", { state: "delivered", ...(sent ? { messageTs: sent.ts } : {}) });
         result.delivered++;
       } catch (error) {
-        await deps.store.advanceFeedback(job.id, "sending", { state: error instanceof SlackDeliveryError ? "pending" : "uncertain" });
+        await deps.store.advanceFeedback(job.id, "sending", { state: (error instanceof SlackDeliveryError || error instanceof InactiveInstallationError) ? "pending" : "uncertain" });
       }
     } catch { result.withheld++; }
   }

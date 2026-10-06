@@ -1,3 +1,4 @@
+import { InactiveInstallationError, requireCurrent, sameTeam } from "./runtime.js";
 import { NotLinkedError } from "./broppy.js";
 import { answerBlocks, suggestionBlocks, type Suggestion } from "./blocks.js";
 import { confirmProposal, destinationPolicy, proposalUrl, validDestinationPolicy, validIssueUrl } from "./actions.js";
@@ -59,7 +60,7 @@ async function offer(deps: Deps, input: { text: string; channel: string; ts: str
       ...(input.teamId ? { teamId: input.teamId } : {}), ...(input.authorSlackId ? { authorSlackId: input.authorSlackId } : {}), ...(permalink ? { permalink } : {}) };
     if (!await deps.store.saveProposal(proposal)) proposal = await deps.store.getProposal(id);
   }
-  if (!proposal || proposal.status !== "pending") return;
+  if (!proposal || !sameTeam(deps.workspace, proposal.teamId) || proposal.status !== "pending") return;
   const claim = `suggest:${id}:${proposal.revision}`;
   if (!explicitUser && !await deps.store.claim(claim)) return;
   try { await showProposal(deps, proposal); }
@@ -67,6 +68,8 @@ async function offer(deps: Deps, input: { text: string; channel: string; ts: str
 }
 
 async function showProposal(deps: Deps, proposal: Proposal): Promise<void> {
+  if (!sameTeam(deps.workspace, proposal.teamId)) return;
+  await requireCurrent(deps.workspace);
   const s = proposal.suggestion;
   const reviewer = proposal.reviewerSlackId ?? s.a;
   if (!reviewer) return;
@@ -74,15 +77,16 @@ async function showProposal(deps: Deps, proposal: Proposal): Promise<void> {
   const candidates = [];
   const email = await deps.slack.userEmail(reviewer);
   if (email) {
-    const exact = await deps.store.findTask(s.p, fingerprint(s.p, s.t), tokens(s.t));
+    const exact = await deps.store.findTask(s.p, fingerprint(s.p, s.t), tokens(s.t), deps.workspace?.teamId);
     const seen = new Set<string>();
-    for (const candidate of [exact, ...await deps.store.candidates(s.p, fingerprint(s.p, s.t), tokens(s.t))].filter((c): c is NonNullable<typeof c> => Boolean(c))) {
-      if (seen.has(candidate.issueKey)) continue;
+    for (const candidate of [exact, ...await deps.store.candidates(s.p, fingerprint(s.p, s.t), tokens(s.t), deps.workspace?.teamId)].filter((c): c is NonNullable<typeof c> => Boolean(c))) {
+      if (!sameTeam(deps.workspace, candidate.teamId) || seen.has(candidate.issueKey)) continue;
       seen.add(candidate.issueKey);
       try { const issue = await deps.broppy.issueAccess(email, candidate.issueKey); if (validIssueUrl(deps, issue.url)) candidates.push({ issueKey: issue.key, issueUrl: issue.url }); }
       catch {}
     }
   }
+  await requireCurrent(deps.workspace);
   await deps.slack.postEphemeral({ channel: s.c, user: reviewer, text: `Review this commitment: ${s.t}`,
     blocks: suggestionBlocks(s, (deps.people.find(p => p.slackId === s.a)?.name ?? s.a) || "Owner unknown", proposalUrl(deps, proposal.id),
       { id: proposal.id, revision: proposal.revision }, candidates,
@@ -111,14 +115,18 @@ function commands(deps: Deps, form: URLSearchParams): SlackResponse {
 
 async function answer(deps: Deps, slackUser: string, question: string, responseUrl: string): Promise<void> {
   try {
+    await requireCurrent(deps.workspace);
     const email = await deps.slack.userEmail(slackUser);
     if (!email) throw new NotLinkedError();
     const result = await deps.broppy.ask(email, question);
+    await requireCurrent(deps.workspace);
     await deps.slack.respond(responseUrl, {
       response_type: "ephemeral", replace_original: true, text: result.text.slice(0, 200),
       blocks: answerBlocks(question, result, openAsk(deps, question))
     });
   } catch (error) {
+    if (error instanceof InactiveInstallationError) return;
+    await requireCurrent(deps.workspace);
     if (error instanceof NotLinkedError) {
       await deps.slack.respond(responseUrl, { ...ephemeral("Your Slack account isn't linked to a Broppy user yet. Ask an admin to add your Slack ID to your Broppy profile."), replace_original: true });
       return;
@@ -152,7 +160,7 @@ async function interactions(deps: Deps, payload: any): Promise<SlackResponse> {
   try { reference = JSON.parse(action.value); } catch { return ok(); }
   if (typeof reference?.id !== "string" || !Number.isInteger(reference.revision)) return ok();
   const proposal = await deps.store.getProposal(reference.id);
-  if (!proposal) return ok(ephemeral("This proposal is unavailable."));
+  if (!proposal || !sameTeam(deps.workspace, proposal.teamId)) return ok(ephemeral("This proposal is unavailable."));
   if (user !== (proposal.reviewerSlackId ?? proposal.suggestion.a)) {
     await deps.slack.respond(payload.response_url, ephemeral(`Only <@${proposal.reviewerSlackId ?? proposal.suggestion.a}> can decide on this task.`)); return ok();
   }
@@ -193,7 +201,7 @@ function editView(proposal: Proposal): Record<string, unknown> {
 async function editSubmission(deps: Deps, payload: any, user: string): Promise<SlackResponse> {
   let ref: any; try { ref = JSON.parse(payload.view.private_metadata); } catch { return ok(); }
   const proposal = typeof ref?.id === "string" ? await deps.store.getProposal(ref.id) : undefined;
-  if (!proposal || user !== (proposal.reviewerSlackId ?? proposal.suggestion.a) || proposal.revision !== ref.revision || proposal.status !== "pending") {
+  if (!proposal || !sameTeam(deps.workspace, proposal.teamId) || user !== (proposal.reviewerSlackId ?? proposal.suggestion.a) || proposal.revision !== ref.revision || proposal.status !== "pending") {
     return ok({ response_action: "errors", errors: { summary: "This proposal changed or is unavailable." } });
   }
   const values = payload.view.state?.values ?? {};

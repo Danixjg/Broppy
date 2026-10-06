@@ -14,7 +14,7 @@ Concurrent confirmations reserve one exact project/title operation in Supabase b
 | Slash command `/broppy` | `https://<host>/slack/commands` |
 | Interactivity and shortcuts `ask_broppy`, `track_broppy` | `https://<host>/slack/interactions` |
 
-Bot scopes include `chat:write`, `commands`, `users:read`, `users:read.email`, `channels:history`, `groups:history`, `channels:read`, and `groups:read`. Invite the app to each watched channel. Bot events are `message.channels` and `message.groups`. Bots and message subtypes do not trigger proposals. Slack's [thread read API](https://docs.slack.dev/reference/methods/conversations.replies/) must permit the app to read the original thread for uncertain-delivery reconciliation. If that read is unavailable, the delivery remains unresolved.
+The required bot scopes and event subscriptions come from [app-manifest.ts](src/app-manifest.ts). Generate the Slack manifest with `pnpm exec tsx scripts/slack-manifest.ts https://gateway.example https://customer-api.example/v1/admin/slack-installation/callback`, adding one callback argument per provisioned customer API. Invite the app to each watched channel. The manifest includes message, uninstall, and token-revocation events. Bots and message subtypes do not trigger proposals. Slack's [thread read API](https://docs.slack.dev/reference/methods/conversations.replies/) must permit the app to read the original thread for uncertain-delivery reconciliation. If that read is unavailable, the delivery remains unresolved.
 
 `/broppy` and the Ask Broppy shortcut return permission-filtered answers privately. Deep links use the `/workspace/index.html` route and an exact proposal or Jira document identity.
 
@@ -22,7 +22,9 @@ Bot scopes include `chat:write`, `commands`, `users:read`, `users:read.email`, `
 
 | Variable | Use |
 | --- | --- |
-| `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | Slack app credentials. |
+| `SLACK_APP_ID`, `SLACK_SIGNING_SECRET` | Shared gateway app identity and signing secret. No global bot token is accepted. |
+| `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` | Server-only customer API OAuth credentials for the same app. |
+| `SLACK_REGISTRY_URL`, `SLACK_REGISTRY_SECRET_KEY` | Shared installation control plane on API and gateway. Set both or use `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. |
 | `SLACK_USERS_JSON` | People used for name matching and Jira assignee mapping, such as `[{"slackId":"U123","name":"Maya","jiraAccountId":"account-id"}]`. |
 | `SLACK_SERVICE_TOKEN` | The same service secret of at least 32 characters configured on the API. |
 | `SLACK_CHANNEL_PROJECTS_JSON`, `JIRA_DEFAULT_PROJECT` | Channel/project suggestions and fallback project. |
@@ -30,21 +32,25 @@ Bot scopes include `chat:write`, `commands`, `users:read`, `users:read.email`, `
 | `SLACK_JIRA_DESTINATIONS_JSON` | Explicit disclosure policy, such as `[{"channel":"C123","project":"DB","allowedSlackIds":["U123","U456"],"disclosureFields":["summary","permalink"]}]`. The administrator declares the complete Jira destination audience. Every declared recipient and the reviewer must still be a source-channel member. `summary` approval is required, and source pointers are omitted unless `permalink` is approved. Empty by default, which refuses creation and linking. |
 | `SLACK_COMPLETION_POLICY_JSON` | Completion recipients, such as `[{"channel":"C123","project":"DB","allowedSlackIds":["U123","U456"]}]`. Empty by default. |
 | `SLACK_WORKER_TOKEN` | Optional bearer secret of at least 32 characters for the maintenance HTTP hooks. Without it those hooks refuse every request. |
-| `BROPPY_API_URL`, `BROPPY_WEB_URL` | API and web origins. |
-| `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `AUTH0_ORG_ID` | Durable organization-scoped server store. Apply migration `006_slack_tasks.sql`, then `009_slack_action_recovery.sql` after the existing migrations. Production requires Supabase. |
+| `API_ORIGIN`, `WEB_ORIGIN` | Trusted HTTPS customer API and web origins. The API publishes these; Slack payloads and browser parameters never choose them. |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `AUTH0_ORG_ID` | Durable organization-scoped server store. Apply migrations through `010_slack_installations.sql` before activating the gateway. Fresh projects use `infra/supabase/schema.sql`. Separate registry and customer task-store projects each need the schema. |
 | `TASK_SCORE_THRESHOLD` | Passive suggestion threshold, default `0.6`. |
+
+People, channel/project maps, disclosure policies, service credentials, task-store credentials, and origins are configured on each customer API. The API publishes one Vault-backed runtime snapshot on install. An admin uses **Refresh workspace settings** after changing deployment settings. The shared gateway reads that snapshot for every request and never inherits a global organization or token.
+
+See [customer installation setup](../../docs/slack-onboarding.md) for activation and lifecycle.
 
 The API must expose authenticated service routes `POST /v1/service/actor` and `POST /v1/service/jira/access` in addition to its existing issue and query routes. The access route reads Jira as the active person and returns only the authorized key, URL, category, provider version, and an optional operation marker.
 
 ## Completion worker and recovery
 
-An external scheduler can call `POST /slack/feedback` with `Authorization: Bearer <SLACK_WORKER_TOKEN>` and `{"limit":25}`. The limit must be 1 through 50. No scheduler is deployed by this change. Run a bounded local pass from the repository root with `node --env-file=.env.local --import tsx apps/slack/src/feedback-worker.ts 25`.
+An external scheduler can call `POST /slack/feedback` with `Authorization: Bearer <SLACK_WORKER_TOKEN>` and `{"teamId":"T123","limit":25}`. The limit must be 1 through 50. No scheduler is deployed by this change. Run a bounded local pass from the repository root with `node --env-file=.env.local --import tsx apps/slack/src/feedback-worker.ts T123 25`.
 
 The worker polls already-linked issues through delegated read credentials. Its first observation initializes a baseline. A later transition to `done` schedules one lifetime completion notice per source commitment. Delivery requires an approved recipient policy, current Slack membership, and an active Broppy actor with Jira read access for every human recipient. The app's own bot is excluded. Other bots and unmapped recipients cause refusal. The notice contains only the approved issue reference and completion statement. Feedback never calls a Jira write route.
 
 Slack messages carry a stable `client_msg_id`. Successful delivery records Slack's timestamp. Confirmed rejection stays pending. An ambiguous result reconciles by finding that ID in the source thread; absence never proves failure and never causes a blind repost.
 
-For uncertain Jira creation, an operator supplies an issue that contains the exact `Broppy operation: <UUID>` marker. Call authenticated `POST /slack/recovery` with `{"operationId":"...","issueKey":"DB-12","actorSlackId":"U123"}`. The server verifies the original active actor's delegated issue read and marker, then records the remote identity. Retry the original approval to finish recording and notification. A missing search result cannot reset an uncertain operation.
+For uncertain Jira creation, an operator supplies an issue that contains the exact `Broppy operation: <UUID>` marker. Call authenticated `POST /slack/recovery` with `{"teamId":"T123","operationId":"...","issueKey":"DB-12","actorSlackId":"U123"}`. The server verifies the original active actor's delegated issue read and marker, then records the remote identity. Retry the original approval to finish recording and notification. A missing search result cannot reset an uncertain operation.
 
 Stop the old confirmation handler before applying the migration and starting this version. An old process bypasses the new reservations. The store retains existing `slack_task_links`, backfills legacy links as reviewed proposals, and treats old `track:*` claims without a recorded issue as unresolved legacy operations. Legacy writes have no operation marker and require operator investigation before any durable manual reconciliation. Original channel/message fields are immutable. Repeated sightings are separate deduplicated rows. The application currently supports one configured Jira site per organization. Policy declarations must accurately describe the complete Jira audience; this implementation checks declared users against current Slack membership and does not enumerate Jira project permission schemes. Destination policy declarations are capped at 100 recipients and Slack membership checks at 1,000 recipients. Candidate search is bounded to 500 recent links; exact issue lookup uses its own index.
 

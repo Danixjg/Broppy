@@ -62,9 +62,9 @@ export interface FeedbackOperation {
   messageTs?: string;
 }
 export interface TaskStore {
-  findTask(project: string, fingerprint: string, tokens: string[]): Promise<TaskLink | undefined>;
-  candidates(project: string, fingerprint: string, tokens: string[]): Promise<TaskLink[]>;
-  listTasks(limit?: number): Promise<TaskLink[]>;
+  findTask(project: string, fingerprint: string, tokens: string[], teamId?: string): Promise<TaskLink | undefined>;
+  candidates(project: string, fingerprint: string, tokens: string[], teamId?: string): Promise<TaskLink[]>;
+  listTasks(limit?: number, teamId?: string): Promise<TaskLink[]>;
   saveTask(link: TaskLink): Promise<void>;
   recordRepeat(link: TaskLink, channel: string, messageTs: string): Promise<void>;
   listProposals(): Promise<Proposal[]>;
@@ -76,7 +76,7 @@ export interface TaskStore {
   getOperation(id: string): Promise<TaskOperation | undefined>;
   advanceOperation(id: string, expected: OperationState, patch: Partial<TaskOperation>): Promise<TaskOperation | undefined>;
   observeCompletion(link: TaskLink, observation: CompletionObservation): Promise<void>;
-  pendingFeedback(limit?: number): Promise<FeedbackOperation[]>;
+  pendingFeedback(limit?: number, teamId?: string): Promise<FeedbackOperation[]>;
   advanceFeedback(id: string, expected: FeedbackOperation["state"], patch: Partial<FeedbackOperation>): Promise<FeedbackOperation | undefined>;
   claim(key: string): Promise<boolean>;
   release(key: string): Promise<void>;
@@ -106,11 +106,11 @@ export class MemoryTaskStore implements TaskStore {
   private readonly polled = new Map<string, number>();
   private pollSequence = 0;
   private readonly feedback = new Map<string, FeedbackOperation>();
-  async findTask(project: string, fingerprint: string, words: string[]) { const found = bestMatch(this.links, project, fingerprint, words); return found && copy(found); }
-  async candidates(project: string, _fingerprint: string, words: string[]) {
-    return copy([...new Map(this.links.filter(link => link.project === project && similarity(link.tokens, words) >= SAME_TASK).map(link => [link.issueKey, link])).values()].slice(0, 3));
+  async findTask(project: string, fingerprint: string, words: string[], teamId?: string) { const found = bestMatch(this.links.filter(link => !teamId || link.teamId === teamId), project, fingerprint, words); return found && copy(found); }
+  async candidates(project: string, _fingerprint: string, words: string[], teamId?: string) {
+    return copy([...new Map(this.links.filter(link => (!teamId || link.teamId === teamId) && link.project === project && similarity(link.tokens, words) >= SAME_TASK).map(link => [link.issueKey, link])).values()].slice(0, 3));
   }
-  async listTasks(limit = 50) { return copy([...this.links].sort((a, b) => (this.polled.get(`${a.project}:${a.fingerprint}`) ?? 0) - (this.polled.get(`${b.project}:${b.fingerprint}`) ?? 0)).slice(0, limit)); }
+  async listTasks(limit = 50, teamId?: string) { return copy(this.links.filter(link => !teamId || link.teamId === teamId).sort((a, b) => (this.polled.get(`${a.project}:${a.fingerprint}`) ?? 0) - (this.polled.get(`${b.project}:${b.fingerprint}`) ?? 0)).slice(0, limit)); }
   async saveTask(link: TaskLink) {
     if (!this.links.some(stored => stored.project === link.project && stored.fingerprint === link.fingerprint)) this.links.push(copy({ ...link, titleFingerprint: link.titleFingerprint ?? makeFingerprint(link.project, link.title) }));
   }
@@ -194,7 +194,7 @@ export class MemoryTaskStore implements TaskStore {
     if (!previous || previous.statusCategory === "done" || observation.statusCategory !== "done" || this.feedback.has(key)) return;
     this.feedback.set(key, { id: randomUUID(), link: copy(link), providerVersion: observation.providerVersion, state: "pending" });
   }
-  async pendingFeedback(limit = 50) { return copy([...this.feedback.values()].filter(f => f.state !== "delivered").slice(0, limit)); }
+  async pendingFeedback(limit = 50, teamId?: string) { return copy([...this.feedback.values()].filter(f => f.state !== "delivered" && (!teamId || f.link.teamId === teamId)).slice(0, limit)); }
   async advanceFeedback(id: string, expected: FeedbackOperation["state"], patch: Partial<FeedbackOperation>) {
     const entry = [...this.feedback.entries()].find(([, f]) => f.id === id && f.state === expected); if (!entry) return undefined;
     const next = { ...entry[1], ...patch, id }; this.feedback.set(entry[0], next); return copy(next);
@@ -223,15 +223,16 @@ export class SupabaseTaskStore implements TaskStore {
       ...(row.source ?? {}), ...(row.operation_id ? { operationId: row.operation_id } : {}) };
   }
   private org() { return `org_id=eq.${encodeURIComponent(this.orgId)}`; }
-  async findTask(project: string, fingerprint: string, _tokens: string[]) {
-    const rows = await this.request(`slack_task_links?${this.org()}&project=eq.${encodeURIComponent(project)}&title_fingerprint=eq.${encodeURIComponent(fingerprint)}&order=created_at.asc&limit=1`);
+  private teamFilter(teamId: string | undefined, field = "source->>teamId") { return teamId ? `&${field}=eq.${encodeURIComponent(teamId)}` : ""; }
+  async findTask(project: string, fingerprint: string, _tokens: string[], teamId?: string) {
+    const rows = await this.request(`slack_task_links?${this.org()}${this.teamFilter(teamId)}&project=eq.${encodeURIComponent(project)}&title_fingerprint=eq.${encodeURIComponent(fingerprint)}&order=created_at.asc&limit=1`);
     return rows?.[0] && SupabaseTaskStore.fromRow(rows[0]);
   }
-  async candidates(project: string, _fingerprint: string, words: string[]) {
-    const rows = await this.request(`slack_task_links?${this.org()}&project=eq.${encodeURIComponent(project)}&order=updated_at.desc&limit=500`);
+  async candidates(project: string, _fingerprint: string, words: string[], teamId?: string) {
+    const rows = await this.request(`slack_task_links?${this.org()}${this.teamFilter(teamId)}&project=eq.${encodeURIComponent(project)}&order=updated_at.desc&limit=500`);
     return [...new Map((rows as any[]).map(SupabaseTaskStore.fromRow).filter(l => similarity(l.tokens, words) >= SAME_TASK).map(l => [l.issueKey, l])).values()].slice(0, 3);
   }
-  async listTasks(limit = 50) { const rows = await this.request(`slack_task_links?${this.org()}&order=updated_at.asc&limit=${Math.min(100, Math.max(1, limit))}`); return rows.map(SupabaseTaskStore.fromRow); }
+  async listTasks(limit = 50, teamId?: string) { const rows = await this.request(`slack_task_links?${this.org()}${this.teamFilter(teamId)}&order=updated_at.asc&limit=${Math.min(100, Math.max(1, limit))}`); return rows.map(SupabaseTaskStore.fromRow); }
   async saveTask(link: TaskLink) {
     await this.request("slack_task_links?on_conflict=org_id,project,fingerprint", "POST", { org_id: this.orgId, fingerprint: link.fingerprint, title_fingerprint: link.titleFingerprint ?? makeFingerprint(link.project, link.title), project: link.project, title: link.title,
       tokens: link.tokens, issue_key: link.issueKey, issue_url: link.issueUrl, assignee_slack_id: link.assigneeSlackId, tracked_by: link.trackedBy, channel: link.channel,
@@ -271,7 +272,7 @@ export class SupabaseTaskStore implements TaskStore {
   async observeCompletion(link: TaskLink, observation: CompletionObservation) {
     await this.request("rpc/observe_slack_completion", "POST", { organization: this.orgId, task_link: link, observation, delivery_id: randomUUID() });
   }
-  async pendingFeedback(limit = 50) { const rows = await this.request(`slack_completion_feedback?${this.org()}&state=neq.delivered&order=created_at.asc&limit=${Math.min(100, Math.max(1, limit))}`); return rows.map((r: any) => r.payload as FeedbackOperation); }
+  async pendingFeedback(limit = 50, teamId?: string) { const rows = await this.request(`slack_completion_feedback?${this.org()}${this.teamFilter(teamId, "payload->link->>teamId")}&state=neq.delivered&order=created_at.asc&limit=${Math.min(100, Math.max(1, limit))}`); return rows.map((r: any) => r.payload as FeedbackOperation); }
   async advanceFeedback(id: string, expected: FeedbackOperation["state"], patch: Partial<FeedbackOperation>) {
     return await this.request("rpc/advance_slack_feedback", "POST", { organization: this.orgId, delivery_id: id, expected_state: expected, patch }) ?? undefined;
   }

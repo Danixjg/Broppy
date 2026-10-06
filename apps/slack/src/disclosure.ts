@@ -1,3 +1,4 @@
+import { requireCurrent, sameTeam } from "./runtime.js";
 import type { Deps } from "./config.js";
 import type { Proposal, TaskLink } from "./store.js";
 
@@ -12,7 +13,9 @@ export function validIssueUrl(deps: Deps, url: string): boolean {
 }
 
 export async function mayDiscloseIssue(deps: Deps, link: TaskLink, purpose: "tracking" | "completion"): Promise<boolean> {
+  if (!sameTeam(deps.workspace, link.teamId)) return false;
   try {
+    await requireCurrent(deps.workspace);
     const policies = purpose === "tracking" ? deps.destinations : deps.completionPolicies;
     const policy = policies?.find(p => p.channel === link.channel && p.project === link.project);
     if (!policy || !Array.isArray(policy.allowedSlackIds) || !policy.allowedSlackIds.length || !deps.slack.members || !validIssueUrl(deps, link.issueUrl)) return false;
