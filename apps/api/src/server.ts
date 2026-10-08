@@ -8,10 +8,12 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
-import { createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
+import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
 import { ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
+import { Auth0Management } from "./auth0-management.js";
+import { People, PeopleError } from "./people.js";
 import { ServiceActor } from "./service-actor.js";
 import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
 import { SupabaseTaskStore } from "../../slack/src/store.js";
@@ -198,6 +200,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const serviceActor = ServiceActor.fromEnv(directory);
   const jiraAsUser = oauth ? new JiraAsUser(oauth) : undefined;
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
+  const people = hasAuth0 ? new People(directory!, Auth0Management.fromEnv()) : undefined;
+  // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
+  const reloadUsers = async () => { users!.splice(0, users!.length, ...await directory!.list()); };
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
   if (options.startOrchestrator === false) {
     // A source that isn't connected yet, or is briefly down, is recorded on its own connection. It must not stop the
@@ -272,7 +277,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (service && !(request.method === "POST" && serviceRoutes.includes(url.pathname))) {
         return await reply(response, 403, { error: "Forbidden" });
       }
-      const resolve = () => service ? serviceActor!.resolve(request) : identity(request, brain, auth0, !connectors);
+          const resolve = async () => {
+        const person = await (service ? serviceActor!.resolve(request) : identity(request, brain, auth0, !connectors));
+        // Another instance may have added or linked this person after this one loaded the directory.
+        if (person && users) {
+          const known = users.findIndex(item => item.id === person.id);
+          if (known < 0) users.push(person); else if (users[known].auth0Sub !== person.auth0Sub) users[known] = person;
+        }
+        return person;
+      };
       const user = await resolve();
       if (!user) return await reply(response, 401, { error: "Unauthorized" });
       actor = user;
@@ -361,6 +374,32 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           traceId,
           entries: user.role === "compliance" ? entries : actorTrace(entries)
         }) : send(response, 404, { error: "Not found" });
+      }
+
+      const personRoute = /^\/v1\/admin\/people(?:\/([a-z0-9-]{1,64})(?:\/(invite))?)?$/.exec(url.pathname);
+      if (personRoute) {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        if (!people) return await reply(response, 404, { error: "Admin-managed sign-in needs Auth0 and the Supabase user directory." });
+        const [, id, verb] = personRoute;
+        if (!id && request.method === "GET") return await reply(response, 200, { people: await people.list(), invitations: people.canInvite });
+        if (!id && request.method === "POST") {
+          const result = await people.add(user, await body(request));
+          brain.audit.append("person_added", user.id, { userId: result.person.id, role: result.person.role, auth0: result.auth0 });
+          await reloadUsers();
+          return await reply(response, 201, result);
+        }
+        if (id && verb === "invite" && request.method === "POST") {
+          const result = await people.invite(user, id);
+          brain.audit.append("person_invited", user.id, { userId: id, auth0: result.auth0 });
+          return await reply(response, 200, result);
+        }
+        if (id && !verb && request.method === "DELETE") {
+          const result = await people.remove(user, id);
+          brain.audit.append("person_removed", user.id, { userId: id, auth0: result.auth0 });
+          await reloadUsers();
+          return await reply(response, 200, result);
+        }
+        return await reply(response, 404, { error: "Not found" });
       }
 
       if (url.pathname === "/v1/admin/model") {
@@ -614,6 +653,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       return await reply(response, 404, { error: "Not found" });
     } catch (error: unknown) {
+      // A real organization sign-in that isn't on the admin's list: say so, so the person knows what to ask for.
+      if (error instanceof AccessDenied) return await reply(response, 403, { error: error.message, code: error.code });
+      if (error instanceof PeopleError) return await reply(response, error.status, { error: error.message });
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
       if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });

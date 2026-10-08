@@ -45,6 +45,8 @@ WEB_ORIGIN=https://WEB_PROJECT.vercel.app
 API_ORIGIN=https://API_PROJECT.vercel.app
 ```
 
+To let the admin invite people from the People page, also set `AUTH0_MANAGEMENT_CLIENT_ID`, `AUTH0_MANAGEMENT_CLIENT_SECRET` (Sensitive) and `AUTH0_CLIENT_ID` (the web application's) on the API project; [admin-managed access](admin-managed-access.md) lists the Auth0 settings behind them.
+
 Keep the trailing slash on `AUTH0_ISSUER`. Provision the Supabase schema and active organization directory members using [live sources and sign-in](live-sources-and-sign-in.md).
 
 `AUDIT_SIGNING_KEY` holds the Ed25519 PEM private key itself (Vercel has no place for a key file). Add it as a **Sensitive** variable; line breaks may be pasted as real newlines or written as `\n`. Generate one with `openssl genpkey -algorithm ed25519`. `AUDIT_SIGNING_KEY_FILE` (a path to a PEM in the running function) still works and is used only when `AUDIT_SIGNING_KEY` is unset. Do not commit private keys.

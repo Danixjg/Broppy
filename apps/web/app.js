@@ -121,6 +121,11 @@ function resetIdentity() {
   if (!connectorLink) { connectorLink = node("a", "", "Connectors settings"); connectorLink.id = "connectorSettings"; $("adminView").prepend(connectorLink); }
   connectorLink.href = `./connectors.html?user=${encodeURIComponent($("user").value)}`;
   connectorLink.hidden = role() !== "admin";
+  let peopleLink = document.getElementById("peopleSettings");
+  if (!peopleLink) { peopleLink = node("a", "", "People and access"); peopleLink.id = "peopleSettings"; peopleLink.style.marginLeft = "1rem"; connectorLink.after(peopleLink); }
+  peopleLink.href = "./people.html";
+  // Adding people is a signed-in admin's job; the public demo has no directory to add to.
+  peopleLink.hidden = role() !== "admin" || state.authMode === "demo";
   $("complianceTab").hidden = role() !== "compliance";
   $("retrySync").hidden = role() !== "admin";
   setView("workspace");

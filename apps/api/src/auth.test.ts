@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { User } from "@brain/types";
-import { Auth0TokenValidator } from "./auth.js";
+import { AccessDenied, Auth0TokenValidator } from "./auth.js";
 
 const issuer = "https://tenant.auth0.com/";
 const audience = "https://brain.example/api";
@@ -23,9 +23,22 @@ function token(claims: Record<string, unknown> = {}, header: Record<string, unkn
   return `${data}.${sign("RSA-SHA256", Buffer.from(data), privateKey).toString("base64url")}`;
 }
 
+function stubDirectory(users: User[]) {
+  return {
+    bySub: async (sub: string) => users.find(user => user.auth0Sub === sub),
+    byEmail: async (email: string) => users.find(user => user.email === email.toLowerCase()),
+    // Mirrors the database rule: only an active entry with no subject yet can be claimed.
+    claim: async (email: string, sub: string) => {
+      const entry = users.find(user => user.email === email.toLowerCase() && !user.auth0Sub && user.active === true);
+      if (entry) entry.auth0Sub = sub;
+      return entry;
+    }
+  };
+}
+
 function setup(jwks: unknown = { keys: [jwk] }, users: User[] = [user]) {
   const fetcher = vi.fn(async () => new Response(JSON.stringify(jwks), { status: 200 }));
-  const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: { bySub: async sub => users.find(user => user.auth0Sub === sub) }, now: () => now * 1000, fetch: fetcher as typeof fetch });
+  const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: stubDirectory(users), now: () => now * 1000, fetch: fetcher as typeof fetch });
   return { fetcher, validator };
 }
 
@@ -67,19 +80,70 @@ describe("Auth0TokenValidator", () => {
       await expect(setup(jwks).validator.validate(`Bearer ${token()}`)).rejects.toThrow("Unauthorized");
     }
     const fetcher = vi.fn(async () => { throw new Error("network details"); });
-    const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: { bySub: async () => user }, fetch: fetcher as typeof fetch });
+    const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: stubDirectory([user]), fetch: fetcher as typeof fetch });
     await expect(validator.validate(`Bearer ${token()}`)).rejects.toThrow("Unauthorized");
   });
 
   it("requires an HTTPS tenant issuer and configured audience", () => {
-    expect(() => new Auth0TokenValidator({ issuer: "http://tenant.auth0.com/", audience, orgId: "org_company_a", directory: { bySub: async () => undefined } })).toThrow();
-    expect(() => new Auth0TokenValidator({ issuer, audience: "", orgId: "org_company_a", directory: { bySub: async () => undefined } })).toThrow();
+    expect(() => new Auth0TokenValidator({ issuer: "http://tenant.auth0.com/", audience, orgId: "org_company_a", directory: stubDirectory([]) })).toThrow();
+    expect(() => new Auth0TokenValidator({ issuer, audience: "", orgId: "org_company_a", directory: stubDirectory([]) })).toThrow();
   });
 });
 
-it("rejects inactive users and directory organisation mismatch", async () => {
-  for (const change of [{ active: false }, { orgId: "other" }]) {
-    const { validator } = setup(undefined, [{ ...user, ...change }]);
-    await expect(validator.validate(`Bearer ${token()}`)).rejects.toThrow("Unauthorized");
+it("rejects directory organisation mismatch, and tells a removed person they were removed", async () => {
+  await expect(setup(undefined, [{ ...user, orgId: "other" }]).validator.validate(`Bearer ${token()}`)).rejects.toThrow("Unauthorized");
+  await expect(setup(undefined, [{ ...user, active: false }]).validator.validate(`Bearer ${token()}`)).rejects.toMatchObject({ code: "removed" });
+});
+
+describe("first sign-in of an admin-added person", () => {
+  const invited = (): User => ({ id: "priya", name: "Priya", email: "priya@company.test", auth0Sub: "", groups: [], role: "member", orgId: "org_company_a", active: true });
+  const priya = (claims: Record<string, unknown> = {}) => `Bearer ${token({ sub: "auth0|priya", ...claims })}`;
+  function withUserinfo(profile: Record<string, unknown> | number, users: User[]) {
+    const userinfo = vi.fn(async () => typeof profile === "number" ? new Response("{}", { status: profile }) : Response.json(profile));
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => String(input).endsWith("/userinfo") ? userinfo() : Response.json({ keys: [jwk] }));
+    const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: stubDirectory(users), now: () => now * 1000, fetch: fetcher as typeof fetch });
+    return { validator, userinfo };
   }
+
+  it("links the entry for their verified email to their Auth0 subject, once", async () => {
+    const users = [user, invited()];
+    const { validator, userinfo } = withUserinfo({ email: "Priya@Company.test", email_verified: true }, users);
+    expect(await validator.validate(priya())).toMatchObject({ id: "priya", auth0Sub: "auth0|priya" });
+    expect(users[1].auth0Sub).toBe("auth0|priya");
+    expect(await validator.validate(priya())).toMatchObject({ id: "priya" });
+    expect(userinfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns away an email the admin did not add, and remembers the refusal briefly", async () => {
+    const { validator, userinfo } = withUserinfo({ email: "stranger@company.test", email_verified: true }, [user, invited()]);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await expect(validator.validate(priya())).rejects.toMatchObject({ code: "not_added" });
+    }
+    expect(userinfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an unverified email claim an entry", async () => {
+    const users = [invited()];
+    const { validator } = withUserinfo({ email: "priya@company.test", email_verified: false }, users);
+    await expect(validator.validate(priya())).rejects.toMatchObject({ code: "email_unverified" });
+    expect(users[0].auth0Sub).toBe("");
+  });
+
+  it("does not let a second Auth0 account take an entry that is already linked", async () => {
+    const { validator } = withUserinfo({ email: "ravi@example.test", email_verified: true }, [user]);
+    await expect(validator.validate(priya())).rejects.toMatchObject({ code: "email_in_use" });
+  });
+
+  it("does not claim a removed entry", async () => {
+    const { validator } = withUserinfo({ email: "priya@company.test", email_verified: true }, [{ ...invited(), active: false }]);
+    await expect(validator.validate(priya())).rejects.toMatchObject({ code: "removed" });
+  });
+
+  it("fails closed, without a reason, when Auth0 gives no profile", async () => {
+    for (const profile of [500, { email_verified: true }]) {
+      const rejection = withUserinfo(profile, [invited()]).validator.validate(priya());
+      await expect(rejection).rejects.toThrow("Unauthorized");
+      await expect(rejection).rejects.not.toBeInstanceOf(AccessDenied);
+    }
+  });
 });

@@ -225,6 +225,9 @@ export function auditSummary(entry) {
     case "channel_membership_removed": return `Removed ${text(data.userId)} from ${doc}`;
     case "source_content_changed": return `Edited ${doc} at its source`;
     case "audit_searched": return `Searched the audit for "${short(data.query, 120)}": ${plural(count(data.results), "result")}`;
+    case "person_added": return `Added a ${text(data.role)} to the people who can sign in`;
+    case "person_invited": return "Sent a sign-in invitation again";
+    case "person_removed": return "Removed a person's access";
     case "model_changed": return data.action === "removed" ? "Removed the organization's AI model" : `Set the organization's AI model to ${text(data.model)} (${text(data.provider)})`;
     case "request_denied": return `Refused ${text(data.method)} ${text(data.path)}`;
     default: {

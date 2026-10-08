@@ -1258,6 +1258,21 @@ Each entry records the options that were considered, what was chosen, and the tr
 - **Effect:** every scenario answer is the same on both sets, and nothing changed on the hand-written set alone.
 - **How decided:** found while building; the user kept it on 5 Oct.
 
+### D80 — The admin decides who can sign in
+- **Asked:** on 7 Oct sarah said an admin adds their own people by email, and an account the admin didn't add isn't
+  recognised.
+- **Chosen:** the admin's list is the directory (`workspace_users`). Adding an email creates an entry with no Auth0
+  subject and has Auth0 invite it to the organization. The first sign-in with that **verified** email links the entry to
+  the person's `sub`, in one conditional update, so an entry is claimed once. Any other organization sign-in gets a 403
+  that says why (not added, removed, verify your email, email already linked).
+- **Removal:** the entry is deactivated first, then Auth0 invitations and membership are withdrawn. A failure at
+  Auth0 is reported and never leaves the person with access. The last admin and your own entry can't be removed.
+- **Why the email comes from `/userinfo`:** it needs no Auth0 Action or extra claim, so there is one less dashboard
+  setting. Refused sign-ins are remembered for 30 seconds per subject so retries don't each call Auth0.
+- **No migration:** `workspace_users` already allowed no subject. The Management API settings are optional;
+  without them the list still gates sign-in and the page says invitations aren't set up.
+- **Auth0 settings:** [admin-managed access](docs/admin-managed-access.md).
+
 ### Implementation details (the generated company in the demo)
 - **Loading:** `loadMockCorpus(now, { generated })` takes `true` for the committed files, or a company generated in
   memory, as `pnpm bench` passes. A generated item with a hand-written item's id stops it. Generated dates move by the
