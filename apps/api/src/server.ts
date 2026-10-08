@@ -303,8 +303,11 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         current.brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
         await current.brain.audit.flush();
       }
-      // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own).
-      if (status >= 200 && status < 300) await (request.method === "GET" ? current.brain.audit.flush() : current.brain.persist());
+      // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own). A question is
+      // a read: rewriting every document and vector to the database after each answer took seconds, and anything a question
+      // refreshes is checked at the source again on the next one.
+      const reads = request.method === "GET" || (request.method === "POST" && new URL(request.url ?? "/", "http://localhost").pathname === "/v1/query");
+      if (status >= 200 && status < 300) await (reads ? current.brain.audit.flush() : current.brain.persist());
       send(response, status, data);
     };
     try {

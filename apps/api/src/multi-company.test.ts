@@ -21,6 +21,7 @@ function token(sub: string, orgId: string): string {
 }
 
 type Row = Record<string, any>;
+let snapshotWrites = 0;
 const tables: Record<string, Row[]> = { workspace_users: [], organizations: [], brain_state: [], audit_entries: [], merkle_batches: [] };
 const auth0Orgs: Array<{ id: string; name: string; display_name: string }> = [];
 const invitations: Array<{ org: string; email: string }> = [];
@@ -82,6 +83,7 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
     const rpc = /^\/rest\/v1\/rpc\/(.+)$/.exec(url.pathname);
     if (rpc) {
       if (rpc[1] === "save_brain_state") {
+        snapshotWrites += 1;
         const rows = tables.brain_state; const at = rows.findIndex(row => row.org_id === body.organization);
         const row = { org_id: body.organization, snapshot: body.snapshot }; if (at >= 0) rows[at] = row; else rows.push(row);
       }
@@ -150,6 +152,13 @@ describe("several companies in one API", () => {
     const me = await call("GET", "/v1/me", home);
     expect(me.status).toBe(200);
     expect(me.body).toMatchObject({ id: "ravi", role: "admin" });
+  });
+
+  it("does not rewrite the whole workspace snapshot to the database after a question", async () => {
+    const before = snapshotWrites;
+    const asked = await call("POST", "/v1/query", { sub: "auth0|ravi", org: HOME }, { question: "What is the status of the launch?" });
+    expect(asked.status).toBe(200);
+    expect(snapshotWrites).toBe(before);
   });
 
   it("turns away an organization that has not signed up, even with a valid sign-in", async () => {
