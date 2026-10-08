@@ -37,9 +37,10 @@ Apply `infra/supabase/migrations/012_company_signup.sql` first (fresh projects: 
   `create:organization_members`, `delete:organization_members`. Save. "User-delegated Access" is a different setting and
   isn't needed.
 - Copy the ID of the sign-in database (Authentication → Database → your connection, `con_...`). New companies use it.
-- Set the web application's **Application Login URI** to `https://YOUR-WEB-DOMAIN/invited`, and keep **Allow
-  organization logins** on the application's Organizations tab. If the application requires an organization, new companies
-  work with it as is, because sign-in always names one.
+- Set the web application's **Application Login URI** (Applications → your web app → Settings → Application URIs) to
+  `https://YOUR-WEB-DOMAIN/invited`. On the same application's **Login Experience** tab (older dashboards: Organizations
+  tab), **Types of Users** must be Business Users or Both; if the application requires an organization, new companies
+  work with it as is, because sign-in always names one. On its **Connections** tab, switch on the sign-in database too.
 
 **API project (`broppy-beii`)**
 
