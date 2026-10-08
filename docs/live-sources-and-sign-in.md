@@ -13,7 +13,7 @@ Auth0 validates identity; Supabase `workspace_users` supplies active status, org
 5. Configure the web host's values in the same root `.env.local` as described in [Auth0 SDK setup](../apps/web/AUTH0.md), start it with `pnpm --dir apps/web dev`, open `http://127.0.0.1:3001/` and choose **Sign in with SSO**. The [troubleshooting table](../apps/web/AUTH0.md#6-symptom--cause) maps each failure to its cause.
 6. Configure `HOST`, `PORT`, `API_ORIGIN` and `WEB_ORIGIN` for deployment. Set `BRAIN_API_URL` in the Next.js server environment to the API origin.
 
-Each API process serves one `AUTH0_ORG_ID`. Tokens for another organization are rejected; directory reads, storage and FGA tuple IDs are organization scoped. Run a separate process per organization and one writer per organization. Directory membership keys are organization scoped. This deployment model does not automatically provision or route new organizations.
+Each API process serves the company in `AUTH0_ORG_ID`. Tokens for another organization are rejected unless self-signup is switched on (`SELF_SIGNUP`, see `docs/self-signup.md`), in which case companies that signed up are served too, each with its own workspace. Directory reads, storage and FGA tuple IDs are organization scoped. Keep one writer per organization.
 
 Directory validation runs again before an answer is returned. Setting `active=false` therefore blocks existing browser tokens immediately at the API. New directory identities require a restart to join the live ingestion user list. OAuth connection callbacks also revalidate the initiating administrator.
 

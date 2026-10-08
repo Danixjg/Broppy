@@ -39,6 +39,9 @@ export class UserDirectory {
     return config ? new UserDirectory(config, process.env.AUTH0_ORG_ID ?? "") : undefined;
   }
 
+  /** The same database, for another company's people. */
+  forOrg(orgId: string): UserDirectory { return new UserDirectory(this.config, orgId); }
+
   async list(): Promise<User[]> {
     const users: User[] = [];
     for (let offset = 0; ; offset += 500) {

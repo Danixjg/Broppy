@@ -15,6 +15,9 @@ import { modelsFromEnv } from "./llm-budget.js";
 import { ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
+import { Companies } from "./companies.js";
+import { Signup, SignupError } from "./signup.js";
+import { TenantRegistry } from "./tenants.js";
 import { People, PeopleError } from "./people.js";
 import { ServiceActor } from "./service-actor.js";
 import { ActionLimit, AgentActions, parseHistory, understandTurn } from "./agent.js";
@@ -27,10 +30,33 @@ import { RemoteFgaAdapter } from "@brain/fga-adapter";
 import { SupabaseIndex } from "@brain/retrieval";
 import type { AuditEntry, Source, SourcePermission, Tier, User } from "@brain/types";
 
+/** Everything one company owns inside the API. */
+interface Tenant {
+  orgId: string;
+  /** The company set up by hand with AUTH0_ORG_ID, which also has the Slack app and the service identity. */
+  isHome: boolean;
+  brain: Brain;
+  orchestrator: SyncOrchestrator;
+  directory?: UserDirectory;
+  users?: User[];
+  people?: People;
+  oauth?: SourceOAuth;
+  connectors?: Record<Source, MockConnector>;
+  orgModel?: OrgModel;
+  slackInstallation?: SlackInstallationOAuth;
+  slackCombined: boolean;
+  jiraAsUser?: JiraAsUser;
+  applySite(source: Source): Promise<void>;
+  reloadUsers(): Promise<void>;
+  agentActions: AgentActions;
+}
+
 export interface ApiServer {
+  /** The home company's brain. Other companies' workspaces are built when their first request arrives. */
   brain: Brain;
   orchestrator: SyncOrchestrator;
   server: Server;
+  shutdown(): Promise<void>;
 }
 
 interface ApiServerOptions {
@@ -167,82 +193,116 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     process.env.FGA_MODEL_ID || process.env.FGA_CLIENT_ID || process.env.FGA_CLIENT_SECRET);
   const models = modelsFromEnv(process.env);
   const embedding = models.embedding;
-  const supabase = embedding ? SupabaseIndex.fromEnv() : null;
-  if (supabase && !embedding) throw new Error("Supabase hybrid search requires an embedding provider (EMBEDDING_PROVIDER)");
-  const users = hasAuth0 ? await directory!.list() : undefined;
-  const persistence = options.brain ? undefined : Persistence.fromEnv();
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
   if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
-  if (oauthConfigs && !persistence) throw new Error("Source OAuth requires Supabase persistence");
+  if (oauthConfigs && (options.brain || !process.env.SUPABASE_URL)) throw new Error("Source OAuth requires Supabase persistence");
   if ((process.env.SLACK_APP_ID || process.env.SLACK_CLIENT_ID || process.env.SLACK_CLIENT_SECRET) && !hasAuth0) throw new Error("Slack onboarding requires Auth0 and the active user directory");
-  const slackInstallation = directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
-  const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
-  const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
-  const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
-    (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
-      ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
-      authorization: oauth.provider(source), atlassianAccountId: accountIds, linkOrigins: oauthConfigs[source].linkOrigins
-    }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
-  if (connectors && !hasAuth0) {
-    throw new Error("Live sources require Auth0 sign-in");
+  const management = hasAuth0 ? Auth0Management.fromEnv() : undefined;
+  const signupMode = hasAuth0 ? Signup.mode() : "off";
+  const companies = signupMode !== "off" ? Companies.fromEnv() : undefined;
+  if (signupMode !== "off") {
+    // Another company's workspace reads its sources through the same Broppy app registrations, so those must be set.
+    if (!companies || !management || !oauthConfigs || !process.env.AUTH0_SIGNUP_CONNECTION_ID) {
+      throw new Error("SELF_SIGNUP needs the Supabase directory, Auth0 invitations (AUTH0_MANAGEMENT_CLIENT_ID and SECRET), SOURCE_OAUTH_JSON and AUTH0_SIGNUP_CONNECTION_ID");
+    }
   }
-  // One consent installs Broppy in Slack and connects Slack as a source, when both use the same Slack app.
-  const slackConfig = oauthConfigs?.slack;
-  const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
-  if (oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
-  const orgModel = persistence ? new OrgModel(persistence) : undefined;
-  const brain = options.brain ?? new Brain(models.llm,
-    { orgLlm: orgModel, orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined,
-      taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
-        ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
-      slackUserIds: slackUserIdsFromEnv(), users, connectors, corpus });
-  // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
-  const applySite = async (source: Source) => {
-    const connector = connectors?.[source];
-    const site = oauth && connector instanceof LiveConnector ? await oauth.orgSite(source) : undefined;
-    if (site) (connector as LiveConnector).useSite(site);
+  const orgModelOf = (persistence?: Persistence) => persistence ? new OrgModel(persistence) : undefined;
+
+  /** Everything one company owns: its people, its sources, its brain and its sign-in rules. Nothing here is shared between companies. */
+  const buildTenant = async (orgId: string, isHome: boolean): Promise<Tenant> => {
+    const tenantDirectory = isHome ? directory : directory?.forOrg(orgId);
+    const users = hasAuth0 ? await tenantDirectory!.list() : undefined;
+    const persistence = options.brain ? undefined : Persistence.fromEnv(orgId);
+    const supabase = embedding ? SupabaseIndex.fromEnv(isHome ? undefined : orgId) : null;
+    const slackInstallation = isHome && directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
+    const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
+    const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
+    const connectors = (isHome ? liveConnectorsFromEnv(users ?? loadMockCorpus().users) : undefined) ?? (oauth ? Object.fromEntries(
+      (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
+        ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
+        authorization: oauth.provider(source), atlassianAccountId: accountIds, linkOrigins: oauthConfigs[source].linkOrigins
+      }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
+    if (connectors && !hasAuth0) {
+      throw new Error("Live sources require Auth0 sign-in");
+    }
+    // A company that signed itself up never sees the sample data: without live sources it has nothing to show.
+    if (!isHome && !connectors) throw new Error("Live sources are not configured");
+    // One consent installs Broppy in Slack and connects Slack as a source, when both use the same Slack app.
+    const slackConfig = oauthConfigs?.slack;
+    const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
+    if (isHome && oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
+    const orgModel = orgModelOf(persistence);
+    const brain = isHome && options.brain ? options.brain : new Brain(models.llm,
+      { orgLlm: orgModel, orgId: isHome ? process.env.AUTH0_ORG_ID : orgId, persistence, audit: await configuredAudit(persistence),
+        remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding, supabase: supabase ?? undefined,
+        taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
+          ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
+        slackUserIds: isHome ? slackUserIdsFromEnv() : undefined, users, connectors, corpus });
+    // Atlassian sites are found when someone signs in; reconnect each connector to its stored site after a restart.
+    const applySite = async (source: Source) => {
+      const connector = connectors?.[source];
+      const site = oauth && connector instanceof LiveConnector ? await oauth.orgSite(source) : undefined;
+      if (site) (connector as LiveConnector).useSite(site);
+    };
+    for (const source of ["jira", "confluence"] as Source[]) await applySite(source);
+    if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
+    await brain.restore();
+    if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
+      store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
+      discard: async () => { await oauth!.remove("slack"); } };
+    const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
+    const people = hasAuth0 ? new People(tenantDirectory!, isHome ? management : management?.forOrg(orgId)) : undefined;
+    // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
+    const reloadUsers = async () => { users!.splice(0, users!.length, ...await tenantDirectory!.list()); };
+    const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
+    if (options.startOrchestrator === false) {
+      // A source that isn't connected yet, or is briefly down, is recorded on its own connection. It must not stop the
+      // whole API from starting: the admin connects sources from the running API, so refusing to start would lock them out.
+      await brain.syncAll().catch(error => {
+        const reasons = error instanceof AggregateError ? error.errors.map(e => e instanceof Error ? e.message : String(e)) : [String(error)];
+        console.warn(`Source synchronization incomplete at startup: ${reasons.join("; ")}`);
+      });
+    }
+    if (options.startOrchestrator ?? true) orchestrator.start();
+    return { orgId, isHome, brain, orchestrator, directory: tenantDirectory, users, people, oauth, connectors, orgModel, slackInstallation, slackCombined,
+      jiraAsUser, applySite, reloadUsers, agentActions: new AgentActions() };
   };
-  for (const source of ["jira", "confluence"] as Source[]) await applySite(source);
-  if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
-  await brain.restore();
+
+  const home = await buildTenant(process.env.AUTH0_ORG_ID ?? "", true);
+  const tenants = new TenantRegistry<Tenant>({
+    homeOrgId: process.env.AUTH0_ORG_ID ?? "", home,
+    isKnown: async orgId => Boolean(companies) && await companies!.isKnown(orgId),
+    build: orgId => buildTenant(orgId, false),
+    drop: tenant => tenant.orchestrator.stop()
+  });
+  const { brain, orchestrator } = home;
   const serviceActor = ServiceActor.fromEnv(directory);
-  if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
-    store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
-    discard: async () => { await oauth!.remove("slack"); } };
-  const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
-  const agentActions = new AgentActions();
   const actionsOn = AgentActions.enabled();
-  const people = hasAuth0 ? new People(directory!, Auth0Management.fromEnv()) : undefined;
   // At someone's first sign-in their accounts at the sources are completed and their access read at once, so they don't
   // wait for the hourly permission pass. Capped, so a slow source never holds up the sign-in.
   const onFirstSignIn = async (person: User) => {
-    await people!.ensureIdentities(person);
-    await Promise.race([brain.refreshAccessFor(person, 8_000), new Promise(resolve => setTimeout(resolve, 10_000))]);
+    const tenant = await tenants.get(person.orgId);
+    if (!tenant?.people) return;
+    await tenant.people.ensureIdentities(person);
+    await Promise.race([tenant.brain.refreshAccessFor(person, 8_000), new Promise(resolve => setTimeout(resolve, 10_000))]);
   };
-  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!, onFirstSignIn) : undefined;
-  // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
-  const reloadUsers = async () => { users!.splice(0, users!.length, ...await directory!.list()); };
-  const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
-  if (options.startOrchestrator === false) {
-    // A source that isn't connected yet, or is briefly down, is recorded on its own connection. It must not stop the
-    // whole API from starting: the admin connects sources from the running API, so refusing to start would lock them out.
-    await brain.syncAll().catch(error => {
-      const reasons = error instanceof AggregateError ? error.errors.map(e => e instanceof Error ? e.message : String(e)) : [String(error)];
-      console.warn(`Source synchronization incomplete at startup: ${reasons.join("; ")}`);
-    });
-  }
-  if (options.startOrchestrator ?? true) orchestrator.start();
+  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(async orgId => (await tenants.get(orgId))?.directory, onFirstSignIn) : undefined;
+  const signup = signupMode !== "off" ? new Signup(management!, companies!, orgId => directory!.forOrg(orgId),
+    { connectionId: process.env.AUTH0_SIGNUP_CONNECTION_ID!, accessCode: process.env.SIGNUP_ACCESS_CODE || undefined, open: signupMode === "on",
+      onCreated: orgId => tenants.markKnown(orgId) }) : undefined;
 
   const server = createServer(async (request, response) => {
     let actor: User | undefined;
+    // The company this request belongs to, once known. Until then, only the home company's log is touched.
+    let current: Tenant = home;
     const reply = async (response: ServerResponse, status: number, data: unknown) => {
       // A refused request is part of the trail too. Only the actor, method and route are recorded, never the body.
       if (status === 403 && actor) {
-        brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
-        await brain.audit.flush();
+        current.brain.audit.append("request_denied", actor.id, { method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname });
+        await current.brain.audit.flush();
       }
       // Reads change no state, so they don't rewrite the whole snapshot (audit entries are flushed on their own).
-      if (status >= 200 && status < 300) await (request.method === "GET" ? brain.audit.flush() : brain.persist());
+      if (status >= 200 && status < 300) await (request.method === "GET" ? current.brain.audit.flush() : current.brain.persist());
       send(response, status, data);
     };
     try {
@@ -251,18 +311,29 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (request.method === "GET" && url.pathname === "/health") {
         return await reply(response, 200, {
           ok: true,
-          sync: [...brain.states.values()],
-          pending: [...brain.runs.values()].filter(run => run.status !== "complete"),
-          auditEntries: brain.audit.entries.length,
-          merkleBatches: brain.audit.batches.length
+          sync: [...home.brain.states.values()],
+          pending: [...home.brain.runs.values()].filter(run => run.status !== "complete"),
+          auditEntries: home.brain.audit.entries.length,
+          merkleBatches: home.brain.audit.batches.length
         });
+      }
+
+      // A company signing itself up, and a person finding their company at sign-in. Both are open to anyone, so they
+      // are limited, answer the same whoever asks, and give nothing away about the people or data inside a company.
+      if (signup && url.pathname === "/v1/signup" && request.method === "POST") {
+        return await reply(response, 202, await signup.create(await body(request)));
+      }
+      if (signup && url.pathname === "/v1/companies/find" && request.method === "GET") {
+        const found = await signup.find(url.searchParams.get("name"));
+        return await reply(response, found ? 200 : 404, found ?? { error: "We couldn't find that company." });
       }
 
       const webOrigin = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001";
       if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
+        const slackInstallation = home.slackInstallation;
         if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
         const returned = splitReturnPage(url.searchParams.get("state") ?? "");
-        const outcome = await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+        const outcome = returned.company ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
           .catch(() => "failed");
         const destination = new URL(returned.page === "setup" ? returnLocation(webOrigin, "setup", {}) : slackInstallation.returnUrl);
         destination.searchParams.set("slack_install", outcome);
@@ -271,16 +342,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       const callback = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
-      if (callback && request.method === "GET" && oauth && directory) {
+      if (callback && request.method === "GET" && home.oauth && home.directory) {
         const source = callback[1] as Source;
         const returned = splitReturnPage(url.searchParams.get("state") ?? "");
         // A person who turns the approval down, or whose account doesn't match, comes back to the page with a reason to show.
         let location: string;
         try {
-          const actor = await oauth.complete(source, returned.state, url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
-          await applySite(source);
-          brain.markConnected(actor, source);
-          await brain.persist();
+          // The company comes from the state; the stored single-use state is then looked up inside that company only.
+          const owner = returned.company ? await tenants.get(returned.company) : home;
+          if (!owner?.oauth || !owner.directory) throw new Error("Invalid OAuth state");
+          const approved = await owner.oauth.complete(source, returned.state, url.searchParams.get("code") ?? "", sub => owner.directory!.bySub(sub));
+          await owner.applySite(source);
+          owner.brain.markConnected(approved, source);
+          await owner.brain.persist();
           location = returnLocation(webOrigin, returned.page, { connected: source });
         } catch (error) {
           location = returnLocation(webOrigin, returned.page, { connect_failed: source, reason: connectFailure(error, url.searchParams.get("error") ?? "") });
@@ -296,17 +370,26 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (service && !(request.method === "POST" && serviceRoutes.includes(url.pathname))) {
         return await reply(response, 403, { error: "Forbidden" });
       }
-          const resolve = async () => {
-        const person = await (service ? serviceActor!.resolve(request) : identity(request, brain, auth0, !connectors));
+      // Who is asking, and which company's workspace they are asking in. A person from a company that is not listed is turned away.
+      const authenticate = async (): Promise<{ person: User; tenant: Tenant } | undefined> => {
+        const person = await (service ? serviceActor!.resolve(request) : identity(request, home.brain, auth0, !home.connectors));
+        if (!person) return undefined;
+        const tenant = hasAuth0 ? await tenants.get(person.orgId) : home;
+        if (!tenant) return undefined;
         // Another instance may have added or linked this person after this one loaded the directory.
-        if (person && users) {
-          const known = users.findIndex(item => item.id === person.id);
-          if (known < 0) users.push(person); else if (users[known].auth0Sub !== person.auth0Sub) users[known] = person;
+        if (tenant.users) {
+          const known = tenant.users.findIndex(item => item.id === person.id);
+          if (known < 0) tenant.users.push(person); else if (tenant.users[known].auth0Sub !== person.auth0Sub) tenant.users[known] = person;
         }
-        return person;
+        return { person, tenant };
       };
-      const user = await resolve();
-      if (!user) return await reply(response, 401, { error: "Unauthorized" });
+      const resolve = async () => (await authenticate())?.person;
+      const identified = await authenticate();
+      if (!identified) return await reply(response, 401, { error: "Unauthorized" });
+      const user = identified.person;
+      const tenant = identified.tenant;
+      current = tenant;
+      const { brain, oauth, directory, users, people, connectors, orgModel, slackInstallation, slackCombined, jiraAsUser, applySite, reloadUsers, agentActions } = tenant;
       actor = user;
 
       if (url.pathname === "/v1/admin/slack-installation" || url.pathname.startsWith("/v1/admin/slack-installation/")) {
@@ -516,8 +599,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (match[2] === "authorize" && request.method === "POST") {
           // The guided setup page asks to be returned to afterwards; anything else returns to the connectors page.
           const page = pageFor((await body(request)).via);
-          if (source === "slack" && slackCombined) return await reply(response, 200, { url: withReturnPage(await slackInstallation!.begin(user), page) });
-          if (oauth) return await reply(response, 200, { url: withReturnPage(await oauth.begin(source, user), page) });
+          if (source === "slack" && slackCombined) return await reply(response, 200, { url: withReturnPage(await slackInstallation!.begin(user), page, tenant.isHome ? undefined : tenant.orgId) });
+          if (oauth) return await reply(response, 200, { url: withReturnPage(await oauth.begin(source, user), page, tenant.isHome ? undefined : tenant.orgId) });
           await brain.connect(user, source); return await reply(response, 200, { connected: true });
         }
         if (match[2] === "containers" && request.method === "GET") return await reply(response, 200, { containers: await brain.listContainers(user, source) });
@@ -724,7 +807,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     } catch (error: unknown) {
       // A real organization sign-in that isn't on the admin's list: say so, so the person knows what to ask for.
       if (error instanceof AccessDenied) return await reply(response, 403, { error: error.message, code: error.code });
-      if (error instanceof PeopleError) return await reply(response, error.status, { error: error.message });
+      if (error instanceof PeopleError || error instanceof SignupError) return await reply(response, error.status, { error: error.message });
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
       if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });
@@ -741,7 +824,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     }
   });
 
-  return { brain, orchestrator, server };
+  /** Stops every company's sync and writes out what each has not yet saved, for a clean exit. */
+  const shutdown = async (): Promise<void> => {
+    server.close();
+    for (const item of tenants.all()) {
+      item.orchestrator.stop();
+      try { item.brain.audit.seal(); await item.brain.audit.flush(); await item.brain.persist(); } catch { /* exiting anyway */ }
+    }
+  };
+  return { brain, orchestrator, server, shutdown };
 }
 
 // Serverless hosts such as Vercel import this module and call its default export once per request. The server is
@@ -770,19 +861,13 @@ export function startupMessage(host: string, port: number, env: NodeJS.ProcessEn
 }
 
 if (isMainModule()) {
-  const { brain, orchestrator, server } = await createApiServer();
+  const { orchestrator, server, shutdown } = await createApiServer();
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? "127.0.0.1";
   server.listen(port, host, () => process.stdout.write(`${startupMessage(host, port)}\n`));
 
-  const stop = (): void => {
-    orchestrator.stop();
-    server.close();
-    // Seal what is left and write it out before the process exits, so the last entries are not left unsealed.
-    void (async () => {
-      try { brain.audit.seal(); await brain.audit.flush(); await brain.persist(); } catch { /* exiting anyway */ }
-    })();
-  };
+  // Seal what is left and write it out before the process exits, so the last entries are not left unsealed.
+  const stop = (): void => { orchestrator.stop(); void shutdown(); };
 
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);

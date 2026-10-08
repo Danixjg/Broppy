@@ -6,22 +6,28 @@
 export type ReturnPage = "setup" | "connectors";
 
 const SUFFIX = ".setup";
+// The company the approval belongs to, for a company other than the one set up by hand. The approval page calls back
+// without a sign-in, so the state carries it; the stored single-use state is looked up inside that company only.
+const COMPANY = /~(org_[A-Za-z0-9]{1,64})$/;
 
 export const pageFor = (via: unknown): ReturnPage => via === "setup" ? "setup" : "connectors";
 
-/** The same sign-in link with the return page added to its state. */
-export function withReturnPage(href: string, page: ReturnPage): string {
-  if (page !== "setup") return href;
+/** The same sign-in link with the return page, and the company when it is not the home company, added to its state. */
+export function withReturnPage(href: string, page: ReturnPage, company?: string): string {
+  if (page !== "setup" && !company) return href;
   const url = new URL(href);
   const state = url.searchParams.get("state");
   if (!state) return href;
-  url.searchParams.set("state", state + SUFFIX);
+  url.searchParams.set("state", state + (company ? `~${company}` : "") + (page === "setup" ? SUFFIX : ""));
   return url.href;
 }
 
-/** The state to check, and the page to return to, from the state a source sent back. */
-export function splitReturnPage(state: string): { state: string; page: ReturnPage } {
-  return state.endsWith(SUFFIX) ? { state: state.slice(0, -SUFFIX.length), page: "setup" } : { state, page: "connectors" };
+/** The state to check, the page to return to and the company, from the state a source sent back. */
+export function splitReturnPage(value: string): { state: string; page: ReturnPage; company?: string } {
+  const page: ReturnPage = value.endsWith(SUFFIX) ? "setup" : "connectors";
+  const rest = page === "setup" ? value.slice(0, -SUFFIX.length) : value;
+  const company = COMPANY.exec(rest);
+  return company ? { state: rest.slice(0, company.index), page, company: company[1] } : { state: rest, page };
 }
 
 /** Why a connection did not complete, in a word the setup page can turn into plain language. */

@@ -243,7 +243,11 @@ async function refresh() {
 async function start() {
   try {
     const me = await request("/v1/me");
-    if (me.role !== "admin") { $("gate").hidden = false; return; }
+    // Someone who has just accepted an invitation lands here; only the company's first admin has setup to do.
+    if (me.role !== "admin") {
+      if (new URLSearchParams(location.search).has("welcome")) { location.replace("./index.html"); return; }
+      $("gate").hidden = false; return;
+    }
     const message = returnMessage(new URLSearchParams(location.search));
     if (message) { notice(message); history.replaceState(null, "", location.pathname + (persona ? `?user=${encodeURIComponent(persona)}` : "")); }
     $("setup").hidden = false;

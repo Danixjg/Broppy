@@ -69,14 +69,14 @@ export class RemoteFgaAdapter {
     this.transport = config.fetch ?? fetch;
   }
 
-  static fromEnv(env: NodeJS.ProcessEnv = process.env): RemoteFgaAdapter {
+  static fromEnv(env: NodeJS.ProcessEnv = process.env, orgId?: string): RemoteFgaAdapter {
     return new RemoteFgaAdapter({
       url: required(env.FGA_API_URL, "FGA_API_URL"),
       storeId: required(env.FGA_STORE_ID, "FGA_STORE_ID"),
       modelId: required(env.FGA_MODEL_ID, "FGA_MODEL_ID"),
       clientId: required(env.FGA_CLIENT_ID, "FGA_CLIENT_ID"), clientSecret: required(env.FGA_CLIENT_SECRET, "FGA_CLIENT_SECRET"),
       tokenIssuer: required(env.FGA_API_TOKEN_ISSUER, "FGA_API_TOKEN_ISSUER"), audience: required(env.FGA_API_AUDIENCE, "FGA_API_AUDIENCE"),
-      orgId: required(env.AUTH0_ORG_ID, "AUTH0_ORG_ID")
+      orgId: orgId ?? required(env.AUTH0_ORG_ID, "AUTH0_ORG_ID")
     });
   }
 

@@ -10,7 +10,12 @@ interface ManagementOptions {
 }
 
 /** Auth0 refused or could not complete a Management API call. The message is safe to show an admin. */
-export class ManagementError extends Error {}
+export class ManagementError extends Error {
+  constructor(message: string, readonly status?: number) { super(message); }
+}
+
+/** An organization as Auth0 describes it. */
+export interface Auth0Organization { id: string; name: string; displayName: string }
 
 const INVITATION_TTL_SECONDS = 7 * 24 * 3600;
 
@@ -22,8 +27,10 @@ const INVITATION_TTL_SECONDS = 7 * 24 * 3600;
 export class Auth0Management {
   private cached?: { token: string; expires: number };
   private readonly transport: typeof fetch;
+  private readonly parent?: Auth0Management;
 
-  constructor(private readonly options: ManagementOptions) {
+  constructor(private readonly options: ManagementOptions, parent?: Auth0Management) {
+    this.parent = parent;
     const issuer = new URL(options.issuer);
     if (issuer.protocol !== "https:" || issuer.pathname !== "/" || options.issuer !== issuer.href ||
       !options.orgId || !options.appClientId || !options.clientId || !options.clientSecret) {
@@ -49,11 +56,17 @@ export class Auth0Management {
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
     });
     const text = await response.text();
-    if (!response.ok) throw new ManagementError(`Auth0 refused the request (${response.status})${reason(text)}`);
+    if (!response.ok) throw new ManagementError(`Auth0 refused the request (${response.status})${reason(text)}`, response.status);
     return text ? JSON.parse(text) : undefined;
   }
 
+  /** The same management application, working on another organization. It shares this one's access token. */
+  forOrg(orgId: string): Auth0Management {
+    return new Auth0Management({ ...this.options, orgId }, this.parent ?? this);
+  }
+
   private async token(): Promise<string> {
+    if (this.parent) return this.parent.token();
     const now = (this.options.now ?? Date.now)();
     if (this.cached && this.cached.expires > now) return this.cached.token;
     const response = await this.transport(new URL("oauth/token", this.options.issuer), {
@@ -94,6 +107,23 @@ export class Auth0Management {
     }
   }
 
+  /** Creates an organization with the sign-in database enabled, for a company that signs itself up. */
+  async createOrganization(input: { name: string; displayName: string; connectionId: string }): Promise<Auth0Organization> {
+    const created = await this.call("organizations", { method: "POST", body: { name: input.name, display_name: input.displayName.slice(0, 100),
+      enabled_connections: [{ connection_id: input.connectionId, assign_membership_on_login: false }] } });
+    return organization(created);
+  }
+
+  async deleteOrganization(id: string): Promise<void> {
+    await this.call(`organizations/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  /** The organization with this short name, or nothing when there is none. */
+  async findOrganization(name: string): Promise<Auth0Organization | undefined> {
+    try { return organization(await this.call(`organizations/name/${encodeURIComponent(name)}`)); }
+    catch (error) { if (error instanceof ManagementError && error.status === 404) return undefined; throw error; }
+  }
+
   async addMember(sub: string): Promise<void> {
     await this.call(`organizations/${this.org}/members`, { method: "POST", body: { members: [sub] } });
   }
@@ -101,6 +131,12 @@ export class Auth0Management {
   async removeMember(sub: string): Promise<void> {
     await this.call(`organizations/${this.org}/members`, { method: "DELETE", body: { members: [sub] } });
   }
+}
+
+function organization(value: unknown): Auth0Organization {
+  const item = value as { id?: unknown; name?: unknown; display_name?: unknown } | undefined;
+  if (typeof item?.id !== "string" || typeof item.name !== "string") throw new ManagementError("Auth0 returned an unexpected organization");
+  return { id: item.id, name: item.name, displayName: typeof item.display_name === "string" ? item.display_name : item.name };
 }
 
 function reason(text: string): string {

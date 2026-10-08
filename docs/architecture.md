@@ -225,8 +225,10 @@ person may also open.
 
 ## Persistence and organizations
 
-- **One organization per API:** each process serves one Auth0 organization (`AUTH0_ORG_ID`) and refuses tokens from
-  any other. Directory reads, saved state, audit rows and remote tuples are all scoped to it.
+- **One workspace per company:** a token's organization decides which company's workspace answers. The company set up
+  by hand (`AUTH0_ORG_ID`) is always served; with `SELF_SIGNUP` on or closed, so is every company listed in
+  `organizations` (see `docs/self-signup.md`). A token from any other organization is refused. Each company has its own
+  directory, saved state, audit chain, source connections and remote tuples, built when its first request arrives.
 - **One writer per organization:** two APIs writing one organization's audit chain break each other.
 - **Saved state:** the index, grants, mock edits, connections, jobs and cursors are saved to Supabase after every sync
   and every successful request. Semantic vectors are restored with the index.

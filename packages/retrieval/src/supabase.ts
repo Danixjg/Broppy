@@ -18,7 +18,7 @@ interface SearchRow {
 export class SupabaseIndex {
   private constructor(private readonly baseUrl: string, private readonly key: string, private readonly orgId = "demo-company-a") {}
 
-  static fromEnv(): SupabaseIndex | null {
+  static fromEnv(orgId = process.env.AUTH0_ORG_ID ?? "demo-company-a"): SupabaseIndex | null {
     const url = process.env.SUPABASE_URL?.trim();
     const key = process.env.SUPABASE_SECRET_KEY?.trim();
     if (!url && !key) return null;
@@ -32,7 +32,7 @@ export class SupabaseIndex {
     if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
       throw new Error("SUPABASE_URL must be an HTTPS project URL without a path, credentials, or query parameters");
     }
-    return new SupabaseIndex(parsed.origin, key, process.env.AUTH0_ORG_ID ?? "demo-company-a");
+    return new SupabaseIndex(parsed.origin, key, orgId);
   }
 
   private async request(path: string, method: string, body?: unknown, prefer?: string): Promise<unknown> {

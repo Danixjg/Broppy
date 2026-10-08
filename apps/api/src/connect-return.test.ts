@@ -12,6 +12,16 @@ describe("returning from a source's approval page", () => {
     expect(withReturnPage("https://auth.example.test/authorize?client_id=x", "setup")).toBe("https://auth.example.test/authorize?client_id=x");
   });
 
+  it("carries the company on the state when it is not the home company", () => {
+    const href = "https://auth.example.test/authorize?client_id=x&state=abc_DEF-123";
+    expect(new URL(withReturnPage(href, "connectors", "org_new1")).searchParams.get("state")).toBe("abc_DEF-123~org_new1");
+    expect(new URL(withReturnPage(href, "setup", "org_new1")).searchParams.get("state")).toBe("abc_DEF-123~org_new1.setup");
+    expect(splitReturnPage("abc_DEF-123~org_new1.setup")).toEqual({ state: "abc_DEF-123", page: "setup", company: "org_new1" });
+    expect(splitReturnPage("abc_DEF-123~org_new1")).toEqual({ state: "abc_DEF-123", page: "connectors", company: "org_new1" });
+    // Something that only looks like a company is part of the state, which then fails to match.
+    expect(splitReturnPage("abc~notacompany")).toEqual({ state: "abc~notacompany", page: "connectors" });
+  });
+
   it("only returns to a page it knows", () => {
     expect(pageFor("setup")).toBe("setup");
     for (const value of [undefined, "", "connectors", "https://evil.test", "../x"]) expect(pageFor(value)).toBe("connectors");
