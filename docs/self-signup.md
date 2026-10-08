@@ -29,9 +29,13 @@ listing it, that organization is left holding its name; delete it in the Auth0 d
 Apply `infra/supabase/migrations/012_company_signup.sql` first (fresh projects: `infra/supabase/schema.sql`).
 
 **Auth0**
-- On the machine-to-machine application used for invitations (`AUTH0_MANAGEMENT_CLIENT_ID`), grant the Management API
-  scopes `create:organizations`, `read:organizations`, `delete:organizations`, `create:organization_connections` and
-  `create:organization_invitations` (it already has `create:organization_members`, `read:users` and `create:users`).
+- In Auth0, open **Applications → Applications**, choose the machine-to-machine application used for invitations (the
+  one whose Client ID is `AUTH0_MANAGEMENT_CLIENT_ID`), then its **APIs** tab. On the **Auth0 Management API** row press
+  **Edit**, open **Client Access**, and tick these permissions (the list has a search box): `create:organizations`,
+  `read:organizations`, `delete:organizations`, `create:organization_connections`, plus the five it should already have for
+  invitations: `create:organization_invitations`, `read:organization_invitations`, `delete:organization_invitations`,
+  `create:organization_members`, `delete:organization_members`. Save. "User-delegated Access" is a different setting and
+  isn't needed.
 - Copy the ID of the sign-in database (Authentication → Database → your connection, `con_...`). New companies use it.
 - Set the web application's **Application Login URI** to `https://YOUR-WEB-DOMAIN/invited`, and keep **Allow
   organization logins** on the application's Organizations tab. If the application requires an organization, new companies
