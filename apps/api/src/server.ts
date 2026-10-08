@@ -1,6 +1,7 @@
 import { SlackInstallationOAuth } from "./slack-installation.js";
 import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { atlassianAccountIds } from "./atlassian-identity.js";
+import { connectFailure, pageFor, returnLocation, splitReturnPage, withReturnPage } from "./connect-return.js";
 import { SourceOAuth } from "./source-oauth.js";
 import { Persistence } from "./persistence.js";
 import { searchAudit } from "./audit-search.js";
@@ -257,11 +258,13 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         });
       }
 
+      const webOrigin = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001";
       if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
         if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
-        const outcome = await slackInstallation.callback({ state: url.searchParams.get("state") ?? "", code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+        const returned = splitReturnPage(url.searchParams.get("state") ?? "");
+        const outcome = await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
           .catch(() => "failed");
-        const destination = new URL(slackInstallation.returnUrl);
+        const destination = new URL(returned.page === "setup" ? returnLocation(webOrigin, "setup", {}) : slackInstallation.returnUrl);
         destination.searchParams.set("slack_install", outcome);
         response.writeHead(302, { location: destination.href, "cache-control": "no-store", "referrer-policy": "no-referrer" });
         response.end(); return;
@@ -270,11 +273,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       const callback = /^\/v1\/admin\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
       if (callback && request.method === "GET" && oauth && directory) {
         const source = callback[1] as Source;
-        const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
-        await applySite(source);
-        brain.markConnected(actor, source);
-        await brain.persist();
-        response.writeHead(302, { location: new URL("/connectors.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
+        const returned = splitReturnPage(url.searchParams.get("state") ?? "");
+        // A person who turns the approval down, or whose account doesn't match, comes back to the page with a reason to show.
+        let location: string;
+        try {
+          const actor = await oauth.complete(source, returned.state, url.searchParams.get("code") ?? "", sub => directory.bySub(sub));
+          await applySite(source);
+          brain.markConnected(actor, source);
+          await brain.persist();
+          location = returnLocation(webOrigin, returned.page, { connected: source });
+        } catch (error) {
+          location = returnLocation(webOrigin, returned.page, { connect_failed: source, reason: connectFailure(error, url.searchParams.get("error") ?? "") });
+        }
+        response.writeHead(302, { location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
         response.end(); return;
       }
 
@@ -503,8 +514,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!match) return await reply(response, 404, { error: "Not found" });
         const source = match[1] as Source;
         if (match[2] === "authorize" && request.method === "POST") {
-          if (source === "slack" && slackCombined) return await reply(response, 200, { url: await slackInstallation!.begin(user) });
-          if (oauth) return await reply(response, 200, { url: await oauth.begin(source, user) });
+          // The guided setup page asks to be returned to afterwards; anything else returns to the connectors page.
+          const page = pageFor((await body(request)).via);
+          if (source === "slack" && slackCombined) return await reply(response, 200, { url: withReturnPage(await slackInstallation!.begin(user), page) });
+          if (oauth) return await reply(response, 200, { url: withReturnPage(await oauth.begin(source, user), page) });
           await brain.connect(user, source); return await reply(response, 200, { connected: true });
         }
         if (match[2] === "containers" && request.method === "GET") return await reply(response, 200, { containers: await brain.listContainers(user, source) });

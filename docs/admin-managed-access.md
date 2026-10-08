@@ -114,3 +114,11 @@ Auth0 `sub` keep working unchanged.
 - Role and group changes after adding aren't on the People page yet; the existing group tools and SQL still work.
 - Auth0 roles aren't read. A person's Broppy role comes from the directory entry the admin set.
 - Auth0 sends the invitation; if the email never arrives, **Resend invitation** replaces the earlier link.
+
+## Landing page and guided setup
+
+- `/` is public. A visitor who is not signed in sees the product page with "Get started" (sign in, then land on `/workspace/setup.html`) and "Sign in". A signed-in visitor sees "Open your workspace" and "Continue setup".
+- `/workspace/setup.html` is the guided setup for admins: connect tools, choose what Broppy reads, add the team, pick an AI (optional), then ask a first question. Every step is derived from what the API already holds (connections, import jobs, people, AI model), so closing the tab or coming back later resumes at the first step not done. Skipped steps are remembered in the browser only. Non-admins see a plain "ask your admin" page.
+- The tool approval pages return to the setup page when a connect starts from it (the authorize request carries `via: "setup"`, kept as a `.setup` suffix on the OAuth state). A failed or cancelled approval comes back with `connect_failed` and a short `reason` (denied, email_mismatch, expired, not_admin, failed) and is shown in plain words, never as a JSON error page. Connects started from the Connectors page behave as before.
+- The "Guided setup" link sits next to Connectors and People and access for admins.
+- Still manual: creating the company's Auth0 organisation and the first admin row (see "The first admin"). The landing page does not create companies.

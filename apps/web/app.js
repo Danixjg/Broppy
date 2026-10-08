@@ -126,6 +126,10 @@ function resetIdentity() {
   peopleLink.href = "./people.html";
   // Adding people is a signed-in admin's job; the public demo has no directory to add to.
   peopleLink.hidden = role() !== "admin" || state.authMode === "demo";
+  let setupLink = document.getElementById("setupGuide");
+  if (!setupLink) { setupLink = node("a", "", "Guided setup"); setupLink.id = "setupGuide"; setupLink.style.marginLeft = "1rem"; peopleLink.after(setupLink); }
+  setupLink.href = "./setup.html";
+  setupLink.hidden = role() !== "admin" || state.authMode === "demo";
   $("complianceTab").hidden = role() !== "compliance";
   $("retrySync").hidden = role() !== "admin";
   setView("workspace");
