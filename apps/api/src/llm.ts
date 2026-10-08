@@ -1,4 +1,4 @@
-import type { LlmClient } from "@brain/retrieval";
+import type { ChatTurn, LlmClient } from "@brain/retrieval";
 
 export type LlmProvider = "hunyuan" | "tokenhub" | "groq" | "anthropic" | "openai" | "openai_compatible";
 /** Providers an organization's admin can choose in settings. The others are for the operator's own settings (env vars). */
@@ -141,7 +141,36 @@ export class ChatLlm implements LlmClient {
       throw new Error("Invalid model input");
     }
 
-    const body = this.request(context, question);
+    return this.send(this.request(context, question));
+  }
+
+  /** The most a conversation turn may use, estimated the same way. */
+  conversationReservation(system: string, turns: ChatTurn[]): number {
+    return estimateTokens(this.conversationBody(system, turns)) + this.maxTokens;
+  }
+
+  async converse(system: string, turns: ChatTurn[]): Promise<string> {
+    return (await this.converseWithUsage(system, turns)).text;
+  }
+
+  async converseWithUsage(system: string, turns: ChatTurn[]): Promise<{ text: string; usage: TokenUsage }> {
+    if (!system.trim() || !turns.length || turns.some(turn => (turn.role !== "user" && turn.role !== "assistant") ||
+      typeof turn.content !== "string" || !turn.content.trim()) || turns[0].role !== "user" || turns[turns.length - 1].role !== "user") {
+      throw new Error("Invalid model input");
+    }
+    return this.send(this.conversationBody(system, turns));
+  }
+
+  private conversationBody(system: string, turns: ChatTurn[]): string {
+    const preset = PRESETS[this.provider];
+    if (preset.format === "messages") {
+      return JSON.stringify({ model: this.options.model, max_tokens: this.maxTokens, system, messages: turns });
+    }
+    return JSON.stringify({ model: this.options.model, stream: false, [preset.limitField]: this.maxTokens, ...preset.extra,
+      messages: [{ role: "system", content: system }, ...turns] });
+  }
+
+  private async send(body: string): Promise<{ text: string; usage: TokenUsage }> {
     // No answer in time, or a broken connection: the provider may still bill for the call.
     const lost = () => new ModelCallError("Model request failed");
     let response: Response;

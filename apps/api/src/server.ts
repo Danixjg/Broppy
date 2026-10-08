@@ -16,6 +16,7 @@ import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
 import { People, PeopleError } from "./people.js";
 import { ServiceActor } from "./service-actor.js";
+import { ActionLimit, AgentActions, parseHistory, understandTurn } from "./agent.js";
 import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
 import { SupabaseTaskStore } from "../../slack/src/store.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
@@ -208,6 +209,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
     discard: async () => { await oauth!.remove("slack"); } };
   const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
+  const agentActions = new AgentActions();
+  const actionsOn = AgentActions.enabled();
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const people = hasAuth0 ? new People(directory!, Auth0Management.fromEnv()) : undefined;
   // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
@@ -337,10 +340,45 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const input = await body(request);
         if (typeof input.question !== "string") throw new Error("Invalid question");
         if (input.project !== undefined && (typeof input.project !== "string" || !input.project || input.project.length > 64)) throw new Error("Invalid project");
+        // The model (or fixed patterns without one) decides before any retrieval whether this is small talk, a ticket to prepare
+        // or a question for the sources. The Slack app keeps the plain question path.
+        const history = service ? [] : parseHistory(input.history);
+        const turn = service ? { kind: "question" as const, question: input.question }
+          : await understandTurn(await brain.conversationModel(), history, input.question);
+        if (turn.kind === "chat" || (turn.kind === "action" && !actionsOn)) {
+          brain.audit.append("chat_turn", user.id, { kind: turn.kind });
+          const text = turn.kind === "chat" ? turn.reply : "Creating tickets from the chat is switched off for this workspace.";
+          return await reply(response, 200, { text, citations: [], kind: "chat" });
+        }
+        if (turn.kind === "action") {
+          brain.audit.append("agent_action_proposed", user.id, { type: "jira_issue", proposalId: turn.proposal.id });
+          return await reply(response, 200, { text: "I can prepare this Jira ticket. Check the details, say which project it belongs to, then confirm. Nothing is created until you do.",
+            citations: [], kind: "action", proposal: { type: "jira_issue", ...turn.proposal } });
+        }
         let traceId: string | undefined;
-        const answer = await brain.query(user, input.question, id => { traceId = id; },
+        const answer = await brain.query(user, turn.question, id => { traceId = id; },
           resolve, { project: input.project as string | undefined });
         return await reply(response, 200, { ...answer, traceId, importNotice: brain.importNotice() });
+      }
+
+      // The person's confirmation of a ticket the chat prepared. The model never calls this; only the person's button does.
+      if (request.method === "POST" && url.pathname === "/v1/actions/jira-issue") {
+        if (!actionsOn) return await reply(response, 403, { error: "Creating tickets from the chat is switched off for this workspace." });
+        if (!jiraAsUser) return await reply(response, 409, { error: "Jira is not connected" });
+        const input = await body(request);
+        if (typeof input.proposalId !== "string" || !/^[0-9a-f-]{36}$/i.test(input.proposalId)) throw new Error("Invalid issue");
+        const issue = parseIssue(input);
+        let created: { key: string; url: string } | undefined;
+        try {
+          created = await agentActions.once(user.id, input.proposalId, () => jiraAsUser.createIssue(user, issue));
+        } catch (error) {
+          if (error instanceof ActionLimit) return await reply(response, 429, { error: "You have created a lot of tickets this hour. Try again later." });
+          brain.audit.append("agent_action_failed", user.id, { type: "jira_issue", proposalId: input.proposalId });
+          throw error;
+        }
+        if (!created) return await reply(response, 409, { error: "Jira is not connected" });
+        brain.audit.append("agent_action_executed", user.id, { type: "jira_issue", proposalId: input.proposalId, key: created.key, project: issue.project });
+        return await reply(response, 201, created);
       }
 
       if (request.method === "GET" && url.pathname === "/v1/trace") {

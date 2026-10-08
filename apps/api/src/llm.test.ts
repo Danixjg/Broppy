@@ -260,3 +260,23 @@ describe("Anthropic and OpenAI providers", () => {
     expect(() => chatLlmFromEnv({ LLM_PROVIDER: "nope", LLM_API_KEY: "k", LLM_MODEL: "m" })).toThrow("LLM_PROVIDER must be");
   });
 });
+
+describe("ChatLlm.converse", () => {
+  it("sends the conversation with the caller's system prompt and no passages", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => reply({ content: "Hello." }));
+    const client = new ChatLlm({ provider: "hunyuan", apiKey: "k", model: "m", fetch: fetcher as typeof fetch });
+    expect(await client.converse("Be brief.", [{ role: "user", content: "hi" }])).toBe("Hello.");
+    const body = JSON.parse(fetcher.mock.calls[0][1].body as string);
+    expect(body.messages).toEqual([{ role: "system", content: "Be brief." }, { role: "user", content: "hi" }]);
+  });
+
+  it("uses Anthropic's system field and rejects a conversation that does not end with the person", async () => {
+    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Hi." }] }), { status: 200 }));
+    const client = new ChatLlm({ provider: "anthropic", apiKey: "k", model: "m", fetch: fetcher as typeof fetch });
+    expect(await client.converse("Be brief.", [{ role: "user", content: "hi" }])).toBe("Hi.");
+    const body = JSON.parse(fetcher.mock.calls[0][1].body as string);
+    expect(body.system).toBe("Be brief.");
+    expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
+    await expect(client.converse("s", [{ role: "user", content: "a" }, { role: "assistant", content: "b" }])).rejects.toThrow("Invalid model input");
+  });
+});

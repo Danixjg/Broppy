@@ -8,7 +8,7 @@ const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [], commitments: [], owners: [], capabilities: {} });
 let deepLinkApplied = false;
-const state = { docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { chat: [], docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
 const roles = { maya: "admin", nur: "compliance" };
 // The lists opened in full since the last search, project or person change.
 const expandedLists = new Set();
@@ -108,7 +108,7 @@ function setView(view, { load = true } = {}) {
 function resetIdentity() {
   state.identity++;
   deepLinkApplied = false;
-  state.docs = []; state.workspace = emptyWorkspace(); state.project = null; expandedLists.clear(); state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
+  state.chat = []; state.docs = []; state.workspace = emptyWorkspace(); state.project = null; expandedLists.clear(); state.selected = null; state.selectedQuotes = []; state.audit = null; state.auditEntries = []; state.proof = null; state.nativeLoad++; state.nativeDoc = null;
   for (const id of ["projectSelect", "slackList", "jiraList", "suggestion", "masterContent", "conclusions", "driveList", "duplicate", "allSources", "selectedDetail", "workspaceTrace", "chatHistory", "previewResult", "auditSummary", "routineHidden", "auditRows", "proofPanel", "tracePanel", "healthCards"]) clear($(id));
   $("duplicate").hidden = true; $("selectedDetail").hidden = true; $("workspaceTrace").hidden = true; $("catchUpResult").hidden = true; $("proofPanel").hidden = true; $("tracePanel").hidden = true;
   for (const id of ["queryStatus", "adminStatus", "auditStatus", "healthStatus", "globalStatus"]) setMessage($(id), "");
@@ -717,11 +717,51 @@ async function ask(question, target, displayQuestion = false) {
   const generation = state.identity;
   const stop = showPending(target, "Checking permissions and sources…");
   let result;
-  try { result = await post("/v1/query", { question, ...(state.project ? { project: state.project } : {}) }); } finally { stop(); }
+  try { result = await post("/v1/query", { question, ...(state.chat.length ? { history: state.chat } : {}), ...(state.project ? { project: state.project } : {}) }); } finally { stop(); }
   if (generation !== state.identity) return null;
-  renderAnswer(target, result, displayQuestion ? question : "");
+  if (result.kind === "action" && result.proposal) renderProposal(target, result);
+  else renderAnswer(target, result, displayQuestion ? question : "");
   if (result.importNotice) appendText(target, "p", "muted", result.importNotice);
+  // The last few turns go back with the next question, so a follow-up can lean on them. Citation markers stay out.
+  state.chat = [...state.chat, { role: "user", text: question }, { role: "assistant", text: safeText(result.text).replace(/\s*\[[^\]]+\]/g, "") }].slice(-6);
   return result;
+}
+// A ticket the chat prepared. Nothing exists in Jira until the person presses Confirm; the project is always theirs to name.
+function renderProposal(target, result) {
+  clear(target); target.hidden = false;
+  const proposal = result.proposal;
+  appendText(target, "p", "", safeText(result.text));
+  const form = node("form", "proposal");
+  const field = (label, control) => { const wrap = node("label", "proposal-field"); wrap.append(node("span", "", label), control); form.append(wrap); return control; };
+  const project = field("Project key (required)", node("input"));
+  project.value = safeText(proposal.project); project.maxLength = 10; project.required = true; project.placeholder = "For example DB"; project.pattern = "[A-Za-z][A-Za-z0-9]{0,9}";
+  const summary = field("Title", node("input")); summary.value = safeText(proposal.summary); summary.maxLength = 250; summary.required = true;
+  const description = field("Description", node("textarea")); description.value = safeText(proposal.description); description.maxLength = 5000; description.rows = 4;
+  const due = field("Due date (optional)", node("input")); due.type = "date"; due.value = safeText(proposal.dueDate);
+  const actions = node("div", "proposal-actions");
+  const confirm = node("button", "", "Confirm and create"); confirm.type = "submit";
+  const cancel = node("button", "text-button", "Cancel"); cancel.type = "button";
+  const status = node("p", "muted"); status.setAttribute("role", "status");
+  actions.append(confirm, cancel); form.append(actions, status); target.append(form);
+  cancel.addEventListener("click", () => { form.remove(); appendText(target, "p", "muted", "Cancelled. Nothing was created."); });
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const generation = state.identity; confirm.disabled = true; status.textContent = "Creating the ticket…";
+    try {
+      const created = await post("/v1/actions/jira-issue", { proposalId: proposal.id, project: project.value.trim().toUpperCase(), summary: summary.value.trim(), description: description.value,
+        ...(due.value ? { dueDate: due.value } : {}) });
+      if (generation !== state.identity) return;
+      form.remove();
+      const line = node("p", "", "Created "); const link = node("a", "", safeText(created.key));
+      if (/^https:\/\//.test(safeText(created.url))) { link.href = created.url; link.target = "_blank"; link.rel = "noopener noreferrer"; }
+      line.append(link, "."); target.append(line);
+      state.chat = [...state.chat, { role: "assistant", text: `Created Jira ticket ${safeText(created.key)}.` }].slice(-6);
+    } catch (error) {
+      if (generation !== state.identity) return;
+      // The same confirmation can be pressed again: the API creates one ticket per proposal.
+      status.textContent = error.message; confirm.disabled = false;
+    }
+  });
 }
 function applyLandingPreference() {
   const preference = localStorage.getItem("brain-landing") || "master";
@@ -929,7 +969,7 @@ $("queryForm").addEventListener("submit", async event => {
   try {
     const result = await ask(question, response); if (generation !== state.identity) return;
     if (role() === "compliance" && looksLikeAuditQuestion(question)) appendAuditHint(response, question);
-    $("queryStatus").textContent = result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = "";
+    $("queryStatus").textContent = result.kind === "action" ? "Review the ticket, then confirm." : result.kind === "chat" ? "" : result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = "";
   }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
