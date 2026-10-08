@@ -95,8 +95,12 @@ export class HybridIndex {
   }
 }
 
+export interface ChatTurn { role: "user" | "assistant"; content: string }
+
 export interface LlmClient {
   generate(context: Array<{ citation: string; text: string }>, question: string): Promise<string>;
+  /** A plain conversation turn with no company passages. Only models that can hold a conversation have it. */
+  converse?(system: string, turns: ChatTurn[]): Promise<string>;
 }
 
 export class LocalGroundedLlm implements LlmClient {

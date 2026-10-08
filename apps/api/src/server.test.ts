@@ -298,3 +298,31 @@ describe("mock data", () => {
     expect(both.documents.length).toBeGreaterThan(handWritten.documents.length + 200);
   });
 });
+
+describe("chat agent turns", () => {
+  it("answers small talk without searching and keeps real questions on the grounded path", async () => {
+    const { request } = await start();
+    const hello = await request("/v1/query", "ravi", { method: "POST", body: JSON.stringify({ question: "hi" }) });
+    expect(hello.status).toBe(200);
+    expect(hello.body).toMatchObject({ kind: "chat", citations: [] });
+    expect(hello.body.text).not.toBe("No accessible information was found for this query.");
+    expect(hello.body.traceId).toBeUndefined();
+    const real = await request("/v1/query", "ravi", { method: "POST", body: JSON.stringify({ question: "what is the zebra offsite plan", history: [{ role: "user", text: "hi" }] }) });
+    expect(real.body.text).toBe("No accessible information was found for this query.");
+  });
+
+  it("prepares a ticket for confirmation without creating one, and never picks the project", async () => {
+    const { request, brain } = await start();
+    const asked = await request("/v1/query", "ravi", { method: "POST", body: JSON.stringify({ question: "create a Jira ticket to raise the ledger quota" }) });
+    expect(asked.body).toMatchObject({ kind: "action", proposal: { type: "jira_issue", summary: "raise the ledger quota" } });
+    expect(asked.body.proposal.project).toBeUndefined();
+    expect(brain.audit.entries.some(entry => entry.type === "agent_action_proposed")).toBe(true);
+    expect(brain.audit.entries.some(entry => entry.type === "agent_action_executed")).toBe(false);
+  });
+
+  it("refuses to create a ticket when Jira is not connected, and rejects a malformed request", async () => {
+    const { request } = await start();
+    const fields = { proposalId: "6f1c2f6e-7c1c-4a43-9a3e-0d6f1a1b2c3d", project: "DB", summary: "Raise quota", description: "d" };
+    expect((await request("/v1/actions/jira-issue", "ravi", { method: "POST", body: JSON.stringify(fields) })).status).toBe(409);
+  });
+});

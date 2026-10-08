@@ -1,5 +1,5 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import type { LlmClient, SemanticEmbeddingClient } from "@brain/retrieval";
+import type { ChatTurn, LlmClient, SemanticEmbeddingClient } from "@brain/retrieval";
 import { embeddingFromEnv } from "./embedding.js";
 import { chatLlmFromEnv, estimateTokens, ModelCallError, ModelUnavailable, positiveInteger, type TokenUsage }
   from "./llm.js";
@@ -145,11 +145,20 @@ export interface UsageReportingLlm {
   reservation(context: Array<{ citation: string; text: string }>, question: string): number;
   generateWithUsage(context: Array<{ citation: string; text: string }>, question: string):
     Promise<{ text: string; usage: TokenUsage }>;
+  conversationReservation?(system: string, turns: ChatTurn[]): number;
+  converseWithUsage?(system: string, turns: ChatTurn[]): Promise<{ text: string; usage: TokenUsage }>;
 }
 
 /** A chat model that only answers while the meter allows it, and records what each answer used. */
 export class BudgetedLlm implements LlmClient {
-  constructor(private readonly inner: UsageReportingLlm, readonly meter: UsageMeter) {}
+  readonly converse?: (system: string, turns: ChatTurn[]) => Promise<string>;
+
+  constructor(private readonly inner: UsageReportingLlm, readonly meter: UsageMeter) {
+    if (inner.converseWithUsage && inner.conversationReservation) {
+      this.converse = async (system, turns) => this.metered(inner.conversationReservation!(system, turns),
+        () => inner.converseWithUsage!(system, turns)).then(result => result.text);
+    }
+  }
 
   async generate(context: Array<{ citation: string; text: string }>, question: string): Promise<string> {
     return (await this.generateWithUsage(context, question)).text;
@@ -157,12 +166,16 @@ export class BudgetedLlm implements LlmClient {
 
   async generateWithUsage(context: Array<{ citation: string; text: string }>, question: string):
     Promise<{ text: string; usage: TokenUsage }> {
-    const reserved = this.inner.reservation(context, question);
+    return this.metered(this.inner.reservation(context, question), () => this.inner.generateWithUsage(context, question));
+  }
+
+  private async metered(reserved: number, call: () => Promise<{ text: string; usage: TokenUsage }>):
+    Promise<{ text: string; usage: TokenUsage }> {
     this.meter.beforeAnswer(reserved);
     let tokens = 0;
     let answered = false;
     try {
-      const result = await this.inner.generateWithUsage(context, question);
+      const result = await call();
       tokens = result.usage.total;
       answered = true;
       return result;

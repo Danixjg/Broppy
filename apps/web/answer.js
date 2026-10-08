@@ -210,6 +210,10 @@ export function auditSummary(entry) {
     case "user_connection_removed": return `Disconnected a personal ${source} account`;
     case "scope_changed": return `Changed what ${source} imports: ${text(data.mode) || "all"}${data.futureOnly ? ", only what is new" : ""}`;
     case "task_created": return `Created ${doc} from ${text(data.fromDocId)}`;
+    case "chat_turn": return "Chat reply with no company content";
+    case "agent_action_proposed": return "Chat prepared a Jira ticket for confirmation";
+    case "agent_action_executed": return `Created Jira issue ${text(data.key)} from chat after confirmation`;
+    case "agent_action_failed": return "Creating a Jira issue from chat failed";
     case "jira_issue_created_from_slack": return `Created Jira issue ${text(data.key)} from Slack`;
     case "jira_comment_added_from_slack": return `Added a comment to Jira issue ${text(data.key)} from Slack`;
     case "commitment_reviewed": return `Reviewed the commitment in ${text(data.fromDocId)}: ${text(data.action)}, revision ${count(data.revision)}`;

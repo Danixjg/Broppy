@@ -1213,3 +1213,26 @@ td button {
 .commitment-review label { display:grid; gap:.25rem; font-size:.8rem; }
 .commitment-review input, .commitment-review select { width:100%; padding:.45rem; border:1px solid #c8d3dc; border-radius:.35rem; }
 .candidate-review { display:grid; gap:.35rem; margin:.6rem 0; }
+
+.proposal {
+  display:grid;
+  gap:.5rem;
+  margin-top:.5rem
+}
+.proposal-field {
+  display:grid;
+  gap:.2rem;
+  font-size:.75rem
+}
+.proposal-field input,
+.proposal-field textarea {
+  font:inherit;
+  padding:.4rem .5rem;
+  border:1px solid #cfd8dc;
+  border-radius:.4rem
+}
+.proposal-actions {
+  display:flex;
+  gap:.75rem;
+  align-items:center
+}

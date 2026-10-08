@@ -1269,6 +1269,17 @@ export class Brain {
     return await connector.checkAccess(user, docId) ? doc : undefined;
   }
 
+  /**
+   * The model for a turn that carries no company content: the organization's, else the operator's. If the organization's
+   * setting can't be read, none, so nothing goes to a model the organization didn't choose.
+   */
+  async conversationModel(): Promise<LlmClient | undefined> {
+    try {
+      const model = (await this.orgLlm?.current()) ?? this.llm;
+      return model instanceof LocalGroundedLlm ? undefined : model;
+    } catch { return undefined; }
+  }
+
   private noResult(user: User, traceId: string, scope?: QueryScope): QueryAnswer {
     this.audit.append("answer_returned", user.id, { traceId, answer: NO_RESULT, citationIds: [], empty: true });
     // The scope comes from the question alone, so it reveals nothing about what exists.
