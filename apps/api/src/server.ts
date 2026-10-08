@@ -211,8 +211,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
   const agentActions = new AgentActions();
   const actionsOn = AgentActions.enabled();
-  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const people = hasAuth0 ? new People(directory!, Auth0Management.fromEnv()) : undefined;
+  // At someone's first sign-in their accounts at the sources are completed and their access read at once, so they don't
+  // wait for the hourly permission pass. Capped, so a slow source never holds up the sign-in.
+  const onFirstSignIn = async (person: User) => {
+    await people!.ensureIdentities(person);
+    await Promise.race([brain.refreshAccessFor(person, 8_000), new Promise(resolve => setTimeout(resolve, 10_000))]);
+  };
+  const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!, onFirstSignIn) : undefined;
   // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
   const reloadUsers = async () => { users!.splice(0, users!.length, ...await directory!.list()); };
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
@@ -392,7 +398,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         }) : send(response, 404, { error: "Not found" });
       }
 
-      const personRoute = /^\/v1\/admin\/people(?:\/([a-z0-9-]{1,64})(?:\/(invite))?)?$/.exec(url.pathname);
+      if (url.pathname === "/v1/admin/access/refresh" && request.method === "POST") {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        if (!people) return await reply(response, 404, { error: "Admin-managed sign-in needs Auth0 and the Supabase user directory." });
+        const input = await body(request);
+        const from = typeof input.from === "number" && Number.isInteger(input.from) && input.from > 0 ? input.from : 0;
+        // The first call completes missing source accounts; later calls only carry on reading from where the last stopped.
+        const filled = from === 0 ? await people.fillMissingIdentities() : 0;
+        if (from === 0) await reloadUsers();
+        const result = await brain.refreshAllAccess(user, 25_000, from);
+        return await reply(response, 200, { ...result, identitiesFilled: filled });
+      }
+
+      const personRoute = /^\/v1\/admin\/people(?:\/([a-z0-9-]{1,64})(?:\/(invite|check|identities))?)?$/.exec(url.pathname);
       if (personRoute) {
         if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
         if (!people) return await reply(response, 404, { error: "Admin-managed sign-in needs Auth0 and the Supabase user directory." });
@@ -408,6 +426,27 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           const result = await people.invite(user, id);
           brain.audit.append("person_invited", user.id, { userId: id, auth0: result.auth0 });
           return await reply(response, 200, result);
+        }
+        if (id && verb === "identities" && request.method === "POST") {
+          const input = await body(request);
+          const { person, user: updated } = await people.setIdentities(id, input.identities);
+          brain.audit.append("person_identities_changed", user.id, { userId: id, sources: Object.keys(input.identities as object) });
+          await reloadUsers();
+          const access = await brain.refreshAccessFor(updated, 15_000);
+          return await reply(response, 200, { person, access });
+        }
+        if (id && verb === "check" && request.method === "POST") {
+          const person = (await directory!.list()).find(item => item.id === id);
+          if (!person) return await reply(response, 404, { error: "Not found" });
+          const checks: Record<string, string> = {};
+          for (const source of ["slack", "jira", "confluence", "drive"] as Source[]) {
+            const identity = person.platformIdentities?.[source];
+            const connector = connectors?.[source];
+            checks[source] = !identity ? "no_identity"
+              : brain.connections.get(source)?.status === "Not connected" || !(connector instanceof LiveConnector) ? "not_connected"
+                : await connector.lookupIdentity(identity);
+          }
+          return await reply(response, 200, { checks });
         }
         if (id && !verb && request.method === "DELETE") {
           const result = await people.remove(user, id);

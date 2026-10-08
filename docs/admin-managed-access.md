@@ -26,8 +26,26 @@ Three independent gates now apply: Auth0 organization membership (the token must
 directory entry, and a verified email for the first link. The API records `person_added`, `person_invited` and
 `person_removed` in the audit log, with the person's Broppy ID and never their email.
 
-The email is also the person's default Slack identity (`platform_identities.slack`), because the Slack app maps a Slack
-user to a Broppy user by email. The people page doesn't edit it yet.
+## Source accounts and reading access
+
+Each source is asked about a person by their account there (`platform_identities`: `slack`, `jira`, `confluence`,
+`drive`). A person added by the admin starts with their work email for all four. A source with no account for someone
+shows them nothing from it, so the admin can change one when a person's account at a source uses another email:
+**People → Source accounts** (an empty value puts the work email back). **Check** asks Slack and Atlassian whether they
+know the email (Drive has no lookup: a share names an email, and it either matches or it doesn't). Adding someone runs
+the check straight away, so a mismatch shows then and not as an empty answer later.
+
+What a person can see is stored per item as the list of people who passed the source check at the last permission pass
+(about hourly in live mode). A new person isn't on those lists yet, so Broppy reads their access right away:
+
+- **At their first sign-in**, and **when the admin saves their source accounts**: Broppy asks each source about every
+  item for that person only and adds them where the source allows it. It adds and never removes. It stops after a few
+  seconds and leaves the rest to the next pass.
+- **Refresh access** (People page): reads every item's permissions at the source again and fills in any missing source
+  account with the work email, for people added before this existed. It carries on until every item is read.
+- **Taking access away** needs none of this: every answer asks the source again, so it takes effect at once.
+
+Audit events: `person_identities_changed` (which sources, never the emails) and `access_refreshed` (counts only).
 
 ## Settings only an Auth0 admin can change
 
@@ -94,4 +112,5 @@ Auth0 `sub` keep working unchanged.
 - A running API instance learns about a person added or linked on another instance when that person's request reaches it.
   Until then it can't use them as a task owner.
 - Role and group changes after adding aren't on the People page yet; the existing group tools and SQL still work.
+- Auth0 roles aren't read. A person's Broppy role comes from the directory entry the admin set.
 - Auth0 sends the invitation; if the email never arrives, **Resend invitation** replaces the earlier link.

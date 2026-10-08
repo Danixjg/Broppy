@@ -1116,6 +1116,65 @@ export class Brain {
     return { user: target, documents, reasons };
   }
 
+  /**
+   * Reads one person's access to every live item now, so a new hire or a changed source account doesn't wait for the
+   * hourly permission pass. It only adds: people lose access through the source check on each answer, which needs no
+   * help. Work stops at the budget, and what is left is reported.
+   */
+  async refreshAccessFor(user: User, budgetMs = 15_000): Promise<AccessRefresh> {
+    this.assertOrg(user);
+    const result: AccessRefresh = { checked: 0, added: 0, failed: 0, remaining: 0 };
+    if (!this.liveMode || user.active === false) return result;
+    const deadline = Date.now() + budgetMs;
+    const ids = [...this.index.documents.values()].filter(doc => !doc.deletedAt).map(doc => doc.docId);
+    for (let i = 0; i < ids.length; i += 5) {
+      if (Date.now() > deadline) { result.remaining = ids.length - i; break; }
+      await Promise.all(ids.slice(i, i + 5).map(async docId => {
+        try {
+          const connector = this.connector(docId);
+          if (this.connections.get(connector.source)?.status === "Not connected") return;
+          result.checked++;
+          if (!await connector.checkAccess(user, docId)) return;
+          const indexed = this.index.documents.get(docId);
+          const permissions = indexed && !indexed.deletedAt ? withViewer(indexed.permissions, user) : undefined;
+          if (!indexed || !permissions) return;
+          this.index.upsert({ ...indexed, permissions });
+          this.fga.upsert({ docId, permissions, tier: indexed.tier });
+          await this.persistSearch(docId, false);
+          if (this.remoteFga) {
+            try { await this.remoteFga.syncDocument({ docId, permissions, tier: indexed.tier }); this.remoteSynced.add(docId); }
+            catch { this.remoteSynced.delete(docId); }
+          }
+          result.added++;
+        } catch { result.failed++; }
+      }));
+    }
+    this.audit.append("access_refreshed", user.id, { scope: "person", ...result });
+    return result;
+  }
+
+  /** Re-reads the permissions of every live item at the source, for the admin's Refresh access. Stops at the budget. */
+  async refreshAllAccess(actor: User, budgetMs = 25_000, from = 0): Promise<AccessRefresh> {
+    this.assertOrg(actor);
+    const result: AccessRefresh = { checked: 0, added: 0, failed: 0, remaining: 0 };
+    if (!this.liveMode) return result;
+    const deadline = Date.now() + budgetMs;
+    const ids = [...this.index.documents.values()].filter(doc => !doc.deletedAt).map(doc => doc.docId).sort();
+    for (let i = Math.max(0, from); i < ids.length; i += 3) {
+      if (Date.now() > deadline) { result.remaining = ids.length - i; result.next = i; break; }
+      await Promise.all(ids.slice(i, i + 3).map(async docId => {
+        try {
+          if (this.connections.get(this.connector(docId).source)?.status === "Not connected") return;
+          result.checked++;
+          await this.refreshLive(docId);
+        } catch { result.failed++; }
+      }));
+    }
+    await this.persist();
+    this.audit.append("access_refreshed", actor.id, { scope: "all", from, ...result });
+    return result;
+  }
+
   private async refreshLive(docId: string): Promise<SourceDocument | undefined> {
     const connector = this.connector(docId);
     const indexed = this.index.documents.get(docId);
@@ -1364,4 +1423,24 @@ function isPermissionSubset(next: SourcePermission, current: SourcePermission): 
   return (!next.public || current.public) &&
     next.users.every(user => current.public || current.users.includes(user)) &&
     next.groups.every(group => current.public || current.groups.includes(group));
+}
+
+/** What a read of access did. `next` is where to carry on from when the time budget ran out. */
+export interface AccessRefresh { checked: number; added: number; failed: number; remaining: number; next?: number }
+
+/** The permission with this person added as a viewer, or undefined when they are already listed everywhere. */
+function withViewer(permission: SourcePermission, user: User): SourcePermission | undefined {
+  const native = permission.native;
+  if (!native) return undefined;
+  const account = user.platformIdentities?.[native.source] ?? user.email;
+  let changed = false;
+  const add = (list: string[], value: string): string[] => { if (list.includes(value)) return list; changed = true; return [...list, value]; };
+  const addOpt = (list: string[] | undefined, value: string) => list && add(list, value);
+  const users = add(permission.users, user.email);
+  let next: NonNullable<SourcePermission["native"]>;
+  if (native.source === "slack") next = { ...native, members: add(native.members, account) };
+  else if (native.source === "jira") next = { ...native, projectViewers: add(native.projectViewers, account), ...(native.issueViewers ? { issueViewers: addOpt(native.issueViewers, account) } : {}) };
+  else if (native.source === "confluence") next = { ...native, spaceViewers: add(native.spaceViewers, account), ...(native.pageViewers ? { pageViewers: addOpt(native.pageViewers, account) } : {}) };
+  else next = { ...native, sharedUsers: add(native.sharedUsers, account) };
+  return changed ? { ...permission, users, native: next } : undefined;
 }

@@ -28,6 +28,8 @@ interface Auth0Options {
   orgId: string;
   fetch?: typeof fetch;
   now?: () => number;
+  /** Runs once, right after someone's first sign-in links to the entry the admin added. A failure never blocks the sign-in. */
+  onFirstSignIn?: (user: User) => Promise<void>;
 }
 
 export class Auth0TokenValidator {
@@ -78,6 +80,7 @@ export class Auth0TokenValidator {
     if (claimed) {
       if (claimed.orgId !== orgId) throw new Error("Unauthorized");
       this.refused.delete(sub);
+      try { await this.options.onFirstSignIn?.(claimed); } catch { /* The hourly pass still brings their access in. */ }
       return claimed;
     }
     const entry = await this.options.directory.byEmail(profile.email);
@@ -99,7 +102,7 @@ export class Auth0TokenValidator {
     return { email: typeof info.email === "string" && info.email ? info.email : undefined, verified: info.email_verified === true };
   }
 }
-export function createAuth0TokenValidatorFromEnv(directory: Directory): Auth0TokenValidator {
+export function createAuth0TokenValidatorFromEnv(directory: Directory, onFirstSignIn?: (user: User) => Promise<void>): Auth0TokenValidator {
   return new Auth0TokenValidator({ issuer: process.env.AUTH0_ISSUER ?? "", audience: process.env.AUTH0_AUDIENCE ?? "",
-    orgId: process.env.AUTH0_ORG_ID ?? "", directory });
+    orgId: process.env.AUTH0_ORG_ID ?? "", directory, onFirstSignIn });
 }

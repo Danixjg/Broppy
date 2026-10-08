@@ -1,4 +1,4 @@
-import type { User } from "@brain/types";
+import type { Source, User } from "@brain/types";
 
 interface SupabaseUserConfig {
   url: string;
@@ -15,6 +15,10 @@ function configured(): SupabaseUserConfig | undefined {
 }
 
 export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+export const SOURCES: readonly Source[] = ["slack", "jira", "confluence", "drive"];
+/** A person's account at each source, when the source uses their work email for it. */
+export const emailIdentities = (email: string): Record<Source, string> =>
+  Object.fromEntries(SOURCES.map(source => [source, normalizeEmail(email)])) as Record<Source, string>;
 export class DirectoryConflict extends Error { constructor() { super("Already in the directory"); } }
 
 export class UserDirectory {
@@ -103,10 +107,12 @@ export class UserDirectory {
 
   /** Adds a person the admin has onboarded. They have no Auth0 subject until they first sign in. */
   async add(person: { id: string; name: string; email: string; role: User["role"]; groups: string[] }): Promise<User> {
+    // Every source starts with the work email. Sources are asked about people by email, and a source with no account
+    // here would deny the person everything it holds. The admin can change one source if that account uses another email.
     const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users`, {
       method: "POST", headers: this.headers({ Prefer: "return=representation" }), signal: AbortSignal.timeout(5000),
       body: JSON.stringify({ org_id: this.orgId, user_id: person.id, name: person.name, email: normalizeEmail(person.email), role: person.role,
-        groups: person.groups, contractor: false, active: true, platform_identities: { slack: normalizeEmail(person.email) } })
+        groups: person.groups, contractor: false, active: true, platform_identities: emailIdentities(person.email) })
     });
     if (response.status === 409) throw new DirectoryConflict();
     if (!response.ok) throw new Error(`Supabase workspace users failed (${response.status})`);
@@ -117,6 +123,15 @@ export class UserDirectory {
   async update(userId: string, patch: { active?: boolean; role?: User["role"]; name?: string }): Promise<User | undefined> {
     const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?org_id=eq.${encodeURIComponent(this.orgId)}&user_id=eq.${encodeURIComponent(userId)}`, {
       method: "PATCH", headers: this.headers({ Prefer: "return=representation" }), signal: AbortSignal.timeout(5000), body: JSON.stringify(patch)
+    });
+    if (!response.ok) throw new Error(`Supabase workspace users failed (${response.status})`);
+    return this.rows(await response.json())[0];
+  }
+
+  /** Replaces the person's accounts at the sources. */
+  async setIdentities(userId: string, identities: Partial<Record<Source, string>>): Promise<User | undefined> {
+    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?org_id=eq.${encodeURIComponent(this.orgId)}&user_id=eq.${encodeURIComponent(userId)}`, {
+      method: "PATCH", headers: this.headers({ Prefer: "return=representation" }), signal: AbortSignal.timeout(5000), body: JSON.stringify({ platform_identities: identities })
     });
     if (!response.ok) throw new Error(`Supabase workspace users failed (${response.status})`);
     return this.rows(await response.json())[0];

@@ -232,6 +232,8 @@ export function auditSummary(entry) {
     case "person_added": return `Added a ${text(data.role)} to the people who can sign in`;
     case "person_invited": return "Sent a sign-in invitation again";
     case "person_removed": return "Removed a person's access";
+    case "person_identities_changed": return "Changed which account a person has at a source";
+    case "access_refreshed": return data.scope === "all" ? "Read the permissions of every item again at the source" : "Read one person's access to every item at the source";
     case "model_changed": return data.action === "removed" ? "Removed the organization's AI model" : `Set the organization's AI model to ${text(data.model)} (${text(data.provider)})`;
     case "request_denied": return `Refused ${text(data.method)} ${text(data.path)}`;
     default: {
