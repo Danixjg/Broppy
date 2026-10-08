@@ -199,7 +199,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const jiraAsUser = oauth ? new JiraAsUser(oauth) : undefined;
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
-  if (options.startOrchestrator === false) await brain.syncAll();
+  if (options.startOrchestrator === false) {
+    // A source that isn't connected yet, or is briefly down, is recorded on its own connection. It must not stop the
+    // whole API from starting: the admin connects sources from the running API, so refusing to start would lock them out.
+    await brain.syncAll().catch(error => {
+      const reasons = error instanceof AggregateError ? error.errors.map(e => e instanceof Error ? e.message : String(e)) : [String(error)];
+      console.warn(`Source synchronization incomplete at startup: ${reasons.join("; ")}`);
+    });
+  }
   if (options.startOrchestrator ?? true) orchestrator.start();
 
   const server = createServer(async (request, response) => {
