@@ -19,7 +19,7 @@ export class OrgModel {
   private cached?: { at: number; stored?: Stored; client?: ChatLlm };
 
   constructor(private readonly persistence: Persistence, private readonly transport?: typeof fetch,
-    private readonly now: () => number = Date.now) {}
+    private readonly now: () => number = Date.now, private readonly options: { customAddress?: boolean } = {}) {}
 
   private client(stored: Stored): ChatLlm {
     return new ChatLlm({ provider: stored.provider, apiKey: stored.apiKey, model: stored.model, baseUrl: stored.baseUrl,
@@ -60,6 +60,9 @@ export class OrgModel {
     if (input.baseUrl !== undefined && input.baseUrl !== null && input.baseUrl !== "" && typeof input.baseUrl !== "string") {
       throw new Error("Invalid address");
     }
+    if (this.options.customAddress === false && (provider === "openai_compatible" || (typeof input.baseUrl === "string" && input.baseUrl.trim()))) {
+      throw new Error(CUSTOM_ADDRESS_REFUSED);
+    }
     const given = typeof input.baseUrl === "string" && input.baseUrl.trim() ? publicHttpsBaseUrl(input.baseUrl.trim()) : undefined;
     if (provider === "openai_compatible" && !given) throw new Error("Invalid address");
     // Anthropic and OpenAI have fixed addresses; a custom one is only for compatible servers and gateways.
@@ -88,6 +91,8 @@ export class OrgModel {
     this.cached = { at: this.now() };
   }
 }
+
+export const CUSTOM_ADDRESS_REFUSED = "Custom model addresses are not available";
 
 /** The provider refused the settings (wrong key, model name or address) or could not be reached. */
 export class ModelCheckFailed extends Error {

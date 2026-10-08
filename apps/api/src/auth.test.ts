@@ -98,10 +98,10 @@ it("rejects directory organisation mismatch, and tells a removed person they wer
 describe("first sign-in of an admin-added person", () => {
   const invited = (): User => ({ id: "priya", name: "Priya", email: "priya@company.test", auth0Sub: "", groups: [], role: "member", orgId: "org_company_a", active: true });
   const priya = (claims: Record<string, unknown> = {}) => `Bearer ${token({ sub: "auth0|priya", ...claims })}`;
-  function withUserinfo(profile: Record<string, unknown> | number, users: User[]) {
+  function withUserinfo(profile: Record<string, unknown> | number, users: User[], onFirstSignIn?: (user: User) => Promise<void>) {
     const userinfo = vi.fn(async () => typeof profile === "number" ? new Response("{}", { status: profile }) : Response.json(profile));
     const fetcher = vi.fn(async (input: URL | RequestInfo) => String(input).endsWith("/userinfo") ? userinfo() : Response.json({ keys: [jwk] }));
-    const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: stubDirectory(users), now: () => now * 1000, fetch: fetcher as typeof fetch });
+    const validator = new Auth0TokenValidator({ issuer, audience, orgId: "org_company_a", directory: stubDirectory(users), now: () => now * 1000, fetch: fetcher as typeof fetch, onFirstSignIn });
     return { validator, userinfo };
   }
 
@@ -112,6 +112,15 @@ describe("first sign-in of an admin-added person", () => {
     expect(users[1].auth0Sub).toBe("auth0|priya");
     expect(await validator.validate(priya())).toMatchObject({ id: "priya" });
     expect(userinfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the first-sign-in step once, and a failure in it never blocks the sign-in", async () => {
+    const seen = vi.fn(async (_person: User) => { throw new Error("source down"); });
+    const { validator } = withUserinfo({ email: "priya@company.test", email_verified: true }, [user, invited()], seen);
+    expect(await validator.validate(priya())).toMatchObject({ id: "priya", auth0Sub: "auth0|priya" });
+    await validator.validate(priya());
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(seen.mock.calls[0][0]).toMatchObject({ id: "priya", auth0Sub: "auth0|priya" });
   });
 
   it("turns away an email the admin did not add, and remembers the refusal briefly", async () => {
@@ -145,5 +154,29 @@ describe("first sign-in of an admin-added person", () => {
       await expect(rejection).rejects.toThrow("Unauthorized");
       await expect(rejection).rejects.not.toBeInstanceOf(AccessDenied);
     }
+  });
+});
+
+describe("Auth0TokenValidator with several companies", () => {
+  const other: User = { ...user, id: "dana", auth0Sub: "auth0|dana", email: "dana@acme.test", orgId: "org_acme" };
+  function several() {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 }));
+    const directories: Record<string, ReturnType<typeof stubDirectory>> = { org_company_a: stubDirectory([user]), org_acme: stubDirectory([other]) };
+    return new Auth0TokenValidator({ issuer, audience, directoryFor: async orgId => directories[orgId], now: () => now * 1000, fetch: fetcher as typeof fetch });
+  }
+
+  it("looks each person up in the company named by their token, and nowhere else", async () => {
+    const validator = several();
+    expect(await validator.validate(`Bearer ${token({ sub: "auth0|dana", org_id: "org_acme" })}`)).toBe(other);
+    expect(await validator.validate(`Bearer ${token()}`)).toBe(user);
+    // Dana's subject under the other company's name, or a company that is not listed, finds no one.
+    await expect(validator.validate(`Bearer ${token({ sub: "auth0|dana", org_id: "org_company_a" })}`)).rejects.toThrow();
+    await expect(validator.validate(`Bearer ${token({ org_id: "org_unlisted" })}`)).rejects.toThrow("Unauthorized");
+  });
+
+  it("refuses a directory entry that belongs to a different company than the token", async () => {
+    const wrong = new Auth0TokenValidator({ issuer, audience, directoryFor: async () => stubDirectory([{ ...other, orgId: "org_other" }]),
+      now: () => now * 1000, fetch: (async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 })) as typeof fetch });
+    await expect(wrong.validate(`Bearer ${token({ sub: "auth0|dana", org_id: "org_acme" })}`)).rejects.toThrow("Unauthorized");
   });
 });

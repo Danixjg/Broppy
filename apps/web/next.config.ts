@@ -5,7 +5,9 @@ const config: NextConfig = {
       { source: "/login.html", destination: "/auth/login", permanent: false },
       { source: "/index.html", destination: "/workspace/index.html", permanent: false },
       { source: "/connectors.html", destination: "/workspace/connectors.html", permanent: false },
-      { source: "/people.html", destination: "/workspace/people.html", permanent: false }
+      { source: "/people.html", destination: "/workspace/people.html", permanent: false },
+      { source: "/setup.html", destination: "/workspace/setup.html", permanent: false },
+      { source: "/setup", destination: "/workspace/setup.html", permanent: false }
     ];
   }
 };

@@ -18,7 +18,8 @@ function fakeDirectory(initial: User[] = [admin]): UserDirectory & FakeDirectory
       const row: User = { ...person, auth0Sub: "", orgId: "org_a", active: true };
       rows.push(row); return row;
     }),
-    update: async (id: string, patch: Partial<User>) => { const row = rows.find(item => item.id === id); if (row) Object.assign(row, patch); return row; }
+    update: async (id: string, patch: Partial<User>) => { const row = rows.find(item => item.id === id); if (row) Object.assign(row, patch); return row; },
+    setIdentities: async (id: string, identities: User["platformIdentities"]) => { const row = rows.find(item => item.id === id); if (row) row.platformIdentities = identities; return row; }
   } as unknown as UserDirectory & FakeDirectory;
 }
 
@@ -70,6 +71,46 @@ describe("admin adds people", () => {
 
   it("does not resend to someone who already signed in", async () => {
     await expect(new People(fakeDirectory(), fakeManagement()).invite(admin, "maya")).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe("source accounts", () => {
+  const all = (email: string) => ({ slack: email, jira: email, confluence: email, drive: email });
+  const priya: User = { ...admin, id: "priya", name: "Priya", email: "priya@company.test", auth0Sub: "auth0|priya", role: "member", platformIdentities: all("priya@company.test") };
+
+  it("changes only the sources named, lowercases them, and puts the work email back for an empty value", async () => {
+    const directory = fakeDirectory([admin, priya]); const people = new People(directory);
+    const changed = await people.setIdentities("priya", { jira: " Priya.Nair@Contractor.test ", drive: "" });
+    expect(changed.person.identities).toEqual({ ...all("priya@company.test"), jira: "priya.nair@contractor.test" });
+    expect(directory.stored.find(row => row.id === "priya")?.platformIdentities?.slack).toBe("priya@company.test");
+  });
+
+  it("refuses unknown sources, bad emails, non-text values and an empty change", async () => {
+    const people = new People(fakeDirectory([admin, priya]));
+    await expect(people.setIdentities("priya", { teams: "a@b.test" })).rejects.toMatchObject({ status: 400 });
+    await expect(people.setIdentities("priya", { jira: "not an email" })).rejects.toMatchObject({ status: 400 });
+    await expect(people.setIdentities("priya", { jira: 5 })).rejects.toMatchObject({ status: 400 });
+    await expect(people.setIdentities("priya", {})).rejects.toMatchObject({ status: 400 });
+    await expect(people.setIdentities("priya", undefined)).rejects.toMatchObject({ status: 400 });
+    await expect(people.setIdentities("nobody", { jira: "a@b.test" })).rejects.toBeInstanceOf(PeopleError);
+  });
+
+  it("fills missing accounts with the work email and leaves existing ones alone", async () => {
+    const old: User = { ...priya, platformIdentities: { slack: "priya@company.test" } as User["platformIdentities"] };
+    const custom: User = { ...priya, id: "raj", email: "raj@company.test", platformIdentities: { ...all("raj@company.test"), jira: "raj@other.test" } };
+    const removed: User = { ...priya, id: "gone", email: "gone@company.test", active: false, platformIdentities: {} as User["platformIdentities"] };
+    const directory = fakeDirectory([admin, old, custom, removed]);
+    expect(await new People(directory).fillMissingIdentities()).toBe(2);
+    expect(directory.stored.find(row => row.id === "priya")?.platformIdentities).toEqual(all("priya@company.test"));
+    expect(directory.stored.find(row => row.id === "raj")?.platformIdentities?.jira).toBe("raj@other.test");
+    expect(directory.stored.find(row => row.id === "gone")?.platformIdentities).toEqual({});
+  });
+
+  it("completes the accounts of someone who just signed in, on the user object itself", async () => {
+    const signedIn: User = { ...priya, platformIdentities: { slack: "priya@company.test" } as User["platformIdentities"] };
+    const directory = fakeDirectory([admin, signedIn]);
+    await new People(directory).ensureIdentities(signedIn);
+    expect(signedIn.platformIdentities).toEqual(all("priya@company.test"));
   });
 });
 

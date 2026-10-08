@@ -404,3 +404,41 @@ describe("access mirrored from the source through the shared connection", () => 
     await expect(down.connector.checkAccess(user, "drive:file-1")).rejects.toBeInstanceOf(SourceAccessUnavailable);
   });
 });
+
+describe("accounts at the sources", () => {
+  const settings = (extra: Record<string, unknown> = {}) => ({ ids: ["C123"], baseUrl: "https://atlassian.example.test/", serviceAuthorization: "", userAuthorizations: {},
+    authorization: async () => "Bearer shared", ...extra });
+  const slackAnswer = (url: URL) => url.pathname.endsWith("users.lookupByEmail")
+    ? (url.searchParams.get("email") === "ravi@example.test" ? Response.json({ ok: true, user: { id: "U1" } }) : Response.json({ ok: false, error: "users_not_found" }))
+    : Response.json({ ok: true, channel: { is_private: true } });
+
+  it("tells whether Slack and Atlassian know an email, and says so when it cannot tell", async () => {
+    const slack = new LiveConnector("slack", settings() as never, [user], vi.fn(async (input: RequestInfo | URL) => slackAnswer(new URL(String(input)))) as unknown as typeof fetch, async () => undefined);
+    expect(await slack.lookupIdentity(" Ravi@Example.test ")).toBe("found");
+    expect(await slack.lookupIdentity("nobody@example.test")).toBe("not_found");
+    const down = new LiveConnector("slack", settings() as never, [user], vi.fn(async () => Response.json({ ok: false, error: "ratelimited" })) as unknown as typeof fetch, async () => undefined);
+    expect(await down.lookupIdentity("ravi@example.test")).toBe("unavailable");
+    const atlassian = (id: string | undefined) => new LiveConnector("jira", settings({ atlassianAccountId: async () => id }) as never, [user], vi.fn() as unknown as typeof fetch);
+    expect(await atlassian("acct-1").lookupIdentity("ravi@example.test")).toBe("found");
+    expect(await atlassian(undefined).lookupIdentity("ravi@example.test")).toBe("not_found");
+    const broken = new LiveConnector("jira", settings({ atlassianAccountId: async () => { throw new Error("boom"); } }) as never, [user], vi.fn() as unknown as typeof fetch);
+    expect(await broken.lookupIdentity("ravi@example.test")).toBe("unavailable");
+  });
+
+  it("reports an unconnected source and has no lookup for Drive", async () => {
+    const idle = new LiveConnector("slack", settings({ authorization: async () => undefined }) as never, [user], vi.fn() as unknown as typeof fetch);
+    expect(await idle.lookupIdentity("ravi@example.test")).toBe("not_connected");
+    const drive = new LiveConnector("drive", settings({ ids: ["file-1"] }) as never, [user], vi.fn() as unknown as typeof fetch);
+    expect(await drive.lookupIdentity("ravi@example.test")).toBe("not_checked");
+  });
+
+  it("lists a person under the account the admin set for that source, and under their email in users", async () => {
+    const contractor: User = { ...user, platformIdentities: { ...user.platformIdentities!, jira: "ravi@contractor.test" } };
+    const jira = new LiveConnector("jira", settings({ ids: ["PAY-101"], atlassianAccountId: async () => "acct-1" }) as never, [contractor],
+      vi.fn(async () => Response.json([{ accountId: "acct-1" }])) as unknown as typeof fetch);
+    jira.useSite({ baseUrl: "https://acme.atlassian.net", cloudId: "cloud-1" });
+    const permissions = await jira.fetchPermissions("jira:PAY-101");
+    expect(permissions?.users).toEqual(["ravi@example.test"]);
+    expect(permissions?.native).toMatchObject({ projectViewers: ["ravi@contractor.test"], issueViewers: ["ravi@contractor.test"] });
+  });
+});

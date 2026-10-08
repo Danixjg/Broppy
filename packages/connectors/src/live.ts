@@ -463,23 +463,46 @@ export class LiveConnector extends MockConnector {
   override async fetchPermissions(docId: string): Promise<SourcePermission | undefined> {
     const id = this.nativeId(docId);
     const allowed: string[] = [];
+    // The policy compares a person's account at this source, which is their work email unless the admin set another.
+    const accounts: string[] = [];
     for (let i = 0; i < this.users.length; i += CHECKS_AT_ONCE) {
       const batch = this.users.slice(i, i + CHECKS_AT_ONCE);
       const checks = await Promise.all(batch.map(user => this.access(user, docId)));
       const unavailable = checks.find(check => check.kind === "unavailable");
       if (unavailable?.kind === "unavailable") throw new SourceAccessUnavailable(this.source, unavailable.cause);
-      allowed.push(...batch.filter((_, index) => checks[index].kind === "allowed").map(user => user.email));
+      const passed = batch.filter((_, index) => checks[index].kind === "allowed");
+      allowed.push(...passed.map(user => user.email));
+      accounts.push(...passed.map(user => user.platformIdentities?.[this.source] ?? user.email));
     }
     const native: SourcePermission["native"] = this.source === "slack"
-      ? { source: "slack", channelId: id, visibility: "private", members: allowed }
+      ? { source: "slack", channelId: id, visibility: "private", members: accounts }
       : this.source === "jira"
-        ? { source: "jira", projectKey: id.split("-")[0], projectViewers: allowed, issueViewers: allowed }
+        ? { source: "jira", projectKey: id.split("-")[0], projectViewers: accounts, issueViewers: accounts }
         : this.source === "confluence"
-          ? { source: "confluence", spaceKey: id, spaceViewers: allowed, pageViewers: allowed }
-          : { source: "drive", fileId: id, owner: "", sharedUsers: allowed };
+          ? { source: "confluence", spaceKey: id, spaceViewers: accounts, pageViewers: accounts }
+          : { source: "drive", fileId: id, owner: "", sharedUsers: accounts };
     return { users: allowed, groups: [], public: false, native };
   }
   override getPermissions(docId: string): Promise<SourcePermission | undefined> { return this.fetchPermissions(docId); }
+  /**
+   * Whether the source knows this email, so a mismatch shows when someone is added and not as an answer that is
+   * quietly empty. Drive has no such lookup: a share names an email, and either it is the person's or it isn't.
+   */
+  async lookupIdentity(identity: string): Promise<"found" | "not_found" | "not_connected" | "unavailable" | "not_checked"> {
+    const email = identity.trim().toLowerCase();
+    if (this.source === "drive" || (this.source !== "slack" && !this.settings.atlassianAccountId)) return "not_checked";
+    try {
+      const authorization = this.settings.authorization ? await this.settings.authorization() : undefined;
+      if (!authorization) return "not_connected";
+      if (this.source === "slack") {
+        const found = optional(await this.get(`/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, authorization));
+        if (found.ok === true) return text(optional(found.user).id) ? "found" : "not_found";
+        return text(found.error) === "users_not_found" ? "not_found" : "unavailable";
+      }
+      return await this.settings.atlassianAccountId!(email) ? "found" : "not_found";
+    } catch { return "unavailable"; }
+  }
+
   override async checkAccess(user: User, docId: string): Promise<boolean> {
     const result = await this.access(user, docId);
     if (result.kind === "unavailable") throw new SourceAccessUnavailable(this.source, result.cause);

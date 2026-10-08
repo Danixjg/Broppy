@@ -7,9 +7,9 @@ export class Persistence {
     private readonly transport: typeof fetch = fetch) {
     if (!orgId || new URL(url).protocol !== "https:") throw new Error("Invalid persistence configuration");
   }
-  static fromEnv(): Persistence | undefined {
+  static fromEnv(orgId = process.env.AUTH0_ORG_ID ?? ""): Persistence | undefined {
     if (!process.env.SUPABASE_URL) return undefined;
-    return new Persistence(process.env.AUTH0_ORG_ID ?? "", process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY ?? "");
+    return new Persistence(orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY ?? "");
   }
   async request(path: string, method = "GET", data?: unknown): Promise<any> {
     const response = await this.transport(`${this.url.replace(/\/$/, "")}/rest/v1/${path}`, {

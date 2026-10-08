@@ -24,10 +24,15 @@ type Directory = Pick<UserDirectory, "bySub" | "byEmail" | "claim">;
 interface Auth0Options {
   issuer: string;
   audience: string;
-  directory: Directory;
-  orgId: string;
+  /** The one company's list of people, when this API serves a single company. */
+  directory?: Directory;
+  orgId?: string;
+  /** Several companies: the list of people for an organization, or nothing when it is not one of ours. */
+  directoryFor?: (orgId: string) => Promise<Directory | undefined>;
   fetch?: typeof fetch;
   now?: () => number;
+  /** Runs once, right after someone's first sign-in links to the entry the admin added. A failure never blocks the sign-in. */
+  onFirstSignIn?: (user: User) => Promise<void>;
 }
 
 export class Auth0TokenValidator {
@@ -36,7 +41,8 @@ export class Auth0TokenValidator {
   constructor(private readonly options: Auth0Options) {
     const issuer = new URL(options.issuer);
     if (issuer.protocol !== "https:" || issuer.username || issuer.password || issuer.search ||
-      issuer.hash || issuer.pathname !== "/" || options.issuer !== issuer.href || !options.audience || !options.orgId) {
+      issuer.hash || issuer.pathname !== "/" || options.issuer !== issuer.href || !options.audience ||
+      (!options.directoryFor && !(options.orgId && options.directory))) {
       throw new Error("Invalid Auth0 configuration");
     }
     this.jwks = createRemoteJWKSet(new URL(".well-known/jwks.json", issuer), {
@@ -52,14 +58,17 @@ export class Auth0TokenValidator {
         requiredClaims: ["sub", "exp", "org_id"],
         currentDate: new Date((this.options.now ?? Date.now)())
       });
-      if (payload.org_id !== this.options.orgId) throw new Error("Unauthorized");
-      const known = await this.options.directory.bySub(payload.sub!);
+      const orgId = payload.org_id;
+      if (typeof orgId !== "string") throw new Error("Unauthorized");
+      const directory = await this.directoryFor(orgId);
+      if (!directory) throw new Error("Unauthorized");
+      const known = await directory.bySub(payload.sub!);
       if (known) {
-        if (known.orgId !== payload.org_id) throw new Error("Unauthorized");
+        if (known.orgId !== orgId) throw new Error("Unauthorized");
         if (known.active !== true) throw deny("removed");
         return known;
       }
-      return await this.firstSignIn(payload.sub!, match[1], payload.org_id);
+      return await this.firstSignIn(payload.sub!, match[1], orgId, directory);
     } catch (error) { throw error instanceof AccessDenied ? error : new Error("Unauthorized"); }
   }
 
@@ -67,26 +76,34 @@ export class Auth0TokenValidator {
    * Someone with a valid organization token who has no directory entry yet: the entry the admin added for their verified
    * email becomes theirs. Anyone else is turned away, so being a member of the organization alone is not enough.
    */
-  private async firstSignIn(sub: string, token: string, orgId: unknown): Promise<User> {
+  private async directoryFor(orgId: string): Promise<Directory | undefined> {
+    if (this.options.directoryFor) return this.options.directoryFor(orgId);
+    return orgId === this.options.orgId ? this.options.directory : undefined;
+  }
+
+  private async firstSignIn(sub: string, token: string, orgId: string, directory: Directory): Promise<User> {
     const now = (this.options.now ?? Date.now)();
-    const remembered = this.refused.get(sub);
+    // Remembered per company, because one Auth0 account can belong to several.
+    const memory = `${orgId}/${sub}`;
+    const remembered = this.refused.get(memory);
     if (remembered && remembered.until > now) throw remembered.error;
     const profile = await this.profile(token);
     if (!profile.email) throw new Error("Unauthorized");
-    if (!profile.verified) throw this.refuse(sub, now, deny("email_unverified"));
-    const claimed = await this.options.directory.claim(profile.email, sub);
+    if (!profile.verified) throw this.refuse(memory, now, deny("email_unverified"));
+    const claimed = await directory.claim(profile.email, sub);
     if (claimed) {
       if (claimed.orgId !== orgId) throw new Error("Unauthorized");
-      this.refused.delete(sub);
+      this.refused.delete(memory);
+      try { await this.options.onFirstSignIn?.(claimed); } catch { /* The hourly pass still brings their access in. */ }
       return claimed;
     }
-    const entry = await this.options.directory.byEmail(profile.email);
-    throw this.refuse(sub, now, deny(!entry ? "not_added" : entry.active !== true ? "removed" : "email_in_use"));
+    const entry = await directory.byEmail(profile.email);
+    throw this.refuse(memory, now, deny(!entry ? "not_added" : entry.active !== true ? "removed" : "email_in_use"));
   }
 
-  private refuse(sub: string, now: number, error: AccessDenied): AccessDenied {
+  private refuse(memory: string, now: number, error: AccessDenied): AccessDenied {
     if (this.refused.size > 1000) this.refused.clear();
-    this.refused.set(sub, { until: now + REFUSAL_MEMORY_MS, error });
+    this.refused.set(memory, { until: now + REFUSAL_MEMORY_MS, error });
     return error;
   }
 
@@ -99,7 +116,7 @@ export class Auth0TokenValidator {
     return { email: typeof info.email === "string" && info.email ? info.email : undefined, verified: info.email_verified === true };
   }
 }
-export function createAuth0TokenValidatorFromEnv(directory: Directory): Auth0TokenValidator {
-  return new Auth0TokenValidator({ issuer: process.env.AUTH0_ISSUER ?? "", audience: process.env.AUTH0_AUDIENCE ?? "",
-    orgId: process.env.AUTH0_ORG_ID ?? "", directory });
+export function createAuth0TokenValidatorFromEnv(directoryFor: (orgId: string) => Promise<Directory | undefined>,
+  onFirstSignIn?: (user: User) => Promise<void>): Auth0TokenValidator {
+  return new Auth0TokenValidator({ issuer: process.env.AUTH0_ISSUER ?? "", audience: process.env.AUTH0_AUDIENCE ?? "", directoryFor, onFirstSignIn });
 }

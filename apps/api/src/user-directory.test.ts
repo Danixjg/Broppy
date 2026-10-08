@@ -25,7 +25,7 @@ it("adds a person with a lowercase email and the organization, and reports a tak
   await directoryWith(transport).add({ id: "priya", name: "Priya", email: " Priya@Company.test ", role: "member", groups: [] });
   const [url, init] = transport.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("https://project.example.test/rest/v1/workspace_users");
-  expect(JSON.parse(String(init.body))).toMatchObject({ org_id: "org_a", email: "priya@company.test", active: true, platform_identities: { slack: "priya@company.test" } });
+  expect(JSON.parse(String(init.body))).toMatchObject({ org_id: "org_a", email: "priya@company.test", active: true, platform_identities: { slack: "priya@company.test", jira: "priya@company.test", confluence: "priya@company.test", drive: "priya@company.test" } });
   await expect(directoryWith(vi.fn(async () => new Response("{}", { status: 409 }))).add({ id: "priya", name: "P", email: "p@company.test", role: "member", groups: [] })).rejects.toThrow("Already in the directory");
 });
 
@@ -36,4 +36,13 @@ it("claims an entry only while it is active and has no subject", async () => {
   expect(url).toContain("org_id=eq.org_a&email=eq.priya%40company.test&auth0_sub=is.null&active=eq.true");
   expect(init.method).toBe("PATCH");
   expect(await directoryWith(vi.fn(async () => Response.json([]))).claim("priya@company.test", "auth0|other")).toBeUndefined();
+});
+
+it("replaces a person's source accounts for that person only", async () => {
+  const transport = vi.fn(async () => Response.json([{ ...row, platform_identities: { slack: "p@x.test" } }]));
+  await directoryWith(transport).setIdentities("priya", { slack: "p@x.test" });
+  const [url, init] = transport.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toContain("org_id=eq.org_a&user_id=eq.priya");
+  expect(init.method).toBe("PATCH");
+  expect(JSON.parse(String(init.body))).toEqual({ platform_identities: { slack: "p@x.test" } });
 });

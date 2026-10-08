@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-011 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-012 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -7,7 +7,8 @@
 create extension if not exists vector;
 create extension if not exists supabase_vault with schema vault;
 
-create table public.organizations (org_id text primary key, name text not null);
+create table public.organizations (org_id text primary key, name text not null,
+  status text not null default 'active' check (status in ('active', 'suspended')), created_by_email text, created_at timestamptz not null default now());
 insert into public.organizations values ('demo-company-a', 'Company A');
 
 create table public.workspace_users (

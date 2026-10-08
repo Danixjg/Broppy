@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#172a3a">
+<title>Set up Broppy</title><link rel="stylesheet" href="./setup.css"><script type="module" src="./setup.js"></script></head>
+<body>
+<a class="skip" href="#main">Skip to setup</a>
+<header class="bar"><a class="logo" href="./index.html"><span class="logo-mark" aria-hidden="true">B</span>Broppy</a><a class="exit" href="./index.html">Go to my workspace</a></header>
+<main id="main" class="wrap">
+  <section id="gate" class="card gate" hidden>
+    <h1 id="gate-title">Setup is done by your company's admin</h1>
+    <p id="gate-text">Your Broppy admin connects the tools and adds the team. You can already start asking questions.</p>
+    <p><a class="btn primary" href="./index.html">Open the workspace</a></p>
+  </section>
+  <div id="setup" hidden>
+    <div class="intro">
+      <p class="eyebrow">Guided setup</p>
+      <h1>Let's get Broppy ready for your team</h1>
+      <p class="lead">A few short steps, all right here. Stop whenever you like and come back later: Broppy remembers where you got to.</p>
+      <div class="progress" role="progressbar" aria-labelledby="progress-label" aria-valuemin="0" aria-valuemax="5" id="progress"><span id="bar"></span></div>
+      <p id="progress-label" class="muted"></p>
+    </div>
+    <p id="notice" class="notice" role="status" hidden></p>
+    <ol class="steps">
+      <li class="step" data-step="connect">
+        <h2><button type="button" aria-expanded="false" aria-controls="panel-connect"><span class="badge">1</span><span class="title">Connect your tools</span><span class="chip"></span></button></h2>
+        <div class="panel" id="panel-connect" hidden>
+          <p>Choose the tools your team uses. Connect at least one to continue; you can add the others later.</p>
+          <div id="tools" class="tools"></div>
+          <p class="hint">Each tool opens its own page where you approve access, then brings you straight back here. Sign in there with the same work email you use for Broppy. Broppy never sees your password.</p>
+        </div>
+      </li>
+      <li class="step" data-step="read">
+        <h2><button type="button" aria-expanded="false" aria-controls="panel-read"><span class="badge">2</span><span class="title">Choose what Broppy reads</span><span class="chip"></span></button></h2>
+        <div class="panel" id="panel-read" hidden>
+          <p>For each connected tool, decide how much Broppy should read. Everyone still only sees what they are already allowed to open.</p>
+          <div id="reads" class="reads"></div>
+          <p id="reads-empty" class="muted">Connect a tool in step 1 first.</p>
+        </div>
+      </li>
+      <li class="step" data-step="team">
+        <h2><button type="button" aria-expanded="false" aria-controls="panel-team"><span class="badge">3</span><span class="title">Add your team</span><span class="chip"></span></button></h2>
+        <div class="panel" id="panel-team" hidden>
+          <p>Type or paste your colleagues' work emails. Each person gets an invitation and signs in with that email.</p>
+          <form id="team-form" class="form">
+            <label for="emails">Work emails <span class="muted">(one per line, or separated by commas)</span></label>
+            <textarea id="emails" rows="5" spellcheck="false" autocomplete="off" placeholder="priya@yourcompany.com&#10;raj@yourcompany.com"></textarea>
+            <label for="role">What can they do?</label>
+            <select id="role"><option value="member">Ask questions (most people)</option><option value="admin">Manage Broppy as well (admin)</option><option value="compliance">Review the activity log (compliance)</option></select>
+            <div class="row"><button class="btn primary" type="submit" id="team-submit">Send invitations</button><button class="btn" type="button" id="team-skip">Skip for now</button></div>
+          </form>
+          <ul id="team-results" class="results" aria-live="polite"></ul>
+          <h3 id="people-title" hidden>On your team</h3>
+          <ul id="people" class="people"></ul>
+        </div>
+      </li>
+      <li class="step" data-step="ai">
+        <h2><button type="button" aria-expanded="false" aria-controls="panel-ai"><span class="badge">4</span><span class="title">Pick your AI</span><span class="chip"></span></button></h2>
+        <div class="panel" id="panel-ai" hidden>
+          <p>Broppy writes answers with an AI model. You can leave this as it is, or connect your company's own AI account.</p>
+          <p id="ai-status" class="muted" role="status"></p>
+          <div class="choices">
+            <button type="button" class="choice" id="ai-default"><strong>Use Broppy's built-in assistant</strong><span>Nothing to set up. You can change this later.</span></button>
+            <button type="button" class="choice" id="ai-own" aria-expanded="false" aria-controls="ai-form"><strong>Use my company's AI account</strong><span>For teams that already have an account with an AI provider.</span></button>
+          </div>
+          <form id="ai-form" class="form" hidden>
+            <label for="ai-provider">AI provider</label>
+            <select id="ai-provider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="openai_compatible">Another provider</option></select>
+            <label for="ai-model" id="ai-model-label">Model</label>
+            <select id="ai-model-choice"></select>
+            <input id="ai-model" maxlength="200" autocomplete="off" placeholder="The model name from your AI account" hidden>
+            <div id="ai-url-field" hidden><label for="ai-url">Address of the provider</label><input id="ai-url" type="url" autocomplete="off" placeholder="https://"></div>
+            <label for="ai-key">Access key <span class="muted">(like a password for your AI account)</span></label>
+            <input id="ai-key" type="password" autocomplete="off">
+            <p class="hint">Your key is stored encrypted and is never shown again. Broppy tries it once before saving.</p>
+            <div class="row"><button class="btn primary" type="submit" id="ai-submit">Connect and test</button></div>
+          </form>
+        </div>
+      </li>
+      <li class="step" data-step="ready">
+        <h2><button type="button" aria-expanded="false" aria-controls="panel-ready"><span class="badge">5</span><span class="title">You're ready</span><span class="chip"></span></button></h2>
+        <div class="panel" id="panel-ready" hidden>
+          <ul id="summary" class="summary"></ul>
+          <p><a class="btn primary" href="./index.html" id="open-workspace">Open my workspace</a></p>
+          <h3>Try asking</h3>
+          <div id="questions" class="questions"></div>
+        </div>
+      </li>
+    </ol>
+  </div>
+</main>
+</body></html>

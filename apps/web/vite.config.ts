@@ -17,6 +17,7 @@ export default defineConfig({
         workspace: path.resolve(import.meta.dirname, "index.html"),
         connectors: path.resolve(import.meta.dirname, "connectors.html"),
         people: path.resolve(import.meta.dirname, "people.html"),
+        setup: path.resolve(import.meta.dirname, "setup.html"),
       },
     },
   },

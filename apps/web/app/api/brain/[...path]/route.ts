@@ -1,4 +1,5 @@
 import { auth0 } from "../../../../lib/auth0";
+import { signupMode } from "../../../../lib/company";
 import { browserOrigin, demoApiUrl, wantsDemo } from "../../../../lib/demo";
 import type { NextRequest } from "next/server";
 
@@ -61,7 +62,8 @@ async function forward(request: NextRequest, context: Context) {
   if (!session && wantsDemo(request)) return forwardDemo(request, context);
   if (!session) return Response.json(signedOut, { status: 401 });
   if (crossOrigin(request)) return Response.json({ error: "Forbidden" }, { status: 403 });
-  if (!process.env.AUTH0_AUDIENCE || !process.env.AUTH0_ORG_ID) {
+  // The company is part of the signed-in session (its token names it), so only the audience has to be set here.
+  if (!process.env.AUTH0_AUDIENCE || (!process.env.AUTH0_ORG_ID && signupMode() === "off")) {
     return Response.json({ error: "Workspace API audience and organization are not configured" }, { status: 503 });
   }
   const outbound = await outgoing(request, context);

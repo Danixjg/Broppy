@@ -1,6 +1,6 @@
-import type { User } from "@brain/types";
+import type { Source, User } from "@brain/types";
 import type { Auth0Management } from "./auth0-management.js";
-import { DirectoryConflict, normalizeEmail, type UserDirectory } from "./user-directory.js";
+import { DirectoryConflict, emailIdentities, normalizeEmail, SOURCES, type UserDirectory } from "./user-directory.js";
 
 export class PeopleError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -17,6 +17,8 @@ export interface Person {
   groups: string[];
   /** invited: added but not signed in yet. active: signed in. removed: access withdrawn. */
   status: "invited" | "active" | "removed";
+  /** The person's account at each source: normally their work email. A source with none shows them nothing. */
+  identities: Partial<Record<Source, string>>;
 }
 
 export interface PersonResult { person: Person; auth0: Auth0Outcome; auth0Error?: string }
@@ -25,7 +27,7 @@ const EMAIL = /^[^\s@<>"',;:()[\]\\]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-
 const ROLES: User["role"][] = ["member", "admin", "compliance"];
 
 const view = (user: User): Person => ({ id: user.id, name: user.name, email: user.email, role: user.role, groups: user.groups,
-  status: user.active !== true ? "removed" : user.auth0Sub ? "active" : "invited" });
+  status: user.active !== true ? "removed" : user.auth0Sub ? "active" : "invited", identities: { ...user.platformIdentities } });
 
 /**
  * The admin's list of who may use Broppy. Adding an email creates its directory entry and asks Auth0 to invite it to the
@@ -93,6 +95,50 @@ export class People {
     } catch (error) {
       return { person: view(removed), auth0: "failed", auth0Error: message(error) };
     }
+  }
+
+  /**
+   * Sets the person's account at one or more sources, for people whose account there uses another email. An empty value
+   * puts the work email back. Only the sources named change.
+   */
+  async setIdentities(id: string, input: unknown): Promise<{ person: Person; user: User }> {
+    const user = await this.find(id);
+    if (user.active !== true) throw new PeopleError(409, "This person was removed.");
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new PeopleError(400, "Send the sources to change.");
+    const next: Partial<Record<Source, string>> = { ...user.platformIdentities };
+    let changed = 0;
+    for (const [source, value] of Object.entries(input)) {
+      if (!SOURCES.includes(source as Source)) throw new PeopleError(400, `Unknown source: ${source.slice(0, 20)}.`);
+      if (typeof value !== "string") throw new PeopleError(400, "Each account must be an email address.");
+      const identity = value.trim() ? normalizeEmail(value) : user.email;
+      if (!EMAIL.test(identity) || identity.length > 254) throw new PeopleError(400, `Enter a valid email for ${source}.`);
+      next[source as Source] = identity; changed++;
+    }
+    if (!changed) throw new PeopleError(400, "Send the sources to change.");
+    const updated = await this.directory.setIdentities(user.id, next);
+    if (!updated) throw new PeopleError(404, "Not found");
+    return { person: view(updated), user: updated };
+  }
+
+  /** Gives every active person the work email for any source they have no account for. Returns how many people changed. */
+  async fillMissingIdentities(): Promise<number> {
+    let filled = 0;
+    for (const user of await this.directory.list()) {
+      if (user.active !== true) continue;
+      const missing = SOURCES.filter(source => !user.platformIdentities?.[source]);
+      if (!missing.length) continue;
+      const next = { ...user.platformIdentities, ...Object.fromEntries(missing.map(source => [source, emailIdentities(user.email)[source]])) };
+      if (await this.directory.setIdentities(user.id, next)) filled++;
+    }
+    return filled;
+  }
+
+  /** The same fill for one person who just signed in, so their first answers already count their accounts. */
+  async ensureIdentities(user: User): Promise<void> {
+    const missing = SOURCES.filter(source => !user.platformIdentities?.[source]);
+    if (!missing.length || user.active !== true) return;
+    const next = { ...user.platformIdentities, ...Object.fromEntries(missing.map(source => [source, emailIdentities(user.email)[source]])) } as User["platformIdentities"];
+    if (await this.directory.setIdentities(user.id, next!)) user.platformIdentities = next;
   }
 
   private async find(id: string): Promise<User> {
