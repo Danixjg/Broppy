@@ -15,6 +15,7 @@ RUN corepack enable
 # Install only the API, its workspace packages and the root tools (tsx) from the lockfile.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
+COPY apps/slack/package.json apps/slack/
 COPY apps/web/package.json apps/web/
 COPY packages/audit/package.json packages/audit/
 COPY packages/connectors/package.json packages/connectors/
@@ -22,14 +23,16 @@ COPY packages/fga-adapter/package.json packages/fga-adapter/
 COPY packages/retrieval/package.json packages/retrieval/
 COPY packages/rust-core/package.json packages/rust-core/
 COPY packages/types/package.json packages/types/
-RUN pnpm install --frozen-lockfile --filter internal-brain --filter "@brain/api..."
+RUN pnpm install --frozen-lockfile --filter internal-brain --filter "@brain/api..." --filter "@brain/slack..."
 
 # Only what the API runs. Nothing from infra/ (where the server keeps sso.env and the audit key) enters the image.
 COPY tsconfig.json ./
 COPY data/mock data/mock
+COPY data/generated data/generated
 COPY packages packages
 COPY --from=rust-core /build/target/release/libbrain_core.so packages/rust-core/brain-core.node
 COPY apps/api apps/api
+COPY apps/slack/src apps/slack/src
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 # The model usage counts live here, on a volume; a new volume takes this folder's owner.
 RUN mkdir -p /data && chown node:node /data
