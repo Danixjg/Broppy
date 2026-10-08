@@ -22,54 +22,54 @@ it("binds single-use OAuth state to an active org admin and stores tokens only i
   const state = url.searchParams.get("state")!;
   expect(await oauth.complete("drive", state, "code", async () => user)).toEqual(user);
   expect(request).toHaveBeenCalledWith("rpc/store_source_token", "POST", expect.objectContaining({ organization: "org_a", provider: "drive" }));
-  expect(await oauth.authorization("drive", "other")).toBeUndefined();
-  expect(await oauth.authorization("drive", user.id)).toBe("Bearer private-token");
+  expect(await oauth.authorization("drive")).toBe("Bearer private-token");
   await expect(oauth.complete("drive", state, "code", async () => user)).rejects.toThrow("Invalid OAuth state");
   await expect(oauth.begin("drive", { ...user, orgId: "other" })).rejects.toThrow("Forbidden");
   const newState = new URL(await oauth.begin("drive", user)).searchParams.get("state")!;
   await expect(oauth.complete("drive", newState, "code", async () => ({ ...user, active: false }))).rejects.toThrow("Forbidden");
 });
 
-it("lets any active user connect their own account, keeps it separate from the org connection, and purges it with the source", async () => {
-  const store = new Map<string, any>();
-  const request = flows(async (path: string, _method: string, data: any) => {
-    if (path === "rpc/store_user_source_token") store.set(`${data.person}/${data.provider}`, data.token);
-    if (path === "rpc/read_user_source_token") return store.get(`${data.person}/${data.provider}`) ?? null;
-    if (path === "rpc/remove_user_source_tokens") for (const key of [...store.keys()]) if (key.endsWith(`/${data.provider}`) && (!data.person || key.startsWith(`${data.person}/`))) store.delete(key);
-    if (path === "rpc/list_user_source_connections") return [...store.keys()].filter(key => key.startsWith(`${data.person}/`)).map(key => ({ source: key.split("/")[1] }));
-    return undefined;
-  });
-  const fetcher = vi.fn(async (url: RequestInfo | URL) => String(url).includes("accessible-resources") ? Response.json([{ id: "cloud-1", url: "https://acme.atlassian.net" }]) :
-    String(url).includes("token") ? Response.json({ access_token: "ravi-token", expires_in: 3600 }) : Response.json({ email: "ravi@example.test" }));
-  const oauth = new SourceOAuth({ jira: { clientId: "client", clientSecret: "secret", scopes: ["read:me"] } }, "https://api.example.test", { orgId: "org_a", request } as unknown as Persistence, fetcher);
-  const ravi: User = { ...user, id: "ravi", auth0Sub: "auth0|ravi", email: "ravi@example.test", role: "member", platformIdentities: { ...user.platformIdentities!, jira: "ravi@example.test" } };
-  await expect(oauth.begin("jira", ravi)).rejects.toThrow("Forbidden");
-  const url = new URL(await oauth.begin("jira", ravi, "user"));
-  expect(url.searchParams.get("redirect_uri")).toBe("https://api.example.test/v1/connections/jira/callback");
-  const state = url.searchParams.get("state")!;
-  // A user flow cannot be completed through the admin callback, and the identity must match the signed-in person.
-  await expect(oauth.complete("jira", state, "code", async () => ravi)).rejects.toThrow("Invalid OAuth state");
-  const second = new URL(await oauth.begin("jira", ravi, "user")).searchParams.get("state")!;
-  await expect(oauth.complete("jira", second, "code", async () => ({ ...ravi, platformIdentities: { ...ravi.platformIdentities!, jira: "other@example.test" } }), "user")).rejects.toThrow("could not be matched");
-  const third = new URL(await oauth.begin("jira", ravi, "user")).searchParams.get("state")!;
-  await oauth.complete("jira", third, "code", async () => ravi, "user");
-  expect(request).toHaveBeenCalledWith("rpc/store_user_source_token", "POST", expect.objectContaining({ person: "ravi", provider: "jira" }));
-  expect(request).not.toHaveBeenCalledWith("rpc/store_source_token", expect.anything(), expect.anything());
-  expect(await oauth.authorizationFor("ravi", "jira")).toBe("Bearer ravi-token");
-  expect(await oauth.authorizationFor("maya", "jira")).toBeUndefined();
-  expect(await oauth.authorization("jira", "ravi")).toBe("Bearer ravi-token");
-  expect(await oauth.authorization("jira")).toBeUndefined();
-  expect(await oauth.connectedSources("ravi")).toEqual(["jira"]);
-  await oauth.remove("jira");
-  expect(await oauth.authorizationFor("ravi", "jira")).toBeUndefined();
-});
-
-it("finds the Atlassian site at sign-in, stores it with the org token, and requires people to reach the same site", async () => {
+it("lets only the admin connect, serves everyone from that one connection, and clears leftover personal connections", async () => {
   const store = new Map<string, any>();
   const request = flows(async (path: string, _method: string, data: any) => {
     if (path === "rpc/store_source_token") store.set(`org/${data.provider}`, data.token);
     if (path === "rpc/read_source_token") return store.get(`org/${data.provider}`) ?? null;
-    if (path === "rpc/store_user_source_token") store.set(`${data.person}/${data.provider}`, data.token);
+    if (path === "rpc/remove_source_token") store.delete(`org/${data.provider}`);
+    return undefined;
+  });
+  const fetcher = vi.fn(async (url: RequestInfo | URL) => String(url).includes("accessible-resources") ? Response.json([{ id: "cloud-1", url: "https://acme.atlassian.net" }]) :
+    String(url).includes("token") ? Response.json({ access_token: "admin-token", expires_in: 3600 }) : Response.json({ email: user.email }));
+  const oauth = new SourceOAuth({ jira: { clientId: "client", clientSecret: "secret", scopes: ["read:me"] } }, "https://api.example.test", { orgId: "org_a", request } as unknown as Persistence, fetcher);
+  const ravi: User = { ...user, id: "ravi", auth0Sub: "auth0|ravi", email: "ravi@example.test", role: "member" };
+  await expect(oauth.begin("jira", ravi)).rejects.toThrow("Forbidden");
+  const url = new URL(await oauth.begin("jira", user));
+  expect(url.searchParams.get("redirect_uri")).toBe("https://api.example.test/v1/admin/connections/jira/callback");
+  await oauth.complete("jira", url.searchParams.get("state")!, "code", async () => user);
+  expect(request).toHaveBeenCalledWith("rpc/remove_user_source_tokens", "POST", expect.objectContaining({ person: null, provider: "jira" }));
+  expect(await oauth.authorization("jira")).toBe("Bearer admin-token");
+  await oauth.remove("jira");
+  expect(await oauth.authorization("jira")).toBeUndefined();
+});
+
+it("stores the admin's Slack grant from the combined install as the shared connection, and refuses anyone else", async () => {
+  const store = new Map<string, any>();
+  const request = flows(async (path: string, _method: string, data: any) => {
+    if (path === "rpc/store_source_token") store.set(`org/${data.provider}`, data.token);
+    if (path === "rpc/read_source_token") return store.get(`org/${data.provider}`) ?? null;
+    return undefined;
+  });
+  const oauth = new SourceOAuth({ slack: { clientId: "client", clientSecret: "secret", scopes: ["channels:read"] } }, "https://api.example.test", { orgId: "org_a", request } as unknown as Persistence);
+  await expect(oauth.storeGrant("slack", { ...user, role: "member" }, { access_token: "xoxp-1" })).rejects.toThrow("Forbidden");
+  await oauth.storeGrant("slack", user, { access_token: "xoxp-1", scope: "channels:read,users:read" });
+  expect(await oauth.authorization("slack")).toBe("Bearer xoxp-1");
+  expect(store.get("org/slack")).toMatchObject({ userId: "maya", scopes: ["channels:read", "users:read"] });
+});
+
+it("finds the Atlassian site at sign-in, stores it with the org token", async () => {
+  const store = new Map<string, any>();
+  const request = flows(async (path: string, _method: string, data: any) => {
+    if (path === "rpc/store_source_token") store.set(`org/${data.provider}`, data.token);
+    if (path === "rpc/read_source_token") return store.get(`org/${data.provider}`) ?? null;
     return undefined;
   });
   let sites: unknown[] = [{ id: "cloud-1", url: "https://acme.atlassian.net", name: "Acme" }];
@@ -87,14 +87,7 @@ it("finds the Atlassian site at sign-in, stores it with the org token, and requi
   expect(await oauth.orgSite("jira")).toEqual({ baseUrl: "https://acme.atlassian.net", cloudId: "cloud-1" });
   expect(store.get("org/jira").site).toEqual({ baseUrl: "https://acme.atlassian.net", cloudId: "cloud-1" });
 
-  // A person who cannot reach the connected site cannot connect their own account.
-  sites = [{ id: "cloud-9", url: "https://other.atlassian.net", name: "Other" }];
-  const own = new URL(await oauth.begin("jira", user, "user")).searchParams.get("state")!;
-  await expect(oauth.complete("jira", own, "code", async () => user, "user")).rejects.toThrow("no access to the connected Atlassian site");
   sites = [{ id: "cloud-1", url: "https://acme.atlassian.net", name: "Acme" }, { id: "cloud-9", url: "https://other.atlassian.net", name: "Other" }];
-  const reach = new URL(await oauth.begin("jira", user, "user")).searchParams.get("state")!;
-  await oauth.complete("jira", reach, "code", async () => user, "user");
-
   // Several sites and no pinned site: the admin must choose in configuration.
   const fresh = new SourceOAuth(config, "https://api.example.test", { orgId: "org_a", request: flows() } as unknown as Persistence, fetcher);
   const next = new URL(await fresh.begin("jira", user)).searchParams.get("state")!;
@@ -107,27 +100,27 @@ it("finds the Atlassian site at sign-in, stores it with the org token, and requi
 it("keeps sign-in state in shared storage so a callback can reach a different instance, and uses a token another instance already refreshed", async () => {
   const store = new Map<string, any>();
   const shared = flows(async (path, _method, data) => {
-    if (path === "rpc/store_user_source_token") store.set(data.person, data.token);
-    if (path === "rpc/read_user_source_token") return store.get(data.person) ?? null;
+    if (path === "rpc/store_source_token") store.set("org", data.token);
+    if (path === "rpc/read_source_token") return store.get("org") ?? null;
     return undefined;
   });
   const fetcher = vi.fn(async (url: RequestInfo | URL) => String(url).includes("token") ? Response.json({ access_token: "first", refresh_token: "r1", expires_in: 3600, scope: "openid email" }) : Response.json({ email: user.email }));
   const persistence = { orgId: "org_a", request: shared } as unknown as Persistence;
   const config = { drive: { clientId: "client", clientSecret: "secret", scopes: ["openid", "email"] } };
   const one = new SourceOAuth(config, "https://api.example.test", persistence, fetcher), two = new SourceOAuth(config, "https://api.example.test", persistence, fetcher);
-  const state = new URL(await one.begin("drive", user, "user")).searchParams.get("state")!;
+  const state = new URL(await one.begin("drive", user)).searchParams.get("state")!;
   // The state is never stored in the clear, and the other instance can finish the flow exactly once.
   expect(JSON.stringify(shared.mock.calls)).not.toContain(state);
-  await two.complete("drive", state, "code", async () => user, "user");
-  await expect(one.complete("drive", state, "code", async () => user, "user")).rejects.toThrow("Invalid OAuth state");
-  expect(store.get(user.id).scopes).toEqual(["openid", "email"]);
+  await two.complete("drive", state, "code", async () => user);
+  await expect(one.complete("drive", state, "code", async () => user)).rejects.toThrow("Invalid OAuth state");
+  expect(store.get("org").scopes).toEqual(["openid", "email"]);
 
   // Instance one reads an expired token; by the time it would refresh, instance two has stored a rotated one, so no refresh request is made.
-  const rotated = { ...store.get(user.id), access_token: "rotated", refresh_token: "r2", expires_at: Date.now() + 3_600_000 };
-  const expired = { ...store.get(user.id), access_token: "expired", expires_at: Date.now() - 1000 };
+  const rotated = { ...store.get("org"), access_token: "rotated", refresh_token: "r2", expires_at: Date.now() + 3_600_000 };
+  const expired = { ...store.get("org"), access_token: "expired", expires_at: Date.now() - 1000 };
   let reads = 0;
-  const stale = new SourceOAuth(config, "https://api.example.test", { orgId: "org_a", request: flows(async path => path === "rpc/read_user_source_token" ? (reads++ === 0 ? expired : rotated) : undefined) } as unknown as Persistence, fetcher);
+  const stale = new SourceOAuth(config, "https://api.example.test", { orgId: "org_a", request: flows(async path => path === "rpc/read_source_token" ? (reads++ === 0 ? expired : rotated) : undefined) } as unknown as Persistence, fetcher);
   const calls = fetcher.mock.calls.length;
-  expect(await stale.authorizationFor(user.id, "drive")).toBe("Bearer rotated");
+  expect(await stale.authorization("drive")).toBe("Bearer rotated");
   expect(fetcher.mock.calls.length).toBe(calls);
 });

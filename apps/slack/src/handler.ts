@@ -183,7 +183,7 @@ async function interactions(deps: Deps, payload: any): Promise<SlackResponse> {
     const current = await deps.store.getProposal(proposal.id);
     if (current?.status === "pending" && /choose Link existing/.test(line)) await showProposal(deps, current);
   } catch (error) {
-    if (error instanceof NotLinkedError) { await deps.slack.respond(payload.response_url, ephemeral("Your Slack account must map to an active Broppy user. No shared Jira account is used.")); return ok(); }
+    if (error instanceof NotLinkedError) { await deps.slack.respond(payload.response_url, ephemeral("Your Slack account must map to an active Broppy user.")); return ok(); }
     throw error;
   }
   return ok();

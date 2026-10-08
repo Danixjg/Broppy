@@ -39,6 +39,8 @@ export type LiveSettings = {
   cloudId?: string;
   discover?: boolean;
   authorization?: AuthorizationProvider;
+  /** Atlassian account ID for an email, so access can be checked for someone who has not connected anything themselves. */
+  atlassianAccountId?: (email: string) => Promise<string | undefined>;
   linkOrigins?: LinkOrigins;
 };
 
@@ -147,19 +149,20 @@ export class LiveConnector extends MockConnector {
       ...(["jira", "confluence"].includes(this.source) ? { jira: [this.origin], confluence: [this.origin] } : {}) };
   }
 
-  private async get(path: string, authorization: string, attempt = 0): Promise<unknown | undefined> {
+  private async get(path: string, authorization: string, attempt = 0, init?: { method: "POST"; body: unknown }): Promise<unknown | undefined> {
     if (!this.origin) throw new Error(`${this.source} site is not connected`);
     const requestOrigin = this.settings.cloudId ? `https://api.atlassian.com/ex/${this.source}/${encodeURIComponent(this.settings.cloudId)}` : this.origin;
     let response: Response;
     try {
       response = await this.transport(`${requestOrigin}${path}`, {
-        headers: { authorization, accept: "application/json" },
+        headers: { authorization, accept: "application/json", ...(init ? { "content-type": "application/json" } : {}) },
+        ...(init ? { method: init.method, body: JSON.stringify(init.body) } : {}),
         redirect: "error", signal: AbortSignal.timeout(5000)
       });
     } catch (error) {
       if (transient(error) && attempt < 3) {
         await this.sleep(250 * 2 ** attempt);
-        return this.get(path, authorization, attempt + 1);
+        return this.get(path, authorization, attempt + 1, init);
       }
       throw error;
     }
@@ -167,13 +170,13 @@ export class LiveConnector extends MockConnector {
       const seconds = Number(response.headers.get("retry-after") ?? 2 ** attempt);
       if (!Number.isFinite(seconds) || seconds > 60) throw new Error("Source rate limited; import will resume on retry");
       await this.sleep(Math.max(1, seconds) * 1000);
-      return this.get(path, authorization, attempt + 1);
+      return this.get(path, authorization, attempt + 1, init);
     }
     if (response.status === 401) throw new CredentialRejected(this.source);
     if (response.status === 403) {
       // Google reports a rate limit as a 403 (userRateLimitExceeded and similar). That is not a permission answer.
       if (/rate.?limit/i.test(await response.text())) {
-        if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1); }
+        if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1, init); }
         throw new Error(`${this.source} rate limited; import will resume on retry`);
       }
       return undefined;
@@ -185,7 +188,7 @@ export class LiveConnector extends MockConnector {
     const body = await response.json();
     // Slack can report a rate limit inside a 200 response.
     if (this.source === "slack" && body && typeof body === "object" && (body as { error?: unknown }).error === "ratelimited") {
-      if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1); }
+      if (attempt < 3) { await this.sleep(1000 * 2 ** attempt); return this.get(path, authorization, attempt + 1, init); }
       throw new Error("slack rate limited; import will resume on retry");
     }
     return body;
@@ -487,12 +490,89 @@ export class LiveConnector extends MockConnector {
     const id = this.nativeId(docId);
     if (!user.platformIdentities?.[this.source] || user.active === false) return { kind: "denied" };
     try {
-      const authorization = await this.settings.authorization?.(user.id) ?? this.settings.userAuthorizations[user.id];
+      // With a shared connection nobody but the admin has a token of their own, so the source is asked who may see the item.
+      if (this.settings.authorization) {
+        const authorization = await this.settings.authorization();
+        if (!authorization) return { kind: "denied" };
+        return { kind: await this.canView(user, id, authorization) ? "allowed" : "denied" };
+      }
+      const authorization = this.settings.userAuthorizations[user.id];
       if (!authorization) return { kind: "denied" };
       return { kind: await this.read(id, authorization) ? "allowed" : "denied" };
     } catch (cause) {
       return { kind: "unavailable", cause };
     }
+  }
+
+  private readonly lists = new Map<string, { at: number; value: unknown }>();
+  /** A source's answer reused for a short while, so checking many people against one item asks the source once. */
+  private async cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const hit = this.lists.get(key);
+    if (hit && Date.now() - hit.at < 30_000) return hit.value as T;
+    const value = await load();
+    this.lists.set(key, { at: Date.now(), value });
+    if (this.lists.size > 500) this.lists.delete(this.lists.keys().next().value!);
+    return value;
+  }
+
+  /** Whether this person may see the item at the source, read with the shared connection. Anything unclear is a no. */
+  private async canView(user: User, id: string, authorization: string): Promise<boolean> {
+    const email = user.platformIdentities![this.source]!.trim().toLowerCase();
+    const escaped = encodeURIComponent(id);
+    if (this.source === "slack") {
+      const found = optional(await this.get(`/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, authorization));
+      if (found.ok !== true) {
+        if (text(found.error) === "users_not_found") return false;
+        if (slackAuthErrors.has(text(found.error))) throw new CredentialRejected("slack");
+        throw new Error(`Slack user lookup failed (${text(found.error) || "unknown"})`);
+      }
+      const slackId = text(optional(found.user).id);
+      if (!slackId) return false;
+      const info = optional(await this.get(`/api/conversations.info?channel=${escaped}`, authorization));
+      if (info.ok !== true) {
+        if (slackAuthErrors.has(text(info.error))) throw new CredentialRejected("slack");
+        if (slackGone.has(text(info.error))) return false;
+        throw new Error(`Slack channel lookup failed (${text(info.error) || "unknown"})`);
+      }
+      if (optional(info.channel).is_private !== true) return true;
+      const members = await this.cached(`slack-members:${id}`, async () => {
+        const ids = new Set<string>(); let cursor = "";
+        do {
+          const page = optional(await this.get(`/api/conversations.members?channel=${escaped}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, authorization));
+          if (page.ok !== true) throw new Error(`Slack member list failed (${text(page.error) || "unknown"})`);
+          for (const member of Array.isArray(page.members) ? page.members : []) ids.add(text(member));
+          cursor = text(optional(page.response_metadata).next_cursor);
+        } while (cursor);
+        return ids;
+      });
+      return members.has(slackId);
+    }
+    if (this.source === "drive") {
+      const grants = await this.cached(`drive-permissions:${id}`, async () => {
+        const all: Record<string, unknown>[] = []; let token = "";
+        do {
+          const page = await this.get(`/drive/v3/files/${escaped}/permissions?supportsAllDrives=true&pageSize=100&fields=${encodeURIComponent("nextPageToken,permissions(type,role,emailAddress,domain)")}${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`, authorization);
+          if (!page) return [];
+          const body = object(page);
+          all.push(...(Array.isArray(body.permissions) ? body.permissions.map(optional) : []));
+          token = text(body.nextPageToken);
+        } while (token);
+        return all;
+      });
+      // Group shares are not expanded, so someone who is only in a group that has the file is not shown it.
+      return grants.some(grant => grant.type === "anyone" || (grant.type === "user" && text(grant.emailAddress).toLowerCase() === email) ||
+        (grant.type === "domain" && email.endsWith(`@${text(grant.domain).toLowerCase()}`)));
+    }
+    const accountId = await this.settings.atlassianAccountId?.(email);
+    if (!accountId) return false;
+    if (this.source === "jira") {
+      // Jira answers for the issue itself, so project roles and issue security levels both count.
+      const result = await this.get(`/rest/api/3/user/permission/search?accountId=${encodeURIComponent(accountId)}&permissions=BROWSE_PROJECTS&issueKey=${escaped}&maxResults=10`, authorization);
+      return Array.isArray(result) && result.some(item => optional(item).accountId === accountId);
+    }
+    const result = await this.get(`/wiki/rest/api/content/${escaped}/permission/check`, authorization, 0,
+      { method: "POST", body: { subject: { type: "user", identifier: accountId }, operation: "read" } });
+    return optional(result).hasPermission === true;
   }
   override subscribe(_callback: (change: Change) => void): () => void { return () => undefined; }
   override subscribeToChanges(callback: (change: Change) => void): () => void { return this.subscribe(callback); }

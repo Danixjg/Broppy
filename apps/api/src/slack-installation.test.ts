@@ -79,3 +79,45 @@ describe("admin Slack installation", () => {
     expect(await ctx.oauth.refresh(admin,3)).toBe(true); expect(await ctx.oauth.refresh(admin,3)).toBe(false);
   });
 });
+
+describe("one consent that installs Broppy and connects Slack as a source", () => {
+  function combined(authed: Record<string, unknown> = {}, userProof: Record<string, unknown> = {}) {
+    const ctx = setup();
+    const stored: unknown[] = []; const discarded = vi.fn();
+    ctx.oauth.link = { scopes: ["channels:read", "users:read.email"], store: async (_admin, grant) => { stored.push(grant); }, discard: async () => { discarded(); } };
+    ctx.transport.mockImplementation(async (input, init) => {
+      const path = String(input);
+      const bearer = new Headers((init as RequestInit | undefined)?.headers).get("authorization");
+      if (path.endsWith("oauth.v2.access")) return Response.json({ ok: true, app_id: "AAPP", token_type: "bot", access_token: "xoxb-test", bot_user_id: "UBOT", team: { id: "TONE", name: "Company A" },
+        scope: SLACK_BOT_SCOPES.join(","), authed_user: { id: "UMAYA", access_token: "xoxp-admin", scope: "channels:read,users:read.email", ...authed }, is_enterprise_install: false });
+      if (path.endsWith("auth.test")) return Response.json(bearer === "Bearer xoxp-admin" ? { ok: true, team_id: "TONE", user_id: "UMAYA", ...userProof } : { ok: true, team_id: "TONE", user_id: "UBOT", bot_id: "BBOT" });
+      return Response.json({ ok: true, user: { id: "UMAYA", profile: { email: "maya@example.test" } } });
+    });
+    return { ...ctx, stored, discarded };
+  }
+  it("asks for the bot and the admin's own scopes together, then stores the admin's token as the shared connection", async () => {
+    const ctx = combined();
+    const url = new URL(await ctx.oauth.begin(admin));
+    expect(url.searchParams.get("user_scope")).toBe("channels:read,users:read.email");
+    expect(url.searchParams.get("scope")).toBe(SLACK_BOT_SCOPES.join(","));
+    expect(await ctx.callback(url.searchParams.get("state")!)).toBe("installed");
+    expect(ctx.stored).toEqual([{ access_token: "xoxp-admin", scope: "channels:read,users:read.email" }]);
+    expect(JSON.stringify(await ctx.oauth.status(admin))).not.toContain("xoxp");
+  });
+  it.each([{ access_token: undefined }, { access_token: "xoxb-bot" }, { refresh_token: "r" }])("refuses a missing or unusable admin token %j without installing", async invalid => {
+    const ctx = combined(invalid);
+    expect(await ctx.callback(await ctx.begin())).toBe("failed");
+    expect(ctx.stored).toEqual([]);
+    expect((await ctx.oauth.status(admin)).state).toBe("not_installed");
+  });
+  it("refuses a token that belongs to someone else", async () => {
+    const ctx = combined({}, { user_id: "UOTHER" });
+    expect(await ctx.callback(await ctx.begin())).toBe("failed");
+    expect(ctx.stored).toEqual([]);
+  });
+  it("removes the stored connection again when the workspace belongs to another organization", async () => {
+    const ctx = combined(); await ctx.registry.seed("TONE", "org-b", "xoxb-owner");
+    expect(await ctx.callback(await ctx.begin())).toBe("conflict");
+    expect(ctx.discarded).toHaveBeenCalled();
+  });
+});
