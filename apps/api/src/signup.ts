@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { Auth0Management } from "./auth0-management.js";
 import { ManagementError } from "./auth0-management.js";
 import type { Companies } from "./companies.js";
@@ -28,8 +28,10 @@ export class Limiter {
     const recent = (this.hits.get(key) ?? []).filter(time => time > now - windowMs);
     if (recent.length >= max) { this.hits.set(key, recent); return false; }
     recent.push(now);
-    if (this.hits.size > 5000) this.hits.clear();
+    // Make room by dropping the keys unused the longest, never by forgetting everyone at once.
+    this.hits.delete(key);
     this.hits.set(key, recent);
+    if (this.hits.size > 5000) for (const old of [...this.hits.keys()].slice(0, 1000)) this.hits.delete(old);
     return true;
   }
 }
@@ -57,9 +59,10 @@ const HOUR = 3_600_000;
  */
 export class Signup {
   private readonly limiter: Limiter;
+  private readonly asking = new Set<string>();
   constructor(private readonly management: Auth0Management, private readonly companies: Companies,
     private readonly directoryFor: (orgId: string) => Pick<UserDirectory, "add">, private readonly settings: SignupSettings,
-    private readonly random: () => string = () => randomBytes(3).toString("hex"), now: () => number = Date.now) {
+    now: () => number = Date.now) {
     if (!settings.connectionId) throw new Error("Self-signup needs AUTH0_SIGNUP_CONNECTION_ID");
     this.limiter = new Limiter(now);
   }
@@ -79,48 +82,50 @@ export class Signup {
     const company = clean(input.company, 60);
     const name = clean(input.name, 80);
     const email = typeof input.email === "string" ? normalizeEmail(input.email) : "";
-    if (company.length < 2 || companyAddress(company).length < 2) throw new SignupError(400, "Enter your company's name.");
+    if (company.length < 2) throw new SignupError(400, "Enter your company's name.");
+    if (companyAddress(company).length < 2) throw new SignupError(400, "Use letters or numbers in your company's name.");
     if (!name) throw new SignupError(400, "Enter your name.");
     if (!EMAIL.test(email) || email.length > 254) throw new SignupError(400, "Enter a valid work email address.");
-    if (!this.limiter.allow(`email:${email}`, 3, HOUR) || !this.limiter.allow("all", this.settings.perHour ?? 20, HOUR)) {
+    if (!this.limiter.allow("all", this.settings.perHour ?? 20, HOUR) || !this.limiter.allow(`email:${email}`, 3, HOUR)) {
       throw new SignupError(429, "Too many sign-ups just now. Try again in a little while.");
     }
-    // Someone who already belongs to a company is not made the admin of another by a form. Answer as if it worked.
-    if (await this.companies.emailInUse(email)) return { sent: true };
-
-    const created = await this.createOrganization(company);
+    // The same email asking twice at once makes one company, not two.
+    if (this.asking.has(email)) return { sent: true };
+    this.asking.add(email);
     try {
-      await this.companies.register({ orgId: created.id, name: created.displayName, createdBy: email });
-      await this.directoryFor(created.id).add({ id: adminId(email), name, email, role: "admin", groups: [] });
-      await this.management.forOrg(created.id).invite(email, "Broppy");
-    } catch (error) {
-      await this.undo(created.id);
-      if (error instanceof ManagementError) throw new SignupError(502, "We couldn't send your invitation email. Try again in a minute.");
-      throw error;
-    }
-    this.settings.onCreated?.(created.id);
-    console.info(JSON.stringify({ event: "company_created", orgId: created.id, name: created.name }));
-    return { sent: true };
-  }
+      // Someone who already belongs to a company is not made the admin of another by a form. Answer as if it worked.
+      if (await this.companies.emailInUse(email)) return { sent: true };
 
-  /** The Auth0 organization for a company name. The short address is made unique with a few random letters if it is taken. */
-  private async createOrganization(company: string) {
-    const base = companyAddress(company);
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const name = attempt === 0 ? base : `${base.slice(0, 40)}-${this.random()}`;
-      try { return await this.management.createOrganization({ name, displayName: company, connectionId: this.settings.connectionId }); }
-      catch (error) {
-        if (error instanceof ManagementError && error.status === 409) continue;
-        if (error instanceof ManagementError) throw new SignupError(502, "We couldn't set up your company just now. Try again in a minute.");
+      const created = await this.createOrganization(company);
+      try {
+        await this.companies.register({ orgId: created.id, name: created.displayName, createdBy: email });
+        await this.management.forOrg(created.id).invite(email, "Broppy");
+        // The admin's entry comes last: until the invitation is out there is nothing in the directory to undo, and a failed
+        // attempt leaves nothing that would stop the same person trying again.
+        await this.directoryFor(created.id).add({ id: adminId(email), name, email, role: "admin", groups: [] });
+      } catch (error) {
+        await this.undo(created.id);
+        if (error instanceof ManagementError) throw new SignupError(502, "We couldn't send your invitation email. Try again in a minute.");
         throw error;
       }
+      this.settings.onCreated?.(created.id);
+      console.info(JSON.stringify({ event: "company_created", orgId: created.id, name: created.name }));
+      return { sent: true };
+    } finally { this.asking.delete(email); }
+  }
+
+  /** The Auth0 organization for a company name. A name that is taken is refused, so one address always means one company. */
+  private async createOrganization(company: string) {
+    try { return await this.management.createOrganization({ name: companyAddress(company), displayName: company, connectionId: this.settings.connectionId }); }
+    catch (error) {
+      if (error instanceof ManagementError && error.status === 409) throw new SignupError(409, "That company name is taken. Add a word to it and try again.");
+      if (error instanceof ManagementError) throw new SignupError(502, "We couldn't set up your company just now. Try again in a minute.");
+      throw error;
     }
-    throw new SignupError(409, "That company name is taken. Add a word to it and try again.");
   }
 
   private async undo(orgId: string): Promise<void> {
     // Each step is attempted whatever the others do; leftovers are harmless once the company is not in the list.
-    await this.companies.forgetPeople(orgId).catch(() => undefined);
     await this.companies.remove(orgId).catch(() => undefined);
     await this.management.deleteOrganization(orgId).catch(() => undefined);
   }
@@ -129,7 +134,7 @@ export class Signup {
   async find(address: unknown): Promise<{ organization: string; name: string } | undefined> {
     const short = companyAddress(clean(address, 80));
     if (short.length < 2) return undefined;
-    if (!this.limiter.allow("find", 120, 60_000)) throw new SignupError(429, "Too many tries. Wait a moment and try again.");
+    if (!this.limiter.allow("find", 600, 60_000)) throw new SignupError(429, "Too many tries. Wait a moment and try again.");
     const found = await this.management.findOrganization(short);
     if (!found || !await this.companies.isKnown(found.id)) return undefined;
     return { organization: found.id, name: found.displayName };

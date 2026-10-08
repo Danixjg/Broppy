@@ -17,9 +17,11 @@ export interface TenantOptions<T> {
 
 const KNOWN_FOR_MS = 60_000;
 const UNKNOWN_FOR_MS = 15_000;
+const IN_USE_MS = 60_000;
 
 export class TenantRegistry<T> {
   private readonly built = new Map<string, T>();
+  private readonly lastUsed = new Map<string, number>();
   private readonly building = new Map<string, Promise<T>>();
   private readonly verdicts = new Map<string, { known: boolean; until: number }>();
 
@@ -35,6 +37,7 @@ export class TenantRegistry<T> {
     const existing = this.built.get(orgId);
     if (existing) {
       this.built.delete(orgId); this.built.set(orgId, existing);
+      this.lastUsed.set(orgId, (this.options.now ?? Date.now)());
       return await this.stillKnown(orgId) ? existing : undefined;
     }
     if (!await this.stillKnown(orgId)) return undefined;
@@ -63,7 +66,7 @@ export class TenantRegistry<T> {
   release(orgId: string): void {
     const tenant = this.built.get(orgId);
     if (tenant === undefined) return;
-    this.built.delete(orgId);
+    this.built.delete(orgId); this.lastUsed.delete(orgId);
     this.options.drop?.(tenant);
   }
 
@@ -72,13 +75,19 @@ export class TenantRegistry<T> {
     this.verdicts.set(orgId, { known: true, until: (this.options.now ?? Date.now)() + KNOWN_FOR_MS });
   }
 
+  /**
+   * Remembers a built workspace and, beyond `max`, drops the one unused the longest. A workspace used in the last minute is
+   * never dropped, so a request still running on it never ends up alongside a second copy writing to the same company.
+   */
   private keep(orgId: string, tenant: T): void {
-    this.built.set(orgId, tenant);
+    const now = (this.options.now ?? Date.now)();
+    this.built.set(orgId, tenant); this.lastUsed.set(orgId, now);
     const max = this.options.max ?? 25;
-    while (this.built.size > max) {
-      const oldest = this.built.keys().next().value as string;
-      const dropped = this.built.get(oldest)!;
-      this.built.delete(oldest);
+    for (const candidate of [...this.built.keys()]) {
+      if (this.built.size <= max) break;
+      if (candidate === orgId || now - (this.lastUsed.get(candidate) ?? 0) < IN_USE_MS) continue;
+      const dropped = this.built.get(candidate)!;
+      this.built.delete(candidate); this.lastUsed.delete(candidate);
       this.options.drop?.(dropped);
     }
   }

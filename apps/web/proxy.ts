@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth0, authConfigured, orgIdProblem } from "./lib/auth0";
-import { pinnedOrganization, signInPath } from "./lib/company";
+import { asksForCompany, pinnedOrganization, signInPath } from "./lib/company";
 import { demoApiUrl, sameHostRedirect, wantsDemo } from "./lib/demo";
 
 export async function proxy(request: NextRequest) {
@@ -17,6 +17,11 @@ export async function proxy(request: NextRequest) {
   if (orgProblem && (path.startsWith("/auth/") || path.startsWith("/workspace/"))) {
     // Fail with the fix instead of bouncing through Auth0 and ending on a bare 500 at /auth/callback.
     return NextResponse.json({ error: orgProblem }, { status: 503 });
+  }
+  // With several companies a sign-in has to name one. Any link to plain /auth/login (an expired session, an old bookmark)
+  // goes through the company page first; invitation links and the company page's own links already name one.
+  if (path === "/auth/login" && asksForCompany() && !request.nextUrl.searchParams.has("organization") && !request.nextUrl.searchParams.has("invitation")) {
+    return NextResponse.redirect(new URL(signInPath(request.nextUrl.searchParams.get("returnTo") ?? undefined), process.env.APP_BASE_URL));
   }
   if (path.startsWith("/workspace/") && !demo && !await auth0.getSession(request)) {
     return NextResponse.redirect(new URL(signInPath(request.nextUrl.pathname + request.nextUrl.search), process.env.APP_BASE_URL));

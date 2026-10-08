@@ -26,6 +26,7 @@ const auth0Orgs: Array<{ id: string; name: string; display_name: string }> = [];
 const invitations: Array<{ org: string; email: string }> = [];
 const emails: Record<string, { email: string; verified: boolean }> = {};
 let orgCounter = 0;
+let failInvites = false;
 
 const json = (data: unknown, status = 200) => new Response(data === undefined ? "" : JSON.stringify(data), { status });
 function filterRows(rows: Row[], params: URLSearchParams): Row[] {
@@ -37,6 +38,8 @@ function filterRows(rows: Row[], params: URLSearchParams): Row[] {
     out = out.filter(row => {
       const actual = key.includes("->>") ? row[key.split("->>")[0]]?.[key.split("->>")[1]] : row[key];
       if (op === "eq") return String(actual) === wanted;
+      if (op === "ilike") return String(actual).toLowerCase() === wanted.replace(/\\(.)/g, "$1").toLowerCase();
+      if (op === "not" && wanted === "is.null") return actual !== null && actual !== undefined;
       if (op === "is" && wanted === "null") return actual === null || actual === undefined;
       return true;
     });
@@ -71,6 +74,7 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
     if (method === "DELETE") { const at = auth0Orgs.findIndex(item => item.id === path.slice(1)); if (at >= 0) auth0Orgs.splice(at, 1); return json(undefined, 204); }
     const invite = /^\/([^/]+)\/invitations$/.exec(path);
     if (invite && method === "GET") return json(invitations.filter(item => item.org === invite[1]).map((item, index) => ({ id: `inv${index}`, invitee: { email: item.email } })));
+    if (invite && method === "POST" && failInvites) return json({ message: "boom" }, 500);
     if (invite && method === "POST") { invitations.push({ org: invite[1], email: body.invitee.email }); return json({ id: "inv" }, 201); }
     return json({}, 404);
   }
@@ -162,9 +166,11 @@ describe("several companies in one API", () => {
     expect(tables.workspace_users.filter(row => row.org_id === "org_new1")).toEqual([expect.objectContaining({ user_id: "dana", role: "admin", auth0_sub: null })]);
   });
 
-  it("answers the same and creates nothing for an email that already belongs to a company", async () => {
+  it("answers the same and creates nothing for an email that has already signed in to a company", async () => {
     const before = [auth0Orgs.length, invitations.length];
-    const again = await call("POST", "/v1/signup", undefined, { company: "Another Co", name: "Dana", email: "dana@acme.test" });
+    emails["auth0|dana"] = { email: "dana@acme.test", verified: true };
+    await call("GET", "/v1/me", { sub: "auth0|dana", org: "org_new1" });
+    const again = await call("POST", "/v1/signup", undefined, { company: "Another Co", name: "Dana", email: "Dana@Acme.test" });
     const homeEmail = await call("POST", "/v1/signup", undefined, { company: "Third Co", name: "Ravi", email: "ravi@home.test" });
     expect([again.status, homeEmail.status]).toEqual([202, 202]);
     expect([auth0Orgs.length, invitations.length]).toEqual(before);
@@ -229,11 +235,38 @@ describe("several companies in one API", () => {
     expect((await call("GET", "/v1/companies/find?name=unrelated")).status).toBe(404);
   });
 
-  it("gives a taken company name a different address", async () => {
+  it("refuses a company name that is taken, so one address is one company", async () => {
+    const before = auth0Orgs.length;
     const second = await call("POST", "/v1/signup", undefined, { company: "Acme & Sons", name: "Eve", email: "eve@elsewhere.test" });
-    expect(second.status).toBe(202);
-    const names = auth0Orgs.map(item => item.name);
-    expect(names).toContain("acme-and-sons");
-    expect(names.filter(name => name.startsWith("acme-and-sons-"))).toHaveLength(1);
+    expect(second.status).toBe(409);
+    expect(auth0Orgs).toHaveLength(before);
+    expect(tables.organizations.every(row => row.created_by_email !== "eve@elsewhere.test")).toBe(true);
+  });
+
+  it("does not let a stranger use someone's email to stop them signing their own company up", async () => {
+    // Lee was only invited to Acme and has never signed in, so Lee's own sign-up goes ahead.
+    const result = await call("POST", "/v1/signup", undefined, { company: "Lee Studio", name: "Lee", email: "lee@acme.test" });
+    expect(result.status).toBe(202);
+    expect(auth0Orgs.some(item => item.display_name === "Lee Studio")).toBe(true);
+  });
+
+  it("leaves no company behind when the invitation cannot be sent, and lets the person try again", async () => {
+    const before = [auth0Orgs.length, tables.organizations.length];
+    failInvites = true;
+    const failed = await call("POST", "/v1/signup", undefined, { company: "Flaky Co", name: "Fay", email: "fay@flaky.test" });
+    failInvites = false;
+    expect(failed.status).toBe(502);
+    expect([auth0Orgs.length, tables.organizations.length]).toEqual(before);
+    expect(tables.workspace_users.some(row => row.email === "fay@flaky.test")).toBe(false);
+    expect((await call("POST", "/v1/signup", undefined, { company: "Flaky Co", name: "Fay", email: "fay@flaky.test" })).status).toBe(202);
+    expect(auth0Orgs.some(item => item.display_name === "Flaky Co")).toBe(true);
+  });
+
+  it("keeps a company's own AI model to the providers' fixed addresses", async () => {
+    const dana = { sub: "auth0|dana", org: "org_new1" };
+    const custom = await call("PUT", "/v1/admin/model", dana, { provider: "openai_compatible", model: "m", apiKey: "k", baseUrl: "https://models.example.com/v1" });
+    expect([custom.status, custom.body.error]).toEqual([400, expect.stringContaining("custom model address")]);
+    const anthropicWithAddress = await call("PUT", "/v1/admin/model", dana, { provider: "anthropic", model: "m", apiKey: "k", baseUrl: "https://models.example.com/v1" });
+    expect(anthropicWithAddress.status).toBe(400);
   });
 });

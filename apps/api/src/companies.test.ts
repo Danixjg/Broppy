@@ -30,12 +30,16 @@ describe("the list of companies", () => {
   it("never removes the home company or its people", async () => {
     const { companies, fetcher } = setup([]);
     await expect(companies.remove("org_home")).rejects.toThrow();
-    await expect(companies.forgetPeople("org_home")).rejects.toThrow();
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("says whether an email is already on any company's list", async () => {
-    expect(await setup([{ user_id: "x" }]).companies.emailInUse("A@B.test")).toBe(true);
+  it("says whether an email has already signed in to a company, ignoring case and not counting entries nobody has signed in to", async () => {
+    const found = setup([{ user_id: "x" }]);
+    expect(await found.companies.emailInUse("A_B@Co.test")).toBe(true);
+    const asked = decodeURIComponent(String((found.fetcher.mock.calls[0] as unknown[])[0]));
+    expect(asked).toContain("email=ilike.a\\_b@co.test");
+    expect(asked).toContain("auth0_sub=not.is.null");
+    expect(asked).toContain("active=eq.true");
     expect(await setup([]).companies.emailInUse("a@b.test")).toBe(false);
   });
 });

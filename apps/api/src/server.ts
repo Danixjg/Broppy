@@ -12,7 +12,7 @@ import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
 import { modelsFromEnv } from "./llm-budget.js";
-import { ModelCheckFailed, OrgModel } from "./org-model.js";
+import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
 import { Companies } from "./companies.js";
@@ -206,7 +206,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       throw new Error("SELF_SIGNUP needs the Supabase directory, Auth0 invitations (AUTH0_MANAGEMENT_CLIENT_ID and SECRET), SOURCE_OAUTH_JSON and AUTH0_SIGNUP_CONNECTION_ID");
     }
   }
-  const orgModelOf = (persistence?: Persistence) => persistence ? new OrgModel(persistence) : undefined;
+  // A company that signed itself up can use Anthropic or OpenAI but not point the API at an address of its own: the API would
+  // call that address from inside its own network. Only the company set up by hand may.
+  const orgModelOf = (persistence: Persistence | undefined, isHome: boolean) => persistence ? new OrgModel(persistence, undefined, undefined, { customAddress: isHome }) : undefined;
 
   /** Everything one company owns: its people, its sources, its brain and its sign-in rules. Nothing here is shared between companies. */
   const buildTenant = async (orgId: string, isHome: boolean): Promise<Tenant> => {
@@ -231,7 +233,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const slackConfig = oauthConfigs?.slack;
     const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
     if (isHome && oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
-    const orgModel = orgModelOf(persistence);
+    const orgModel = orgModelOf(persistence, isHome);
     const brain = isHome && options.brain ? options.brain : new Brain(models.llm,
       { orgLlm: orgModel, orgId: isHome ? process.env.AUTH0_ORG_ID : orgId, persistence, audit: await configuredAudit(persistence),
         remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding, supabase: supabase ?? undefined,
@@ -321,11 +323,11 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // A company signing itself up, and a person finding their company at sign-in. Both are open to anyone, so they
       // are limited, answer the same whoever asks, and give nothing away about the people or data inside a company.
       if (signup && url.pathname === "/v1/signup" && request.method === "POST") {
-        return await reply(response, 202, await signup.create(await body(request)));
+        return send(response, 202, await signup.create(await body(request)));
       }
       if (signup && url.pathname === "/v1/companies/find" && request.method === "GET") {
         const found = await signup.find(url.searchParams.get("name"));
-        return await reply(response, found ? 200 : 404, found ?? { error: "We couldn't find that company." });
+        return send(response, found ? 200 : 404, found ?? { error: "We couldn't find that company." });
       }
 
       const webOrigin = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001";
@@ -814,6 +816,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (message === "Live sources are read-only") {
         return await reply(response, 409, { error: "This app only reads live sources. Make the change in Jira." });
       }
+      if (message === CUSTOM_ADDRESS_REFUSED) return await reply(response, 400, { error: "This workspace can use Anthropic or OpenAI. A custom model address isn't available." });
       if (message === "Already tracked") return await reply(response, 409, { error: "A Jira task already quotes this agreement." });
       if (message === "Stale commitment revision") return await reply(response, 409, { error: "This commitment changed or is being processed. Reload before reviewing it." });
       if (message === "Unknown document" || message === "Unknown source item" || message === "Unknown user" ||

@@ -46,10 +46,18 @@ describe("one workspace per company", () => {
   });
 
   it("drops the longest-unused company beyond the limit and never the home company", async () => {
-    const { registry, dropped } = make(() => true, 2);
-    await registry.get("org_a"); await registry.get("org_b"); await registry.get("org_a"); await registry.get("org_c");
+    const { registry, dropped, advance } = make(() => true, 2);
+    await registry.get("org_a"); advance(1); await registry.get("org_b"); advance(70_000);
+    await registry.get("org_a"); advance(1); await registry.get("org_c");
     expect(dropped).toEqual(["org_b"]);
     expect(registry.all().map(item => item.id)).toEqual(["org_home", "org_a", "org_c"]);
+  });
+
+  it("keeps a company used in the last minute even when over the limit", async () => {
+    const { registry, dropped } = make(() => true, 1);
+    await registry.get("org_a"); await registry.get("org_b"); await registry.get("org_c");
+    expect(dropped).toEqual([]);
+    expect(registry.all()).toHaveLength(4);
   });
 
   it("builds again after a failed build", async () => {

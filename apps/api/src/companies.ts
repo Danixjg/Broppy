@@ -57,18 +57,13 @@ export class Companies {
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
   }
 
-  /** Removes every person listed for a company that is being undone. Never the home company's. */
-  async forgetPeople(orgId: string): Promise<void> {
-    if (orgId === this.homeOrgId) throw new Error("The home company cannot be removed");
-    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?org_id=eq.${encodeURIComponent(orgId)}`, {
-      method: "DELETE", headers: this.headers(), signal: AbortSignal.timeout(5000)
-    });
-    if (!response.ok) throw new Error(`Supabase workspace users failed (${response.status})`);
-  }
-
-  /** Whether this email is already on any company's list (active), in any organization. */
+  /**
+   * Whether someone with this email has already signed in to a company, in any organization. An entry nobody has
+   * signed in to yet doesn't count: otherwise anyone could use a stranger's address to stop them signing their own company up.
+   */
   async emailInUse(email: string): Promise<boolean> {
-    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?select=user_id&email=eq.${encodeURIComponent(normalizeEmail(email))}&limit=1`, {
+    const pattern = normalizeEmail(email).replace(/[\\%_*]/g, "\\$&");
+    const response = await this.transport(`${this.baseUrl}/rest/v1/workspace_users?select=user_id&email=ilike.${encodeURIComponent(pattern)}&auth0_sub=not.is.null&active=eq.true&limit=1`, {
       headers: this.headers(), signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) throw new Error(`Supabase workspace users failed (${response.status})`);

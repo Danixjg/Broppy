@@ -21,7 +21,9 @@ export default async function Signup({ searchParams }: { searchParams: Promise<R
   const query = await searchParams;
   if (!authConfigured || signupMode() === "off") redirect("/");
   const open = signupMode() === "on";
-  const sent = one(query.sent);
+  const typed = one(query.sent);
+  // Only something shaped like an email is shown back, so a crafted link can't put its own wording on this page.
+  const sent = typed ? (/^[^\s@<>"']{1,64}@[A-Za-z0-9.-]{1,200}\.[A-Za-z]{2,}$/.test(typed) ? typed : "the address you entered") : "";
   const error = MESSAGES[one(query.error)];
 
   if (sent) return <AuthShell>

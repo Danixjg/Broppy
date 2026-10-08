@@ -8,9 +8,9 @@ set up by hand: no SQL, no Auth0 dashboard.
 
 1. The sign-up form posts to the web app, which calls `POST /v1/signup` on the API.
 2. The API creates an Auth0 organization for the company (its short name is the company name in lowercase letters,
-   digits and hyphens; if taken, a few random letters are added), turns on the sign-in database for it, lists the company
-   in `public.organizations`, adds the person as the company's admin in `workspace_users`, and sends an Auth0
-   organization invitation to that email.
+   digits and hyphens; a name that is already taken is refused, so one name is one company), turns on the sign-in database
+   for it, lists the company in `public.organizations`, sends an Auth0 organization invitation to that email, and only then
+   adds the person as the company's admin in `workspace_users`.
 3. The admin is whoever can open the invitation. At their first sign-in the directory entry becomes theirs only if
    Auth0 says the email is verified (the same rule as every other person), so a form with someone else's email creates a
    company nobody can enter.
@@ -19,8 +19,10 @@ set up by hand: no SQL, no Auth0 dashboard.
    the company's organization ID.
 5. Returning people go to **Sign in**, type their company's name, and are sent to that company's Auth0 sign-in.
 
-If anything fails after the Auth0 organization is created (listing the company, adding the admin, sending the email),
-the API removes what it created, so a failed attempt leaves nothing behind.
+If anything fails after the Auth0 organization is created (listing the company, sending the email, adding the admin),
+the API removes the organization and its listing. The admin's entry is added last, so a failed attempt leaves nothing in the
+directory that would stop the same person trying again. (If the API itself stops between creating the Auth0 organization and
+listing it, that organization is left holding its name; delete it in the Auth0 dashboard.)
 
 ## Switching it on
 
@@ -57,8 +59,17 @@ Redeploy both projects.
   twenty companies an hour per running instance, and the web form allows five tries an hour per visitor. These counters
   live in each running instance, so they slow abuse down; they are not a hard limit. Use `SIGNUP_ACCESS_CODE` for an
   invite-only launch, and `closed` to stop sign-ups.
-- An email that is already on a company's list gets the same answer as anyone else and nothing is created, so the form
-  can't be used to find out who has an account.
+- An email that someone has already signed in with gets the same answer as anyone else and nothing is created. An email
+  that was only invited and never signed in doesn't count, so nobody can use a stranger's address to stop them signing their
+  own company up (they get an invitation they can ignore). The answers match but not the time they take, so a patient caller
+  could still tell the two apart.
+- Anyone can sign up with a company name that sounds like a real one before the real company does. The access code or
+  `closed` mode is the defence; names can't be reclaimed from the page.
+- A company's AI model can be Anthropic or OpenAI only. The "OpenAI-compatible" option with an address of its own is
+  refused for companies that signed up, because the API would call that address from inside its own network. Your existing
+  company keeps it.
+- Don't pin `cloudId` or `baseUrl` for Jira or Confluence in `SOURCE_OAUTH_JSON` when self-signup is on: those pin one
+  company's site, and other companies would be refused.
 - **The Slack app (`apps/slack`) and its `/broppy` command serve the existing company only.** A new company still
   connects Slack as a source through the guided setup; installing the Broppy bot into a second company's Slack is not
   built yet.

@@ -12,11 +12,11 @@ function setup(overrides: { create?: () => Promise<{ id: string; name: string; d
     forOrg: vi.fn(() => ({ invite }))
   };
   const companies = { emailInUse: vi.fn(async () => overrides.inUse === true), register: vi.fn(async () => {}), remove: vi.fn(async () => {}),
-    forgetPeople: vi.fn(async () => {}), isKnown: vi.fn(async (id: string) => id === "org_1") };
+    isKnown: vi.fn(async (id: string) => id === "org_1") };
   const add = vi.fn(async () => ({}));
   const created = vi.fn();
   const signup = new Signup(management as any, companies as any, () => ({ add }) as any,
-    { connectionId: "con_1", accessCode: overrides.code, open: overrides.open, onCreated: created }, () => "abc123");
+    { connectionId: "con_1", accessCode: overrides.code, open: overrides.open, onCreated: created });
   return { signup, management, companies, add, invite, created };
 }
 
@@ -37,14 +37,11 @@ describe("a company signing itself up", () => {
     expect(created).toHaveBeenCalledWith("org_1");
   });
 
-  it("changes the address when the name is taken, and gives up politely after a few tries", async () => {
-    const names: string[] = [];
+  it("refuses a name that is taken, so one address is one company", async () => {
     const taken = setup({ create: async () => { throw new ManagementError("exists", 409); } });
     await expect(taken.signup.create({ company: "Acme", name: "D", email: "d@acme.test" })).rejects.toMatchObject({ status: 409 });
-    const retry = setup({ create: vi.fn().mockImplementationOnce(async () => { throw new ManagementError("exists", 409); })
-      .mockImplementation(async (input: { name: string }) => { names.push(input.name); return { id: "org_9", name: input.name, displayName: "Acme" }; }) });
-    await retry.signup.create({ company: "Acme", name: "D", email: "d@acme.test" });
-    expect(names).toEqual(["acme-abc123"]);
+    expect(taken.management.createOrganization).toHaveBeenCalledTimes(1);
+    expect(taken.add).not.toHaveBeenCalled();
   });
 
   it("creates nothing and answers the same for an email already on a company's list", async () => {
@@ -54,11 +51,18 @@ describe("a company signing itself up", () => {
   });
 
   it("undoes everything when the invitation cannot be sent", async () => {
-    const { signup, management, companies } = setup({ invite: async () => { throw new ManagementError("no", 500); } });
+    const { signup, management, companies, add } = setup({ invite: async () => { throw new ManagementError("no", 500); } });
     await expect(signup.create({ company: "Acme", name: "Dana", email: "dana@acme.test" })).rejects.toBeInstanceOf(SignupError);
-    expect(companies.forgetPeople).toHaveBeenCalledWith("org_1");
+    // The first admin is added only once the invitation is out, so nothing is left in the directory to block a retry.
+    expect(add).not.toHaveBeenCalled();
     expect(companies.remove).toHaveBeenCalledWith("org_1");
     expect(management.deleteOrganization).toHaveBeenCalledWith("org_1");
+  });
+
+  it("makes one company when the same email asks twice at once", async () => {
+    const { signup, management } = setup();
+    await Promise.all([signup.create({ company: "Acme", name: "D", email: "d@acme.test" }), signup.create({ company: "Acme", name: "D", email: "d@acme.test" })]);
+    expect(management.createOrganization).toHaveBeenCalledTimes(1);
   });
 
   it("checks the form", async () => {
@@ -81,6 +85,11 @@ describe("a company signing itself up", () => {
     const { signup } = setup();
     for (let i = 0; i < 3; i++) await signup.create({ company: `Co ${i}`, name: "D", email: "d@acme.test" });
     await expect(signup.create({ company: "Co 4", name: "D", email: "d@acme.test" })).rejects.toMatchObject({ status: 429 });
+    // Many different emails don't make the limiter forget the company-wide count.
+    const flood = setup();
+    for (let i = 0; i < 20; i++) await flood.signup.create({ company: `Co ${i}`, name: "D", email: `p${i}@x.test` });
+    for (let i = 0; i < 6000; i++) await flood.signup.create({ company: "Zed", name: "D", email: `q${i}@x.test` }).catch(() => undefined);
+    await expect(flood.signup.create({ company: "Late", name: "D", email: "late@x.test" })).rejects.toMatchObject({ status: 429 });
   });
 
   it("finds only a company that signed up here", async () => {
