@@ -342,10 +342,11 @@ it("still imports an item whose optional link or label fields are malformed", as
 
 describe("Atlassian site found at sign-in", () => {
   it("refuses to read until a site is set, then uses that site's cloud ID", async () => {
-    const transport = vi.fn(async () => Response.json({ fields: { summary: "PAY-101", description: { content: [{ text: "Cutover requires approval." }] },
+    const transport = vi.fn(async (input: RequestInfo | URL) => String(input).includes("user/permission/search") ? Response.json([{ accountId: "acct-ravi" }]) :
+      Response.json({ fields: { summary: "PAY-101", description: { content: [{ text: "Cutover requires approval." }] },
       updated: "2026-09-26T11:00:00.000Z", status: { name: "Open" } } }));
     const connector = new LiveConnector("jira", { ids: ["PAY-101"], serviceAuthorization: "", userAuthorizations: {},
-      authorization: async () => "Bearer org" }, [user], transport as unknown as typeof fetch);
+      authorization: async () => "Bearer org", atlassianAccountId: async () => "acct-ravi" }, [user], transport as unknown as typeof fetch);
     await expect(connector.fetchDocument("jira:PAY-101")).rejects.toThrow("site is not connected");
     expect(transport).not.toHaveBeenCalled();
     connector.useSite({ baseUrl: "https://acme.atlassian.net", cloudId: "cloud-1" });
@@ -353,5 +354,53 @@ describe("Atlassian site found at sign-in", () => {
     expect(doc?.content).toContain("Cutover requires approval.");
     expect(String((transport.mock.calls[0] as unknown[])[0])).toContain("https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/issue/PAY-101");
     expect(() => connector.useSite({ baseUrl: "http://acme.atlassian.net", cloudId: "cloud-1" })).toThrow("HTTPS origin");
+  });
+});
+
+describe("access mirrored from the source through the shared connection", () => {
+  const other: User = { ...user, id: "wei", name: "Wei", email: "wei@example.test", auth0Sub: "auth0|wei",
+    platformIdentities: { slack: "wei@example.test", jira: "wei@example.test", confluence: "wei@example.test", drive: "wei@example.test" } };
+  const setup = (source: Source, answer: (url: URL, init?: RequestInit) => Response) => {
+    const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => answer(new URL(String(input)), init));
+    const connector = new LiveConnector(source, { ids: [ids[source]], baseUrl: "https://atlassian.example.test/", serviceAuthorization: "", userAuthorizations: {},
+      authorization: async () => "Bearer shared", atlassianAccountId: async email => email === "ravi@example.test" ? "acct-ravi" : email === "wei@example.test" ? "acct-wei" : undefined },
+      [user, other], transport as unknown as typeof fetch, async () => undefined);
+    return { connector, transport };
+  };
+
+  it("lets only the members of a private Slack channel see it, and everyone in the workspace see a public one", async () => {
+    const slack = (isPrivate: boolean) => setup("slack", url => {
+      if (url.pathname.endsWith("users.lookupByEmail")) return Response.json({ ok: true, user: { id: url.searchParams.get("email") === "ravi@example.test" ? "U1" : "U2" } });
+      if (url.pathname.endsWith("conversations.info")) return Response.json({ ok: true, channel: { name: "pay", is_private: isPrivate } });
+      if (url.pathname.endsWith("conversations.members")) return Response.json({ ok: true, members: ["U1"] });
+      return Response.json({ ok: false, error: "unexpected" });
+    });
+    const priv = slack(true).connector;
+    expect(await priv.checkAccess(user, "slack:C123")).toBe(true);
+    expect(await priv.checkAccess(other, "slack:C123")).toBe(false);
+    expect(await slack(false).connector.checkAccess(other, "slack:C123")).toBe(true);
+  });
+
+  it("uses a Drive file's own shares, and does not expand groups", async () => {
+    const { connector } = setup("drive", () => Response.json({ permissions: [{ type: "user", emailAddress: "Ravi@example.test", role: "reader" }, { type: "group", emailAddress: "team@example.test" }] }));
+    expect(await connector.checkAccess(user, "drive:file-1")).toBe(true);
+    expect(await connector.checkAccess(other, "drive:file-1")).toBe(false);
+  });
+
+  it("asks Jira and Confluence whether that person's Atlassian account may see the item", async () => {
+    const jira = setup("jira", url => Response.json(url.searchParams.get("accountId") === "acct-ravi" ? [{ accountId: "acct-ravi" }] : []));
+    expect(await jira.connector.checkAccess(user, "jira:PAY-101")).toBe(true);
+    expect(await jira.connector.checkAccess(other, "jira:PAY-101")).toBe(false);
+    const wiki = setup("confluence", (url, init) => Response.json({ hasPermission: JSON.parse(String(init?.body)).subject.identifier === "acct-ravi" }));
+    expect(await wiki.connector.checkAccess(user, "confluence:42")).toBe(true);
+    expect(await wiki.connector.checkAccess(other, "confluence:42")).toBe(false);
+    expect(String(wiki.transport.mock.calls[0][0])).toContain("/wiki/rest/api/content/42/permission/check");
+  });
+
+  it("denies a person Atlassian cannot match, and reports an outage instead of denying", async () => {
+    const stranger: User = { ...user, id: "x", platformIdentities: { ...user.platformIdentities!, jira: "nobody@example.test" } };
+    expect(await setup("jira", () => Response.json([{ accountId: "acct-ravi" }])).connector.checkAccess(stranger, "jira:PAY-101")).toBe(false);
+    const down = setup("drive", () => new Response("", { status: 500 }));
+    await expect(down.connector.checkAccess(user, "drive:file-1")).rejects.toBeInstanceOf(SourceAccessUnavailable);
   });
 });

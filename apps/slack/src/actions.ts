@@ -17,7 +17,7 @@ async function activeEmail(deps: Deps, user: string) {
   return email;
 }
 const pending = "Jira may have accepted this action. It is waiting for reconciliation; no second issue will be created.";
-const unavailable = "Your account must be active in Broppy and connected to Jira. No shared account is used.";
+const unavailable = "Your account must be active in Broppy, and your administrator must have connected Jira to Broppy.";
 
 export async function confirmProposal(deps: Deps, proposal: Proposal, user: string, selectedIssueKey?: string): Promise<string> {
   if (!sameTeam(deps.workspace, proposal.teamId)) return "This proposal is unavailable in this Slack workspace.";

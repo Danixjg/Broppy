@@ -12,9 +12,9 @@ export interface JiraIssueRequest {
 }
 
 export interface BroppyApi {
-  /** Creates the issue as the person's own Jira connection; undefined when they haven't connected Jira. */
+  /** Creates the issue through the organization's shared Jira connection, for this person; undefined when the admin hasn't connected Jira. */
   createIssue(slackEmail: string, issue: JiraIssueRequest): Promise<{ key: string; url: string } | undefined>;
-  /** Comments as the person; false when they haven't connected Jira. */
+  /** Comments through the shared Jira connection, for this person; false when the admin hasn't connected Jira. */
   comment(slackEmail: string, key: string, text: string): Promise<boolean>;
   ask(slackEmail: string, question: string): Promise<BroppyAnswer>;
   actor(slackEmail: string): Promise<{ active: true }>;

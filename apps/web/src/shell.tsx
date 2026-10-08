@@ -50,7 +50,6 @@ export function Shell() {
         </label>
         <div id="authIdentity" className="auth-identity" hidden>
           <span id="authName" />
-          <a href="/accounts.html">My accounts</a>
           <Button type="button" id="loginButton" variant="outline" size="sm" hidden>Log in</Button>
           <Button type="button" id="logoutButton" variant="outline" size="sm" hidden>Log out</Button>
         </div>

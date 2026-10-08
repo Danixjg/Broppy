@@ -1,5 +1,6 @@
 import { SlackInstallationOAuth } from "./slack-installation.js";
 import { slackUserIdsFromEnv } from "./slack-identity.js";
+import { atlassianAccountIds } from "./atlassian-identity.js";
 import { SourceOAuth } from "./source-oauth.js";
 import { Persistence } from "./persistence.js";
 import { searchAudit } from "./audit-search.js";
@@ -174,14 +175,19 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if ((process.env.SLACK_APP_ID || process.env.SLACK_CLIENT_ID || process.env.SLACK_CLIENT_SECRET) && !hasAuth0) throw new Error("Slack onboarding requires Auth0 and the active user directory");
   const slackInstallation = directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
   const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
+  const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
   const connectors = liveConnectorsFromEnv(users ?? loadMockCorpus().users) ?? (oauth ? Object.fromEntries(
     (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
       ids: [], serviceAuthorization: "", userAuthorizations: {}, discover: true, baseUrl: oauthConfigs[source].baseUrl, cloudId: oauthConfigs[source].cloudId,
-      authorization: oauth.provider(source), linkOrigins: oauthConfigs[source].linkOrigins
+      authorization: oauth.provider(source), atlassianAccountId: accountIds, linkOrigins: oauthConfigs[source].linkOrigins
     }, users ?? []) : new MockConnector(source, [])])) as Record<Source, MockConnector> : undefined);
   if (connectors && !hasAuth0) {
     throw new Error("Live sources require Auth0 sign-in");
   }
+  // One consent installs Broppy in Slack and connects Slack as a source, when both use the same Slack app.
+  const slackConfig = oauthConfigs?.slack;
+  const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
+  if (oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
   const orgModel = persistence ? new OrgModel(persistence) : undefined;
   const brain = options.brain ?? new Brain(models.llm,
     { orgLlm: orgModel, orgId: process.env.AUTH0_ORG_ID, persistence, audit: await configuredAudit(persistence), remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv() : undefined, embedding, supabase: supabase ?? undefined,
@@ -198,7 +204,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
   await brain.restore();
   const serviceActor = ServiceActor.fromEnv(directory);
-  const jiraAsUser = oauth ? new JiraAsUser(oauth) : undefined;
+  if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
+    store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
+    discard: async () => { await oauth!.remove("slack"); } };
+  const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
   const auth0 = hasAuth0 ? createAuth0TokenValidatorFromEnv(directory!) : undefined;
   const people = hasAuth0 ? new People(directory!, Auth0Management.fromEnv()) : undefined;
   // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
@@ -260,16 +269,6 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         response.end(); return;
       }
 
-      const own = /^\/v1\/connections\/(slack|jira|confluence|drive)\/callback$/.exec(url.pathname);
-      if (own && request.method === "GET" && oauth && directory) {
-        const source = own[1] as Source;
-        const actor = await oauth.complete(source, url.searchParams.get("state") ?? "", url.searchParams.get("code") ?? "", sub => directory.bySub(sub), "user");
-        brain.audit.append("user_connection_created", actor.id, { source });
-        await brain.persist();
-        response.writeHead(302, { location: new URL("/accounts.html", process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001").href, "cache-control": "no-store" });
-        response.end(); return;
-      }
-
       // The Slack app acts as the Slack user's own Broppy user, for questions and Jira writes only. Any other request carrying the
       // service header is refused rather than falling back to another identity.
       const service = serviceActor?.present(request) === true;
@@ -315,27 +314,6 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, result ? 200 : 409, result ?? { error: "Jira access unavailable" });
       }
 
-      // Each person connects their own source accounts; the org-wide admin connection is separate.
-      const sources: Source[] = ["slack", "jira", "confluence", "drive"];
-      if (url.pathname === "/v1/me/connections" && request.method === "GET") {
-        const connected = oauth ? new Set(await oauth.connectedSources(user.id)) : new Set<Source>();
-        return await reply(response, 200, { available: Boolean(oauth),
-          connections: sources.map(source => ({ source, configured: Boolean(oauth?.configs[source]), connected: connected.has(source) })) });
-      }
-      const mine = /^\/v1\/me\/connections\/(slack|jira|confluence|drive)(?:\/(authorize))?$/.exec(url.pathname);
-      if (mine) {
-        if (!oauth) return await reply(response, 404, { error: "Source OAuth is not configured" });
-        const source = mine[1] as Source;
-        if (mine[2] === "authorize" && request.method === "POST") return await reply(response, 200, { url: await oauth.begin(source, user, "user") });
-        if (!mine[2] && request.method === "DELETE") {
-          await oauth.removeUser(source, user.id);
-          brain.audit.append("user_connection_removed", user.id, { source });
-          await brain.persist();
-          return await reply(response, 200, { ok: true });
-        }
-        return await reply(response, 404, { error: "Not found" });
-      }
-
       if (request.method === "GET" && url.pathname === "/v1/me") {
         return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
       }
@@ -345,12 +323,12 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const input = await body(request);
         if (url.pathname === "/v1/service/jira/issue") {
           const issue = await jiraAsUser.createIssue(user, parseIssue(input));
-          if (!issue) return await reply(response, 409, { error: "Jira is not connected for this user" });
-          brain.audit.append("jira_issue_created_from_slack", user.id, { key: issue.key });
+          if (!issue) return await reply(response, 409, { error: "Jira is not connected" });
+          brain.audit.append("jira_issue_created_from_slack", user.id, { key: issue.key, via: "shared_connection" });
           return await reply(response, 201, issue);
         }
         const comment = parseComment(input);
-        if (!await jiraAsUser.comment(user, comment.key, comment.text)) return await reply(response, 409, { error: "Jira is not connected for this user" });
+        if (!await jiraAsUser.comment(user, comment.key, comment.text)) return await reply(response, 409, { error: "Jira is not connected" });
         brain.audit.append("jira_comment_added_from_slack", user.id, { key: comment.key });
         return await reply(response, 200, { ok: true });
       }
@@ -448,6 +426,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!match) return await reply(response, 404, { error: "Not found" });
         const source = match[1] as Source;
         if (match[2] === "authorize" && request.method === "POST") {
+          if (source === "slack" && slackCombined) return await reply(response, 200, { url: await slackInstallation!.begin(user) });
           if (oauth) return await reply(response, 200, { url: await oauth.begin(source, user) });
           await brain.connect(user, source); return await reply(response, 200, { connected: true });
         }
