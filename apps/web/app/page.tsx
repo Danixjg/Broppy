@@ -79,7 +79,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   const primary = session ? <a className="btn primary" href={target}>Open your workspace <ArrowRight size={17} /></a>
     : authConfigured && mode === "on" ? <a className="btn primary" href="/signup">Create your company <ArrowRight size={17} /></a>
-      : authConfigured ? <a className="btn primary" href={login(SETUP_PAGE)}>{mode === "closed" ? "Sign in" : "Get started"} <ArrowRight size={17} /></a> : null;
+      : authConfigured ? <a className="btn primary" href={login(SETUP_PAGE)}>Sign in <ArrowRight size={17} /></a> : null;
   const secondary = session ? <a className="btn" href={SETUP_PAGE}>Continue setup</a>
     : authConfigured && mode === "on" ? <a className="btn" href={login(target)}>Sign in</a>
       : demo ? <a className="btn" href={demoLink}>Try the demo</a> : null;
@@ -91,7 +91,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       <nav aria-label="Page sections"><a href="#how">How it works</a><a href="#why">Why Broppy</a><a href="#security">Security</a><a href="#faq">Questions</a></nav>
       <div className="nav-actions">
         {session ? <><a className="link" href="/auth/logout">Sign out</a><a className="btn small primary" href={target}>Open workspace</a></>
-          : authConfigured ? <><a className="link" href={login(target)}>Sign in</a>{mode !== "closed" && <a className="btn small primary" href={mode === "on" ? "/signup" : login(SETUP_PAGE)}>{mode === "on" ? "Create your company" : "Get started"}</a>}</>
+          : authConfigured ? <><a className="link" href={login(target)}>Sign in</a>{mode === "on" && <a className="btn small primary" href="/signup">Create your company</a>}</>
             : demo ? <a className="btn small primary" href={demoLink}>Try the demo</a> : null}
       </div>
     </header>

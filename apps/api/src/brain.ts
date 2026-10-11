@@ -402,6 +402,18 @@ export class Brain {
   async query(user: User, question: string, onTrace?: (traceId: string) => void,
     revalidateUser?: () => Promise<User | undefined>,
     options: { project?: string; within?: { project: string; docIds: readonly string[] } } = {}): Promise<QueryAnswer> {
+    // One log line per question with where the time went, in milliseconds per stage. It never carries the question or any content.
+    const started = performance.now();
+    const stages: Record<string, number> = {};
+    let last = started;
+    const lap = (stage: string) => { const now = performance.now(); stages[stage] = Math.round(now - last); last = now; };
+    try { return await this.answerQuery(user, question, onTrace, revalidateUser, options, lap); }
+    finally { console.info(JSON.stringify({ event: "query_timing", totalMs: Math.round(performance.now() - started), stages })); }
+  }
+
+  private async answerQuery(user: User, question: string, onTrace: ((traceId: string) => void) | undefined,
+    revalidateUser: (() => Promise<User | undefined>) | undefined,
+    options: { project?: string; within?: { project: string; docIds: readonly string[] } }, lap: (stage: string) => void): Promise<QueryAnswer> {
     this.assertOrg(user);
     const trimmed = question.trim();
     if (!trimmed || trimmed.length > 500) throw new Error("Invalid question");
@@ -417,6 +429,7 @@ export class Brain {
       this.audit.append(type, user.id, { traceId, ...data });
     audit("query_received", { question: trimmed, questionHash: hashQuestion(trimmed) });
     await this.audit.flush();
+    lap("audit_start");
 
     // ② Access is decided on document IDs only, and every decision is audited.
     const authorize = async (docIds: string[]): Promise<Set<string>> => {
@@ -459,6 +472,7 @@ export class Brain {
         catch { this.pauseEmbedding(); audit("embedding_fallback", { reason: "failed" }); }
       }
     }
+    lap("plan_and_embed");
     // Keep the full local candidate set so denied hits cannot crowd an
     // accessible document out of the authorization pass.
     const localCandidates = await this.index.searchAsync(plan.searchText, Number.MAX_SAFE_INTEGER, queryVector);
@@ -474,6 +488,7 @@ export class Brain {
       }
       catch { audit("search_fallback", {}); }
     }
+    lap("search");
     if (plan.window) {
       candidates = candidates.filter(item => {
         const doc = this.index.documents.get(item.docId);
@@ -492,6 +507,7 @@ export class Brain {
     }
 
     const allowedIds = await authorize(candidateDocIds);
+    lap("authorize");
     if (!allowedIds.size) return this.noResult(user, traceId, scope);
 
     const asksForHistory = /\b(superseded|old|draft|historical|previous)\b/i.test(trimmed);
@@ -557,9 +573,11 @@ export class Brain {
       });
     }
 
+    lap("live_checks");
     if (!context.length) return this.noResult(user, traceId, scope);
     audit("context_sent", { chunkIds: [...citationMap.keys()] });
     await this.audit.flush();
+    lap("audit_context");
     const evidence = new Map(context.map(item => [item.citation, item.text]));
     let generated: string;
     // If the organization's own model can't be looked up, answer with the built-in writer rather than send the
@@ -578,6 +596,7 @@ export class Brain {
       generated = await this.fallbackLlm.generate(context, trimmed);
       fromModel = false;
     }
+    lap("model");
     // Each line must say only what a passage it cites says (packages/retrieval/src/grounding.ts).
     let checked = checkAnswer(generated, citationMap, evidence);
     const leftOut = checked.report.removed;
@@ -613,6 +632,7 @@ export class Brain {
       audit("output_access_decision", { ...this.auditDocument(citation.docId), allowed });
       if (!allowed) return this.noResult(user, traceId, scope);
     }
+    lap("revalidate_and_recheck");
     audit("answer_returned", {
       answer: answer.text,
       documents: answer.citations.map(citation => this.auditDocument(citation.docId)),
