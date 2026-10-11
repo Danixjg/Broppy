@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Auth0Management } from "./auth0-management.js";
 import { ManagementError } from "./auth0-management.js";
 import type { Companies } from "./companies.js";
@@ -16,6 +16,14 @@ const clean = (value: unknown, max: number) => typeof value === "string"
 export function companyAddress(name: string): string {
   return name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
     .replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+}
+
+/**
+ * The address of a personal workspace, worked out from the email alone: the same email always gives the same address, so a
+ * person can find their workspace at sign-in without remembering a name, and two people with the same name never clash.
+ */
+export function personalAddress(email: string): string {
+  return `me-${createHash("sha256").update(normalizeEmail(email)).digest("hex").slice(0, 16)}`;
 }
 
 /** Counts events per key inside a window; used to keep a public form from being used to send mail or create companies in bulk. */
@@ -79,11 +87,13 @@ export class Signup {
       const wanted = Buffer.from(this.settings.accessCode);
       if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) throw new SignupError(403, "That access code isn't right. Check it and try again.");
     }
-    const company = clean(input.company, 60);
+    // A personal workspace is one person's own: it is named after them and they are its only member. Anything else is a company.
+    const personal = input.kind === "personal";
+    const company = personal ? clean(input.name, 80) : clean(input.company, 60);
     const name = clean(input.name, 80);
     const email = typeof input.email === "string" ? normalizeEmail(input.email) : "";
-    if (company.length < 2) throw new SignupError(400, "Enter your company's name.");
-    if (companyAddress(company).length < 2) throw new SignupError(400, "Use letters or numbers in your company's name.");
+    if (!personal && company.length < 2) throw new SignupError(400, "Enter your company's name.");
+    if (!personal && companyAddress(company).length < 2) throw new SignupError(400, "Use letters or numbers in your company's name.");
     if (!name) throw new SignupError(400, "Enter your name.");
     if (!EMAIL.test(email) || email.length > 254) throw new SignupError(400, "Enter a valid work email address.");
     if (!this.limiter.allow("all", this.settings.perHour ?? 20, HOUR) || !this.limiter.allow(`email:${email}`, 3, HOUR)) {
@@ -96,7 +106,8 @@ export class Signup {
       // Someone who already belongs to a company is not made the admin of another by a form. Answer as if it worked.
       if (await this.companies.emailInUse(email)) return { sent: true };
 
-      const created = await this.createOrganization(company);
+      const created = personal ? await this.createPersonalOrganization(email, name) : await this.createOrganization(company);
+      if (!created) return { sent: true };
       try {
         await this.companies.register({ orgId: created.id, name: created.displayName, createdBy: email });
         await this.management.forOrg(created.id).invite(email, "Broppy");
@@ -114,6 +125,24 @@ export class Signup {
     } finally { this.asking.delete(email); }
   }
 
+  /**
+   * A personal workspace for an email. If one already exists it was made by an earlier attempt that was never opened (an
+   * email that has signed in is refused above), so the invitation is sent again and nothing new is created.
+   */
+  private async createPersonalOrganization(email: string, name: string) {
+    const address = personalAddress(email);
+    try { return await this.management.createOrganization({ name: address, displayName: name, connectionId: this.settings.connectionId }); }
+    catch (error) {
+      if (error instanceof ManagementError && error.status === 409) {
+        const existing = await this.management.findOrganization(address).catch(() => undefined);
+        if (existing && await this.companies.isKnown(existing.id)) await this.management.forOrg(existing.id).invite(email, "Broppy").catch(() => undefined);
+        return undefined;
+      }
+      if (error instanceof ManagementError) throw new SignupError(502, "We couldn't set up your workspace just now. Try again in a minute.");
+      throw error;
+    }
+  }
+
   /** The Auth0 organization for a company name. A name that is taken is refused, so one address always means one company. */
   private async createOrganization(company: string) {
     try { return await this.management.createOrganization({ name: companyAddress(company), displayName: company, connectionId: this.settings.connectionId }); }
@@ -128,6 +157,16 @@ export class Signup {
     // Each step is attempted whatever the others do; leftovers are harmless once the company is not in the list.
     await this.companies.remove(orgId).catch(() => undefined);
     await this.management.deleteOrganization(orgId).catch(() => undefined);
+  }
+
+  /** The Auth0 organization of the personal workspace for an email typed at sign-in, if it is one of ours. */
+  async findPersonal(email: unknown): Promise<{ organization: string; name: string } | undefined> {
+    const address = typeof email === "string" && EMAIL.test(normalizeEmail(email)) ? personalAddress(email) : "";
+    if (!address) return undefined;
+    if (!this.limiter.allow("find", 600, 60_000)) throw new SignupError(429, "Too many tries. Wait a moment and try again.");
+    const found = await this.management.findOrganization(address);
+    if (!found || !await this.companies.isKnown(found.id)) return undefined;
+    return { organization: found.id, name: found.displayName };
   }
 
   /** The Auth0 organization and display name for a company address typed at sign-in, if it is one of ours. */

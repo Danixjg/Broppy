@@ -7,6 +7,11 @@ export const signupMode = (): SignupMode =>
 /** Whether sign-in starts by asking for the company, instead of going to a single fixed company. */
 export const asksForCompany = (): boolean => signupMode() !== "off";
 
+/** The two ways to sign up: a workspace for one person, or a company's, whose first person becomes its admin. */
+export type SignupKind = "personal" | "enterprise";
+export const signupKind = (value: unknown): SignupKind | undefined => value === "personal" || value === "enterprise" ? value : undefined;
+export const signupPath = (kind: SignupKind): string => `/signup/${kind}`;
+
 export const needsAccessCode = (): boolean => process.env.SIGNUP_NEEDS_CODE === "on";
 
 /** The company a plain sign-in is limited to. Several companies share this site once sign-up is open, so then none. */
