@@ -1,6 +1,6 @@
 # Broppy commitment workflow implementation
 
-The parallel build implements the six bounded batches proposed in the other Codex window's repository audit. The recovered audit is `/tmp/broppy-repository-audit.md`; the starting revision was `6e3f97a612e43ec2875c5bff5c0c205cc6e6de99`. Work ran in isolated checkouts and was merged with the other window's completed Rust migration. The narrower A1/A2 Slack patch was compared before integration; its unknown legacy-outcome fence and confirmed-no-effect reservation rules are retained in the broader canonical proposal model.
+The parallel build implements the six bounded batches proposed in the other Codex window's repository audit. The starting revision was `6e3f97a612e43ec2875c5bff5c0c205cc6e6de99`. Work ran in isolated checkouts and was merged with the other window's completed Rust migration. The narrower A1/A2 Slack patch was compared before integration; its unknown legacy-outcome fence and confirmed-no-effect reservation rules are retained in the broader canonical proposal model.
 
 ## Resulting behavior
 
@@ -29,24 +29,9 @@ See [Slack setup and recovery](../apps/slack/README.md), [live sources and sign-
 
 ## Verification
 
-The completed shared-workspace integration passed these checks:
+`pnpm test`, `pnpm typecheck`, `pnpm rust:check`, `pnpm rust:smoke` and `node tools/check-workspace.mjs` cover this work and run in CI. `apps/slack/verify-recovery.sql` checks the recovery migration against a local PostgreSQL database; see [Slack setup and recovery](../apps/slack/README.md).
 
-| Check | Result | Local evidence |
-| --- | --- | --- |
-| Rust workspace tests | 56 passed | `/tmp/broppy-parallel-20261005/main-final-test.log` |
-| TypeScript suite | 543 passed, one existing skip, 46 files | `/tmp/broppy-parallel-20261005/main-final-test.log` |
-| Web behavior checks | 24 passed | `/tmp/broppy-parallel-20261005/main-final-test.log` |
-| Root and web type checks | Passed | `/tmp/broppy-parallel-20261005/main-final-typecheck.log` |
-| Rust formatting and Clippy | Passed | `/tmp/broppy-parallel-20261005/main-rust-final-check.log` |
-| Production web build | Passed | `/tmp/broppy-parallel-20261005/main-web-build.log` |
-| Running browser/API | Passed | `/tmp/broppy-parallel-20261005/main-browser-final.log` |
-| PostgreSQL recovery and explicit-link assertions | Passed | `/tmp/broppy-parallel-20261005/sql-final.log` |
-| Fresh two-connection create reservation | One durable operation | `/tmp/broppy-parallel-20261005/sql-concurrency-final.log` |
-| Native HTTP, signed audit restore and independent anchor smoke | Passed | `/tmp/broppy-parallel-20261005/main-rust-smoke.log` |
-
-The final main run matches the isolated combination. One worked-example check initially exceeded its five-second timeout during concurrent compilation; the complete suite passed after compilation finished. No test assertions or timeouts were weakened. The failure log is retained at `/tmp/broppy-parallel-20261005/main-worked-examples-timeout.log`. Local artifacts remain under `/tmp/broppy-parallel-20261005/`, including the recovered context, compared designs, independent reviews, SQL outputs and browser screenshot. The append-only decision trail is [parallel-implementation-decisions.tsv](parallel-implementation-decisions.tsv).
-
-The browser harness runs the real API and Next server with a sanitized demo environment. It verifies edit/save/reload/create, authorized exact issue navigation, identity-switch access denial and recovery, and scoped/unscoped questions. It makes no provider writes. Vitest uses isolated process workers: the native thread pool completed cases but stalled during worker teardown in this environment; the process pool exits normally.
+The browser harness runs the real API and Next server with a sanitized demo environment. It verifies edit/save/reload/create, authorized exact issue navigation, identity-switch access denial and recovery, and scoped/unscoped questions. It makes no provider writes. Vitest uses isolated process workers: the native thread pool completed cases but stalled during worker teardown, while the process pool exits normally.
 
 ## Practical limits
 
