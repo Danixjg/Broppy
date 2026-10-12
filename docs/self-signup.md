@@ -23,8 +23,10 @@ The front page offers **Sign up** (personal) and **Enterprise sign up** (a compa
 ## What happens
 
 1. The sign-up form posts to the web app, which calls `POST /v1/signup` on the API.
-2. The API creates an Auth0 organization for the company (its short name is the company name in lowercase letters,
-   digits and hyphens; a name that is already taken is refused, so one name is one company), turns on the sign-in database
+2. The API creates an Auth0 organization for the company. Its short name, the sign-in address people type, is the
+   company name in lowercase letters, digits and hyphens followed by a random ending, such as `acme-7k2qmx`, so two
+   companies may share a name and nobody can take a name before the real company signs up. The admin sees the address at
+   the top of the guided setup. It then turns on the sign-in database
    for it, lists the company in `public.organizations`, sends an Auth0 organization invitation to that email, and only then
    adds the person as the company's admin in `workspace_users`.
 3. The admin is whoever can open the invitation. At their first sign-in the directory entry becomes theirs only if
@@ -84,8 +86,9 @@ Redeploy both projects.
   that was only invited and never signed in doesn't count, so nobody can use a stranger's address to stop them signing their
   own company up (they get an invitation they can ignore). The answers match but not the time they take, so a patient caller
   could still tell the two apart.
-- Anyone can sign up with a company name that sounds like a real one before the real company does. The access code or
-  `closed` mode is the defence; names can't be reclaimed from the page.
+- Company names are not unique and prove nothing: anyone can sign up a company called "Aspire". The real Aspire still
+  signs up and gets its own address, but invitations from the other one look just as real. Companies that signed up
+  before addresses had a random ending keep their plain address.
 - A company's AI model can be Anthropic or OpenAI only. The "OpenAI-compatible" option with an address of its own is
   refused for companies that signed up, because the API would call that address from inside its own network. Your existing
   company keeps it.

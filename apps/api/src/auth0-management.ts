@@ -118,6 +118,11 @@ export class Auth0Management {
     await this.call(`organizations/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  /** This organization: its address (the short name typed at sign-in) and display name. */
+  async organization(): Promise<Auth0Organization> {
+    return organization(await this.call(`organizations/${this.org}`));
+  }
+
   /** The organization with this short name, or nothing when there is none. */
   async findOrganization(name: string): Promise<Auth0Organization | undefined> {
     try { return organization(await this.call(`organizations/name/${encodeURIComponent(name)}`)); }

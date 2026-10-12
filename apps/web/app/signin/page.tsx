@@ -41,7 +41,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
       const found = await findCompany(search.find);
       if (typeof found === "object") redirect(`/auth/login?${new URLSearchParams({ organization: found.organization, returnTo })}`);
       problem = { for: search.for, text: found === "none"
-        ? search.for === "company" ? "We couldn't find a company with that name. Check the spelling, or ask your admin for the name they used."
+        ? search.for === "company" ? "We couldn't find a company at that address. Check the spelling, or ask your admin: it is shown on their setup page."
           : "We couldn't find a personal workspace for that email. Check the spelling, or sign up for one."
         : "We couldn't reach Broppy just now. Please try again in a minute." };
     }
@@ -50,7 +50,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
   return <AuthShell>
     <section className="form-card">
       <h1>Sign in</h1>
-      <p className="form-lead">Sign in to your personal workspace with your email, or to your company with its name. We'll take you to the right sign-in.</p>
+      <p className="form-lead">Sign in to your personal workspace with your email, or to your company with its sign-in address. We'll take you to the right sign-in.</p>
       <h2 className="form-sub">Personal</h2>
       {problem?.for === "email" && <p className="form-error" role="alert">{problem.text}</p>}
       <form method="get" action="/signin" className="form">
@@ -61,7 +61,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
       <h2 className="form-sub">Company</h2>
       {problem?.for === "company" && <p className="form-error" role="alert">{problem.text}</p>}
       <form method="get" action="/signin" className="form">
-        <label>Company name<input name="company" required maxLength={80} autoComplete="organization" defaultValue={company} placeholder="Acme" /></label>
+        <label>Company address<input name="company" required maxLength={80} autoComplete="off" spellCheck={false} defaultValue={company} placeholder="acme-7k2qmx" /></label>
         {hidden}
         <button className="btn" type="submit">Continue</button>
       </form>

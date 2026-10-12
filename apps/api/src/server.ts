@@ -16,7 +16,7 @@ import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.
 import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
 import { Companies } from "./companies.js";
-import { Signup, SignupError } from "./signup.js";
+import { isPersonalAddress, Signup, SignupError } from "./signup.js";
 import { TenantRegistry } from "./tenants.js";
 import { People, PeopleError } from "./people.js";
 import { ServiceActor } from "./service-actor.js";
@@ -555,6 +555,17 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           return await reply(response, 200, result);
         }
         return await reply(response, 404, { error: "Not found" });
+      }
+
+      // The address people type at sign-in to reach this company, shown to its admins so they can pass it on.
+      if (request.method === "GET" && url.pathname === "/v1/admin/company") {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        const own = current.isHome ? management : management?.forOrg(current.orgId);
+        // With one fixed company, sign-in never asks for an address.
+        if (!own || signupMode === "off") return await reply(response, 404, { error: "Not found" });
+        const found = await own.organization();
+        // A personal workspace is found from its owner's email, so its address is never typed.
+        return await reply(response, 200, { address: isPersonalAddress(found.name) ? null : found.name, name: found.displayName });
       }
 
       if (url.pathname === "/v1/admin/model") {

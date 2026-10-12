@@ -10,7 +10,6 @@ export const metadata = { title: "Sign up · Broppy" };
 const MESSAGES: Record<string, string> = {
   invalid: "Check the form: add your name and a valid email address, and your company's name if you are signing up a company.",
   code: "That access code isn't right. Check it and try again.",
-  taken: "That company name is taken. Add a word to it and try again.",
   limit: "Too many tries just now. Please wait a little while and try again.",
   busy: "We couldn't create your company just now. Please try again in a minute."
 };

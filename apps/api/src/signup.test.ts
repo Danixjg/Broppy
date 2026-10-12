@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { ManagementError } from "./auth0-management.js";
-import { companyAddress, Limiter, personalAddress, Signup, SignupError } from "./signup.js";
+import { companyAddress, isPersonalAddress, Limiter, newCompanyAddress, personalAddress, Signup, SignupError } from "./signup.js";
 
-function setup(overrides: { create?: () => Promise<{ id: string; name: string; displayName: string }>; invite?: () => Promise<void>; inUse?: boolean; code?: string; open?: boolean } = {}) {
+function setup(overrides: { create?: (input: { name: string; displayName: string }) => Promise<{ id: string; name: string; displayName: string }>; invite?: () => Promise<void>; inUse?: boolean; code?: string; open?: boolean } = {}) {
   let counter = 0;
   const invite = vi.fn(overrides.invite ?? (async () => {}));
   const management = {
@@ -16,7 +16,7 @@ function setup(overrides: { create?: () => Promise<{ id: string; name: string; d
   const add = vi.fn(async () => ({}));
   const created = vi.fn();
   const signup = new Signup(management as any, companies as any, () => ({ add }) as any,
-    { connectionId: "con_1", accessCode: overrides.code, open: overrides.open, onCreated: created });
+    { connectionId: "con_1", accessCode: overrides.code, open: overrides.open, onCreated: created }, Date.now, () => 0);
   return { signup, management, companies, add, invite, created };
 }
 
@@ -27,21 +27,45 @@ describe("a company signing itself up", () => {
     expect(companyAddress("!!")).toBe("");
   });
 
+  it("gives a new company its name followed by a random ending", () => {
+    let next = 0;
+    expect(newCompanyAddress("Acme & Sons", () => next++)).toBe("acme-and-sons-abcdef");
+    // Auth0 allows 50 characters; a long name is cut before the ending.
+    const long = newCompanyAddress("x".repeat(80) + " Holdings");
+    expect(long).toMatch(/^x{40}-[a-z2-9]{6}$/);
+    expect(newCompanyAddress("Acme")).not.toBe(newCompanyAddress("Acme"));
+    // A company can never be given an address that looks like someone's personal workspace.
+    expect(isPersonalAddress(newCompanyAddress("me 0123456789abcdef"))).toBe(false);
+    expect(isPersonalAddress(personalAddress("dana@gmail.test"))).toBe(true);
+  });
+
   it("creates the organization, lists the company, adds the first admin and invites them", async () => {
     const { signup, management, companies, add, invite, created } = setup();
     await expect(signup.create({ company: "Acme", name: "Dana", email: " Dana@Acme.test " })).resolves.toEqual({ sent: true });
-    expect(management.createOrganization).toHaveBeenCalledWith({ name: "acme", displayName: "Acme", connectionId: "con_1" });
+    expect(management.createOrganization).toHaveBeenCalledWith({ name: "acme-aaaaaa", displayName: "Acme", connectionId: "con_1" });
     expect(companies.register).toHaveBeenCalledWith({ orgId: "org_1", name: "Acme", createdBy: "dana@acme.test" });
     expect(add).toHaveBeenCalledWith({ id: "dana", name: "Dana", email: "dana@acme.test", role: "admin", groups: [] });
     expect(invite).toHaveBeenCalledWith("dana@acme.test", "Broppy");
     expect(created).toHaveBeenCalledWith("org_1");
   });
 
-  it("refuses a name that is taken, so one address is one company", async () => {
-    const taken = setup({ create: async () => { throw new ManagementError("exists", 409); } });
-    await expect(taken.signup.create({ company: "Acme", name: "D", email: "d@acme.test" })).rejects.toMatchObject({ status: 409 });
-    expect(taken.management.createOrganization).toHaveBeenCalledTimes(1);
-    expect(taken.add).not.toHaveBeenCalled();
+  it("lets two companies share a name, each at its own address", async () => {
+    const { signup, management, add } = setup();
+    await signup.create({ company: "Acme", name: "D", email: "d@gmail.test" });
+    await signup.create({ company: "Acme", name: "E", email: "e@gmail.test" });
+    expect(management.createOrganization).toHaveBeenCalledTimes(2);
+    expect(add).toHaveBeenCalledTimes(2);
+  });
+
+  it("tries another ending when an address is in use, and gives up after three", async () => {
+    let tries = 0;
+    const lucky = setup({ create: async input => { if (++tries < 3) throw new ManagementError("exists", 409); return { id: "org_1", name: input.name, displayName: input.displayName }; } });
+    await expect(lucky.signup.create({ company: "Acme", name: "D", email: "d@acme.test" })).resolves.toEqual({ sent: true });
+    expect(lucky.management.createOrganization).toHaveBeenCalledTimes(3);
+    const unlucky = setup({ create: async () => { throw new ManagementError("exists", 409); } });
+    await expect(unlucky.signup.create({ company: "Acme", name: "D", email: "d@acme.test" })).rejects.toMatchObject({ status: 502 });
+    expect(unlucky.management.createOrganization).toHaveBeenCalledTimes(3);
+    expect(unlucky.add).not.toHaveBeenCalled();
   });
 
   it("creates nothing and answers the same for an email already on a company's list", async () => {
@@ -94,7 +118,8 @@ describe("a company signing itself up", () => {
 
   it("finds only a company that signed up here", async () => {
     const { signup, management } = setup();
-    expect(await signup.find("Acme")).toEqual({ organization: "org_1", name: "Acme" });
+    // Typed in any case; companies from before random endings keep a plain address like this one.
+    expect(await signup.find("ACME")).toEqual({ organization: "org_1", name: "Acme" });
     expect(management.findOrganization).toHaveBeenCalledWith("acme");
     expect(await signup.find("nobody")).toBeUndefined();
     expect(await signup.find("!")).toBeUndefined();

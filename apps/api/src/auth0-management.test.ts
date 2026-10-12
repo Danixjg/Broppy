@@ -27,6 +27,13 @@ describe("Auth0 management for several companies", () => {
     await expect(management.createOrganization({ name: "acme", displayName: "Acme", connectionId: "c" })).rejects.toMatchObject({ status: 409 });
   });
 
+  it("reads the organization it was made for, with its sign-in address", async () => {
+    const { management, calls } = setup(url => url.pathname.endsWith("/organizations/org_b")
+      ? new Response(JSON.stringify({ id: "org_b", name: "acme-7k2qmx", display_name: "Acme" }), { status: 200 }) : new Response("{}", { status: 404 }));
+    expect(await management.forOrg("org_b").organization()).toEqual({ id: "org_b", name: "acme-7k2qmx", displayName: "Acme" });
+    expect(calls.at(-1)).toMatchObject({ method: "GET" });
+  });
+
   it("finds an organization by name and returns nothing for an unknown one", async () => {
     const { management } = setup(url => url.pathname.endsWith("/acme") ? new Response(JSON.stringify({ id: "org_1", name: "acme" }), { status: 200 }) : new Response("{}", { status: 404 }));
     expect(await management.findOrganization("acme")).toEqual({ id: "org_1", name: "acme", displayName: "acme" });

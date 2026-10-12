@@ -72,6 +72,10 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
       const found = auth0Orgs.find(item => item.name === decodeURIComponent(path.slice(6)));
       return found ? json(found) : json({ message: "none" }, 404);
     }
+    if (method === "GET" && /^\/org_\w+$/.test(path)) {
+      const found = auth0Orgs.find(item => item.id === path.slice(1));
+      return found ? json(found) : json({ message: "none" }, 404);
+    }
     if (method === "DELETE") { const at = auth0Orgs.findIndex(item => item.id === path.slice(1)); if (at >= 0) auth0Orgs.splice(at, 1); return json(undefined, 204); }
     const invite = /^\/([^/]+)\/invitations$/.exec(path);
     if (invite && method === "GET") return json(invitations.filter(item => item.org === invite[1]).map((item, index) => ({ id: `inv${index}`, invitee: { email: item.email } })));
@@ -169,7 +173,7 @@ describe("several companies in one API", () => {
   it("creates a company, its organization and an invited first admin from the sign-up form", async () => {
     const result = await call("POST", "/v1/signup", undefined, { company: "Acme & Sons", name: "Dana Lee", email: "Dana@Acme.test" });
     expect(result.status).toBe(202);
-    expect(auth0Orgs).toEqual([{ id: "org_new1", name: "acme-and-sons", display_name: "Acme & Sons" }]);
+    expect(auth0Orgs).toEqual([{ id: "org_new1", name: expect.stringMatching(/^acme-and-sons-[a-z2-9]{6}$/), display_name: "Acme & Sons" }]);
     expect(invitations).toEqual([{ org: "org_new1", email: "dana@acme.test" }]);
     expect(tables.organizations).toEqual([expect.objectContaining({ org_id: "org_new1", name: "Acme & Sons", status: "active", created_by_email: "dana@acme.test" })]);
     expect(tables.workspace_users.filter(row => row.org_id === "org_new1")).toEqual([expect.objectContaining({ user_id: "dana", role: "admin", auth0_sub: null })]);
@@ -237,19 +241,33 @@ describe("several companies in one API", () => {
   });
 
   it("serves the company address lookup for sign-in", async () => {
-    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).body).toEqual({ organization: "org_new1", name: "Acme & Sons" });
+    const address = auth0Orgs[0].name;
+    expect((await call("GET", `/v1/companies/find?name=${address.toUpperCase()}`)).body).toEqual({ organization: "org_new1", name: "Acme & Sons" });
+    // The name alone is not an address.
+    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).status).toBe(404);
     expect((await call("GET", "/v1/companies/find?name=nobody")).status).toBe(404);
     // An organization that exists in Auth0 but never signed up here is not offered.
     auth0Orgs.push({ id: "org_other9", name: "unrelated", display_name: "Unrelated" });
     expect((await call("GET", "/v1/companies/find?name=unrelated")).status).toBe(404);
   });
 
-  it("refuses a company name that is taken, so one address is one company", async () => {
-    const before = auth0Orgs.length;
+  it("shows a company's admin its sign-in address, and only its admin", async () => {
+    const dana = { sub: "auth0|dana", org: "org_new1" };
+    expect((await call("GET", "/v1/admin/company", dana)).body).toEqual({ address: auth0Orgs[0].name, name: "Acme & Sons" });
+    // Someone the admin never added gets nothing, whatever organization their sign-in names.
+    emails["auth0|outsider"] = { email: "outsider@acme.test", verified: true };
+    expect((await call("GET", "/v1/admin/company", { sub: "auth0|outsider", org: "org_new1" })).status).toBe(403);
+  });
+
+  it("lets a second company take the same name, at its own address, without touching the first", async () => {
     const second = await call("POST", "/v1/signup", undefined, { company: "Acme & Sons", name: "Eve", email: "eve@elsewhere.test" });
-    expect(second.status).toBe(409);
-    expect(auth0Orgs).toHaveLength(before);
-    expect(tables.organizations.every(row => row.created_by_email !== "eve@elsewhere.test")).toBe(true);
+    expect(second.status).toBe(202);
+    const both = auth0Orgs.filter(item => item.display_name === "Acme & Sons");
+    expect(both).toHaveLength(2);
+    expect(both[0].name).not.toBe(both[1].name);
+    const eve = tables.organizations.find(row => row.created_by_email === "eve@elsewhere.test")!;
+    expect(eve.org_id).not.toBe("org_new1");
+    expect(tables.workspace_users.filter(row => row.org_id === "org_new1").map(row => row.email)).not.toContain("eve@elsewhere.test");
   });
 
   it("does not let a stranger use someone's email to stop them signing their own company up", async () => {
