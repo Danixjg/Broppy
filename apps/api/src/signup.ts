@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import type { Auth0Management } from "./auth0-management.js";
 import { ManagementError } from "./auth0-management.js";
 import type { Companies } from "./companies.js";
@@ -18,6 +18,18 @@ export function companyAddress(name: string): string {
     .replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
 }
 
+const SUFFIX_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789";
+
+/**
+ * The address a new company gets: its name followed by a random ending, such as acme-7k2qmx. Names don't have to be unique,
+ * so nobody can take a company's name before it signs up, and an address never looks like a personal one (me- and 16 hex).
+ * Letters that are easy to confuse (0/o, 1/l/i) are left out, since people type the address at sign-in.
+ */
+export function newCompanyAddress(name: string, pick: (max: number) => number = randomInt): string {
+  const ending = Array.from({ length: 6 }, () => SUFFIX_LETTERS[pick(SUFFIX_LETTERS.length)]).join("");
+  return `${companyAddress(name).slice(0, 40).replace(/-+$/g, "")}-${ending}`;
+}
+
 /**
  * The address of a personal workspace, worked out from the email alone: the same email always gives the same address, so a
  * person can find their workspace at sign-in without remembering a name, and two people with the same name never clash.
@@ -25,6 +37,8 @@ export function companyAddress(name: string): string {
 export function personalAddress(email: string): string {
   return `me-${createHash("sha256").update(normalizeEmail(email)).digest("hex").slice(0, 16)}`;
 }
+
+export const isPersonalAddress = (address: string): boolean => /^me-[0-9a-f]{16}$/.test(address);
 
 /** Counts events per key inside a window; used to keep a public form from being used to send mail or create companies in bulk. */
 export class Limiter {
@@ -70,7 +84,7 @@ export class Signup {
   private readonly asking = new Set<string>();
   constructor(private readonly management: Auth0Management, private readonly companies: Companies,
     private readonly directoryFor: (orgId: string) => Pick<UserDirectory, "add">, private readonly settings: SignupSettings,
-    now: () => number = Date.now) {
+    now: () => number = Date.now, private readonly pick: (max: number) => number = randomInt) {
     if (!settings.connectionId) throw new Error("Self-signup needs AUTH0_SIGNUP_CONNECTION_ID");
     this.limiter = new Limiter(now);
   }
@@ -143,13 +157,15 @@ export class Signup {
     }
   }
 
-  /** The Auth0 organization for a company name. A name that is taken is refused, so one address always means one company. */
+  /** The Auth0 organization for a company, at a new address. An address already in use only means another random ending. */
   private async createOrganization(company: string) {
-    try { return await this.management.createOrganization({ name: companyAddress(company), displayName: company, connectionId: this.settings.connectionId }); }
-    catch (error) {
-      if (error instanceof ManagementError && error.status === 409) throw new SignupError(409, "That company name is taken. Add a word to it and try again.");
-      if (error instanceof ManagementError) throw new SignupError(502, "We couldn't set up your company just now. Try again in a minute.");
-      throw error;
+    for (let attempt = 1; ; attempt++) {
+      try { return await this.management.createOrganization({ name: newCompanyAddress(company, this.pick), displayName: company, connectionId: this.settings.connectionId }); }
+      catch (error) {
+        if (error instanceof ManagementError && error.status === 409 && attempt < 3) continue;
+        if (error instanceof ManagementError) throw new SignupError(502, "We couldn't set up your company just now. Try again in a minute.");
+        throw error;
+      }
     }
   }
 
@@ -169,7 +185,10 @@ export class Signup {
     return { organization: found.id, name: found.displayName };
   }
 
-  /** The Auth0 organization and display name for a company address typed at sign-in, if it is one of ours. */
+  /**
+   * The Auth0 organization and display name for a company address typed at sign-in, if it is one of ours. Companies that
+   * signed up before addresses had a random ending keep their plain one, which is found the same way.
+   */
   async find(address: unknown): Promise<{ organization: string; name: string } | undefined> {
     const short = companyAddress(clean(address, 80));
     if (short.length < 2) return undefined;

@@ -251,6 +251,9 @@ async function start() {
     const message = returnMessage(new URLSearchParams(location.search));
     if (message) { notice(message); history.replaceState(null, "", location.pathname + (persona ? `?user=${encodeURIComponent(persona)}` : "")); }
     $("setup").hidden = false;
+    void request("/v1/admin/company").then(company => {
+      if (company?.address) { $("address-value").textContent = company.address; $("address").hidden = false; }
+    }).catch(() => undefined);
     await refresh();
   } catch (error) {
     $("gate").hidden = false; $("gate-title").textContent = "We couldn't open setup";
