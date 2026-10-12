@@ -1,29 +1,48 @@
 name: Checks
-on: [push, pull_request]
+on:
+  # Pushes to main and every pull request; a branch push with an open PR would otherwise run twice.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  PLAYWRIGHT_VERSION: 1.63.0
+  PLAYWRIGHT_BROWSERS_PATH: /tmp/broppy-playwright/browsers
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: corepack prepare pnpm@9.15.0 --activate
+          cache: pnpm
       - run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm rust:check
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm --filter @brain/web build:workspace
-      - run: npm install --prefix /tmp/broppy-playwright --no-audit --no-fund --ignore-scripts playwright@1.63.0
-      - run: node /tmp/broppy-playwright/node_modules/playwright/cli.js install --with-deps chromium
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: /tmp/broppy-playwright/browsers
+      - run: npm install --prefix /tmp/broppy-playwright --no-audit --no-fund --ignore-scripts playwright@${{ env.PLAYWRIGHT_VERSION }}
+      - id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: node /tmp/broppy-playwright/node_modules/playwright/cli.js install --with-deps chromium
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: node /tmp/broppy-playwright/node_modules/playwright/cli.js install-deps chromium
       - run: node tools/check-workspace.mjs
         env:
           BROPPY_PLAYWRIGHT_MODULE: /tmp/broppy-playwright/node_modules/playwright/index.mjs
-          PLAYWRIGHT_BROWSERS_PATH: /tmp/broppy-playwright/browsers
       - run: pnpm rust:smoke

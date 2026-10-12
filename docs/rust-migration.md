@@ -45,4 +45,4 @@ Install [Rust with rustup](https://rust-lang.org/tools/install/) if `rustup` is 
 
 The API [Dockerfile](../infra/tencent/Dockerfile) builds Rust on Debian Bookworm, then copies the native library into a Node Bookworm runtime. The Slack [Vercel configuration](../apps/slack/vercel.json) builds Rust for its host and includes the library in the function. Enable source files outside the Slack project root as described in [Slack setup](../apps/slack/README.md). The browser application communicates over HTTP and does not load Rust binaries.
 
-The [decision trail](rust/decisions.tsv) records the design and verification choices. [Verification notes](rust/verification.md) record the checks and remaining deployment limits.
+Docker startup, Vercel deployment and live Auth0, provider, Supabase and OpenFGA services are covered by mocked behavior tests only. Browser UI and platform transports remain TypeScript; the migrated domain modules run in Rust with no JavaScript fallback.

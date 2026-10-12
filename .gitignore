@@ -25,3 +25,7 @@ plans.md
 # Local model usage counts (LLM_USAGE_FILE) and the meter's temporary file
 llm-usage.json
 llm-usage.json.tmp
+
+# Agent skills installed locally by other tools (npx skills add)
+.agents/
+skills-lock.json
