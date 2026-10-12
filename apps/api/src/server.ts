@@ -329,7 +329,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return send(response, 202, await signup.create(await body(request)));
       }
       if (signup && url.pathname === "/v1/companies/find" && request.method === "GET") {
-        const found = await signup.find(url.searchParams.get("name"));
+        const email = url.searchParams.get("email");
+        const found = email !== null ? await signup.findPersonal(email) : await signup.find(url.searchParams.get("name"));
         return send(response, found ? 200 : 404, found ?? { error: "We couldn't find that company." });
       }
 

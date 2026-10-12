@@ -1,6 +1,6 @@
 import { ArrowRight, BadgeCheck, BookOpenText, Check, EyeOff, HardDrive, KeyRound, ListChecks, Lock, MessageSquare, Plug, ScrollText, Search, Sparkles, Ticket, Users } from "lucide-react";
 import { auth0, authConfigured } from "../lib/auth0";
-import { signInPath, signupMode } from "../lib/company";
+import { signInPath, signupMode, signupPath } from "../lib/company";
 import { demoApiUrl } from "../lib/demo";
 import { workspaceTarget } from "../links";
 import { redirect } from "next/navigation";
@@ -49,7 +49,10 @@ const questions = [
   ["How do I get an account?", "Your Broppy admin adds your work email, and you sign in with it. If you can't sign in, ask your admin to check that your email is on the list."]
 ] as const;
 
-const startQuestion = ["How do I start with my own company?", "Press Create your company, enter your company's name, your name and your work email, and open the invitation we send you. You become your company's first admin, and the guided setup begins straight away."] as const;
+const startQuestions = [
+  ["How do I start with my own company?", "Press Enterprise sign up, enter your company's name, your name and your work email, and open the invitation we send you. You become your company's first admin, and the guided setup begins straight away."],
+  ["Can I use Broppy just for myself?", "Yes. Press Sign up, enter your name and email, and open the invitation we send you. You get a private workspace where you are the only person: connect your own Slack, Jira, Confluence and Google Drive and ask across them. Nobody else can see it. If your team wants to share one brain, an Enterprise sign up lets the admin connect the tools once for everyone."]
+] as const;
 
 function Product() {
   return <div className="product" aria-label="An example question and answer in Broppy" role="img">
@@ -78,10 +81,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const demoLink = `/demo${target.includes("?") ? target.slice(target.indexOf("?")) : ""}`;
 
   const primary = session ? <a className="btn primary" href={target}>Open your workspace <ArrowRight size={17} /></a>
-    : authConfigured && mode === "on" ? <a className="btn primary" href="/signup">Create your company <ArrowRight size={17} /></a>
-      : authConfigured ? <a className="btn primary" href={login(SETUP_PAGE)}>Sign in <ArrowRight size={17} /></a> : null;
+    : authConfigured && mode === "on" ? <a className="btn primary" href={signupPath("personal")}>Sign up <ArrowRight size={17} /></a>
+      : authConfigured ? <a className="btn primary" href={login(SETUP_PAGE)}>{mode === "closed" ? "Sign in" : "Get started"} <ArrowRight size={17} /></a> : null;
   const secondary = session ? <a className="btn" href={SETUP_PAGE}>Continue setup</a>
-    : authConfigured && mode === "on" ? <a className="btn" href={login(target)}>Sign in</a>
+    : authConfigured && mode === "on" ? <a className="btn" href={signupPath("enterprise")}>Enterprise sign up</a>
       : demo ? <a className="btn" href={demoLink}>Try the demo</a> : null;
 
   return <div className="site">
@@ -91,7 +94,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       <nav aria-label="Page sections"><a href="#how">How it works</a><a href="#why">Why Broppy</a><a href="#security">Security</a><a href="#faq">Questions</a></nav>
       <div className="nav-actions">
         {session ? <><a className="link" href="/auth/logout">Sign out</a><a className="btn small primary" href={target}>Open workspace</a></>
-          : authConfigured ? <><a className="link" href={login(target)}>Sign in</a>{mode === "on" && <a className="btn small primary" href="/signup">Create your company</a>}</>
+          : authConfigured ? <><a className="link" href={login(target)}>Sign in</a>{mode === "on" ? <><a className="btn small" href={signupPath("enterprise")}>Enterprise sign up</a><a className="btn small primary" href={signupPath("personal")}>Sign up</a></>
+            : mode !== "closed" && <a className="btn small primary" href={login(SETUP_PAGE)}>Get started</a>}</>
             : demo ? <a className="btn small primary" href={demoLink}>Try the demo</a> : null}
       </div>
     </header>
@@ -150,7 +154,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       <section id="faq" className="band">
         <div className="section-head"><p className="eyebrow">Questions</p><h2>Before you start</h2></div>
         <div className="faq">
-          {(mode === "on" ? [startQuestion, ...questions] : questions).map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}
+          {(mode === "on" ? [...startQuestions, ...questions] : questions).map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}
         </div>
       </section>
 

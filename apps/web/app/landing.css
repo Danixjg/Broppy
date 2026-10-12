@@ -154,3 +154,16 @@ ul, ol { padding: 0; list-style: none; }
 .form-points { display: grid; gap: .6rem; margin: 1.2rem 0 1.6rem; }
 .form-points li { display: flex; gap: .55rem; line-height: 1.5; color: var(--muted); }
 .form-points svg { flex: none; margin-top: .2rem; color: var(--accent); }
+
+/* Choosing between a personal and an enterprise sign-up */
+.choice-page { width: min(100%, 52rem); }
+.choice-page h1 { font-size: 2.1rem; letter-spacing: -.03em; line-height: 1.15; }
+.choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.2rem; margin-top: 1.8rem; }
+.choice { display: grid; align-content: start; gap: .35rem; padding: 1.75rem; border-radius: 1.2rem; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.choice h2 { margin-top: .8rem; font-size: 1.35rem; letter-spacing: -.02em; }
+.choice-line { color: var(--muted); }
+.choice .form-points { margin: 1rem 0 1.4rem; }
+.choice .btn { justify-self: start; }
+@media (max-width: 720px) { .choices { grid-template-columns: 1fr; } }
+.form-sub { margin-top: 1.6rem; font-size: 1.05rem; letter-spacing: -.01em; }
+.form-sub + .form, .form-sub + .form-error { margin-top: .8rem; }

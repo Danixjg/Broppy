@@ -4,6 +4,22 @@ A new customer opens the site, presses **Create your company**, enters a company
 and opens the invitation emailed to them. They become the company's first admin and land in the guided setup. Nothing is
 set up by hand: no SQL, no Auth0 dashboard.
 
+## Two ways to sign up
+
+The front page offers **Sign up** (personal) and **Enterprise sign up** (a company); `/signup` lets a visitor pick.
+
+- **Enterprise sign up** is the flow described below: a company name, the person's name and work email, and that person
+  becomes the company's first admin.
+- **Sign up** makes a workspace for one person. It is named after them and they are its only member and admin. It is the
+  same thing underneath (an Auth0 organization, a row in `public.organizations`, an invitation), so everything below applies
+  to it. Its Auth0 organization name is `me-` plus 16 hex characters worked out from the email, so nobody needs to remember
+  a company name: **Sign in** has a Personal box that asks for the email and finds the workspace from it. The same email
+  always gives the same workspace, and an email already on any workspace gets the same answer as everyone else and creates
+  nothing. A repeated sign-up for an unopened personal workspace sends the invitation again.
+- There is no separate switch: both need `SELF_SIGNUP=on`, and `SIGNUP_ACCESS_CODE` applies to both.
+- Not built yet: the guided setup still shows the "Add your team" step to a personal workspace (it can be skipped), and
+  nothing marks a workspace as personal in the database.
+
 ## What happens
 
 1. The sign-up form posts to the web app, which calls `POST /v1/signup` on the API.

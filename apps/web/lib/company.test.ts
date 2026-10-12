@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { asksForCompany, pinnedOrganization, safeReturn, signInPath, signupMode } from "./company";
+import { asksForCompany, pinnedOrganization, safeReturn, signInPath, signupKind, signupMode, signupPath } from "./company";
 import { allow } from "./visitor-limit";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -20,6 +20,12 @@ describe("one company or many", () => {
     }
     expect(signInPath()).toBe("/signin");
     expect(signInPath("/workspace/index.html?ask=x")).toBe("/signin?returnTo=%2Fworkspace%2Findex.html%3Fask%3Dx");
+  });
+
+  it("knows the two kinds of sign-up and nothing else", () => {
+    expect([signupKind("personal"), signupKind("enterprise")]).toEqual(["personal", "enterprise"]);
+    for (const value of [undefined, "", "Personal", "admin", "../x", 1]) expect(signupKind(value)).toBeUndefined();
+    expect([signupPath("personal"), signupPath("enterprise")]).toEqual(["/signup/personal", "/signup/enterprise"]);
   });
 
   it("only returns to a page on this site", () => {
