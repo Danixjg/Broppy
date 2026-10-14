@@ -73,7 +73,11 @@ const REASONS = {
 /** What to tell the admin when they come back from a tool's approval page, from the address's query. */
 export function returnMessage(params) {
   const source = params.get("connected"), failed = params.get("connect_failed"), slack = params.get("slack_install");
-  if (source) return { kind: "good", text: `${toolName(source)} is connected.` };
+  if (source) {
+    // One Atlassian approval can connect Jira and Confluence together.
+    const names = source.split(",").filter(Boolean).map(toolName);
+    return { kind: "good", text: names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are connected.` : `${names[0]} is connected.` };
+  }
   if (failed) return { kind: "bad", text: `${toolName(failed)}: ${REASONS[params.get("reason")] ?? REASONS.failed}` };
   if (slack === "installed") return { kind: "good", text: "Broppy was added to Slack and Slack is connected." };
   if (slack === "denied") return { kind: "bad", text: `Slack: ${REASONS.denied}` };

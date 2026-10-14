@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-013 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-014 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -849,3 +849,20 @@ begin
 end $$;
 revoke all on function public.store_org_model(text,text,text,text,text,text), public.read_org_model(text), public.remove_org_model(text) from public, anon, authenticated;
 grant execute on function public.store_org_model(text,text,text,text,text,text), public.read_org_model(text), public.remove_org_model(text) to service_role;
+
+-- Workspace snapshot revisions (migration 014).
+alter table public.brain_state add column if not exists revision bigint not null default 0;
+
+create or replace function public.save_brain_state_at(organization text, snapshot jsonb, expected bigint)
+returns bigint language plpgsql security invoker set search_path = '' as $$
+declare current_revision bigint;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('brain_state/' || organization, 0));
+  select revision into current_revision from public.brain_state where org_id = organization;
+  if coalesce(current_revision, 0) <> expected then return null; end if;
+  perform public.save_brain_state(organization, snapshot);
+  update public.brain_state set revision = expected + 1 where org_id = organization;
+  return expected + 1;
+end $$;
+revoke all on function public.save_brain_state_at(text, jsonb, bigint) from public, anon, authenticated;
+grant execute on function public.save_brain_state_at(text, jsonb, bigint) to service_role;

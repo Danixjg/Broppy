@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SourceOAuth } from "./source-oauth.js";
 import type { Persistence } from "./persistence.js";
 import type { User } from "@brain/types";
@@ -123,4 +123,46 @@ it("keeps sign-in state in shared storage so a callback can reach a different in
   const calls = fetcher.mock.calls.length;
   expect(await stale.authorization("drive")).toBe("Bearer rotated");
   expect(fetcher.mock.calls.length).toBe(calls);
+});
+
+describe("one Atlassian approval for Jira and Confluence", () => {
+  const atlassianUser: User = { ...user, platformIdentities: { ...user.platformIdentities, jira: user.email, confluence: user.email } as User["platformIdentities"] };
+  function setup(options: { confluenceClient?: string; granted?: string; sites?: Array<{ id: string; url: string }> } = {}) {
+    const store = new Map<string, any>();
+    const request = flows(async (path: string, _method: string, data: any) => {
+      if (path === "rpc/store_source_token") store.set(data.provider, data.token);
+      if (path === "rpc/read_source_token") return store.get(data.provider) ?? null;
+      return undefined;
+    });
+    const fetcher = vi.fn(async (url: RequestInfo | URL) => String(url).includes("accessible-resources")
+      ? Response.json(options.sites ?? [{ id: "cloud-1", url: "https://acme.atlassian.net" }])
+      : String(url).includes("token") ? Response.json({ access_token: "shared", expires_in: 3600, scope: options.granted ?? "read:jira-work read:confluence-content.all read:me" })
+      : Response.json({ email: user.email }));
+    const oauth = new SourceOAuth({
+      jira: { clientId: "atlassian-app", clientSecret: "s", scopes: ["read:jira-work", "read:me"] },
+      confluence: { clientId: options.confluenceClient ?? "atlassian-app", clientSecret: "s", scopes: ["read:confluence-content.all", "read:me"] }
+    }, "https://api.example.test", { orgId: "org_a", request } as unknown as Persistence, fetcher);
+    return { oauth, store };
+  }
+
+  it("asks for both products' permissions and connects both when the same app is used", async () => {
+    const { oauth, store } = setup();
+    const url = new URL(await oauth.begin("jira", atlassianUser));
+    expect(url.searchParams.get("scope")!.split(" ").sort()).toEqual(["read:confluence-content.all", "read:jira-work", "read:me"]);
+    const result = await oauth.completeAll("jira", url.searchParams.get("state")!, "code", async () => atlassianUser);
+    expect(result.sources).toEqual(["jira", "confluence"]);
+    expect(store.get("confluence")).toMatchObject({ access_token: "shared", site: { cloudId: "cloud-1" } });
+    expect(await oauth.authorization("confluence")).toBe("Bearer shared");
+  });
+
+  it("connects only the one asked for with separate apps, or when the approval lacks the other's permissions", async () => {
+    const separate = setup({ confluenceClient: "another-app" });
+    const url = new URL(await separate.oauth.begin("jira", atlassianUser));
+    expect(url.searchParams.get("scope")).toBe("read:jira-work read:me");
+    expect((await separate.oauth.completeAll("jira", url.searchParams.get("state")!, "code", async () => atlassianUser)).sources).toEqual(["jira"]);
+    const partial = setup({ granted: "read:jira-work read:me" });
+    const again = new URL(await partial.oauth.begin("jira", atlassianUser));
+    expect((await partial.oauth.completeAll("jira", again.searchParams.get("state")!, "code", async () => atlassianUser)).sources).toEqual(["jira"]);
+    expect(partial.store.has("confluence")).toBe(false);
+  });
 });

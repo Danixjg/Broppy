@@ -55,6 +55,7 @@ test("reads work emails from pasted text, once each, and sets aside what is not 
 test("says what happened when the admin comes back from a tool's approval page", () => {
   const message = query => returnMessage(new URLSearchParams(query));
   assert.deepEqual(message("connected=jira"), { kind: "good", text: "Jira is connected." });
+  assert.deepEqual(message("connected=jira,confluence"), { kind: "good", text: "Jira and Confluence are connected." });
   assert.match(message("connect_failed=slack&reason=email_mismatch").text, /^Slack: .*same email/);
   assert.match(message("connect_failed=drive&reason=denied").text, /^Google Drive: You cancelled/);
   assert.match(message("connect_failed=drive&reason=unknown").text, /didn't accept/);
