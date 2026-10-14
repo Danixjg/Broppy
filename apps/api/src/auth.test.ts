@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { User } from "@brain/types";
-import { AccessDenied, Auth0TokenValidator } from "./auth.js";
+import { AccessDenied, Auth0TokenValidator, WorkspaceUnavailable } from "./auth.js";
 
 const issuer = "https://tenant.auth0.com/";
 const audience = "https://brain.example/api";
@@ -172,6 +172,14 @@ describe("Auth0TokenValidator with several companies", () => {
     // Dana's subject under the other company's name, or a company that is not listed, finds no one.
     await expect(validator.validate(`Bearer ${token({ sub: "auth0|dana", org_id: "org_company_a" })}`)).rejects.toThrow();
     await expect(validator.validate(`Bearer ${token({ org_id: "org_unlisted" })}`)).rejects.toThrow("Unauthorized");
+  });
+
+  it("says the workspace couldn't load, rather than refusing the person, when loading it fails", async () => {
+    const flaky = new Auth0TokenValidator({ issuer, audience, directoryFor: async () => { throw new Error("Supabase organizations failed (504)"); },
+      now: () => now * 1000, fetch: (async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 })) as typeof fetch });
+    await expect(flaky.validate(`Bearer ${token({ sub: "auth0|dana", org_id: "org_acme" })}`)).rejects.toBeInstanceOf(WorkspaceUnavailable);
+    // A bad token is still a refusal.
+    await expect(flaky.validate("Bearer not-a-token")).rejects.toThrow("Unauthorized");
   });
 
   it("refuses a directory entry that belongs to a different company than the token", async () => {

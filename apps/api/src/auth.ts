@@ -6,6 +6,17 @@ import type { UserDirectory } from "./user-directory.js";
  * A valid organization sign-in that Broppy will not let in, with a reason the person can act on. The reasons tell nothing
  * about the configuration: only that this account has not been added, was removed, or needs its email verified.
  */
+/** The person's sign-in was fine, but their company's workspace couldn't be loaded just now. */
+export class WorkspaceUnavailable extends Error {
+  constructor(problem?: unknown) {
+    super("Workspace unavailable");
+    console.error(JSON.stringify({ event: "workspace_unavailable", reason: problem instanceof Error ? problem.message.slice(0, 200) : "unknown" }));
+  }
+}
+
+/** Why a sign-in was refused, in a word, for the host's log; never the token or who it was. */
+const refusal = (reason: string) => console.warn(JSON.stringify({ event: "sign_in_refused", reason }));
+
 export class AccessDenied extends Error {
   constructor(readonly code: "not_added" | "removed" | "email_unverified" | "email_in_use", message: string) { super(message); }
 }
@@ -60,8 +71,12 @@ export class Auth0TokenValidator {
       });
       const orgId = payload.org_id;
       if (typeof orgId !== "string") throw new Error("Unauthorized");
-      const directory = await this.directoryFor(orgId);
-      if (!directory) throw new Error("Unauthorized");
+      let directory: Directory | undefined;
+      // Loading the company's workspace can fail for reasons that have nothing to do with this person (a database
+      // timeout, a source that won't answer). That is reported as such, not as a refused sign-in.
+      try { directory = await this.directoryFor(orgId); }
+      catch (error) { throw new WorkspaceUnavailable(error); }
+      if (!directory) { refusal("company_not_listed"); throw new Error("Unauthorized"); }
       const known = await directory.bySub(payload.sub!);
       if (known) {
         if (known.orgId !== orgId) throw new Error("Unauthorized");
@@ -69,7 +84,12 @@ export class Auth0TokenValidator {
         return known;
       }
       return await this.firstSignIn(payload.sub!, match[1], orgId, directory);
-    } catch (error) { throw error instanceof AccessDenied ? error : new Error("Unauthorized"); }
+    } catch (error) {
+      if (error instanceof AccessDenied || error instanceof WorkspaceUnavailable) throw error;
+      // jose names what was wrong with a token (expired, wrong audience, bad signature); nothing from the token is logged.
+      if (error && typeof error === "object" && "code" in error && typeof error.code === "string") refusal(error.code);
+      throw new Error("Unauthorized");
+    }
   }
 
   /**

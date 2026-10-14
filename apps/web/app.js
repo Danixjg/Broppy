@@ -92,8 +92,11 @@ async function call(path, options = {}) {
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
 function role() { return state.authMode === "demo" ? roles[$("user").value] || "member" : state.me?.role || "member"; }
 // load: whether opening Compliance loads the whole audit; a caller about to search it passes false.
+// Source controls edit the practice data and its demo people directly; a company on its live tools changes access at
+// the tools themselves, so the page isn't shown there.
+const practiceControls = () => role() === "admin" && state.workspace.capabilities.mode !== "live";
 function setView(view, { load = true } = {}) {
-  if (view === "admin" && role() !== "admin") view = "workspace";
+  if (view === "admin" && !practiceControls()) view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
   state.view = view;
   for (const name of ["workspace", "admin", "compliance", "operations"]) {
@@ -116,7 +119,7 @@ function resetIdentity() {
   $("hideRoutine").checked = true;
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
-  $("adminTab").hidden = role() !== "admin";
+  $("adminTab").hidden = !practiceControls();
   let connectorLink = document.getElementById("connectorSettings");
   if (!connectorLink) { connectorLink = node("a", "", "Connectors settings"); connectorLink.id = "connectorSettings"; $("adminView").prepend(connectorLink); }
   connectorLink.href = `./connectors.html?user=${encodeURIComponent($("user").value)}`;
@@ -578,12 +581,14 @@ async function loadWorkspace() {
     };
     $("workspaceMode").textContent = state.workspace.capabilities.mode === "live" ? "Live workspace" :
       state.workspace.capabilities.mode === "demo" ? "Demo workspace" : "Workspace";
+    $("adminTab").hidden = !practiceControls();
+    if (state.view === "admin" && !practiceControls()) setView("workspace");
     const onScreen = state.project;
     chooseProject();
     // A reload after an action leaves the lists as the person had them, unless their project is gone.
     if (state.project !== onScreen) expandedLists.clear();
     renderWorkspace();
-    if (role() === "admin") await loadNativePermissions();
+    if (practiceControls()) await loadNativePermissions();
     if (generation !== state.identity) return;
     $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.${result.importNotice ? ` ${result.importNotice}` : ""}`;
     if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, state.selectedQuotes); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; state.selectedQuotes = []; } }

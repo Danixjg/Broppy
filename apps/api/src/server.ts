@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
-import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
+import { AccessDenied, createAuth0TokenValidatorFromEnv, WorkspaceUnavailable, type Auth0TokenValidator } from "./auth.js";
 import { companyLimitsFromEnv, companyModels, modelsFromEnv } from "./llm-budget.js";
 import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
@@ -416,7 +416,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const tenant = hasAuth0 ? await tenants.get(person.orgId) : home;
         if (!tenant) return undefined;
         // Another instance may have changed this workspace since this one loaded it.
-        await tenant.brain.refreshIfStale();
+        await tenant.brain.refreshIfStale().catch(error => { throw new WorkspaceUnavailable(error); });
         // Another instance may have added or linked this person after this one loaded the directory.
         if (tenant.users) {
           const known = tenant.users.findIndex(item => item.id === person.id);
@@ -865,6 +865,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // A real organization sign-in that isn't on the admin's list: say so, so the person knows what to ask for.
       if (error instanceof AccessDenied) return await reply(response, 403, { error: error.message, code: error.code });
       if (error instanceof PeopleError || error instanceof SignupError) return await reply(response, error.status, { error: error.message });
+      if (error instanceof WorkspaceUnavailable) return await reply(response, 503, { error: "Broppy couldn't load your workspace just now. Wait a moment and try again.", code: "workspace_unavailable" });
       if (error instanceof StaleState) return await reply(response, 409, { error: "This workspace was just changed somewhere else. Reload the page and try again." });
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
