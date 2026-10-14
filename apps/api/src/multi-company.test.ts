@@ -180,7 +180,7 @@ describe("several companies in one API", () => {
     expect(result.status).toBe(202);
     expect(auth0Orgs).toEqual([{ id: "org_new1", name: expect.stringMatching(/^acme-and-sons-[a-z2-9]{6}$/), display_name: "Acme & Sons" }]);
     expect(invitations).toEqual([{ org: "org_new1", email: "dana@acme.test" }]);
-    expect(tables.organizations).toEqual([expect.objectContaining({ org_id: "org_new1", name: "Acme & Sons", status: "active", created_by_email: "dana@acme.test" })]);
+    expect(tables.organizations).toEqual([expect.objectContaining({ org_id: "org_new1", name: "Acme & Sons", status: "active", created_by_email: "dana@acme.test", kind: "company" })]);
     expect(tables.workspace_users.filter(row => row.org_id === "org_new1")).toEqual([expect.objectContaining({ user_id: "dana", role: "admin", auth0_sub: null })]);
   });
 
@@ -258,7 +258,7 @@ describe("several companies in one API", () => {
 
   it("shows a company's admin its sign-in address, and only its admin", async () => {
     const dana = { sub: "auth0|dana", org: "org_new1" };
-    expect((await call("GET", "/v1/admin/company", dana)).body).toEqual({ address: auth0Orgs[0].name, name: "Acme & Sons" });
+    expect((await call("GET", "/v1/admin/company", dana)).body).toEqual({ address: auth0Orgs[0].name, name: "Acme & Sons", personal: false });
     // Someone the admin never added gets nothing, whatever organization their sign-in names.
     emails["auth0|outsider"] = { email: "outsider@acme.test", verified: true };
     expect((await call("GET", "/v1/admin/company", { sub: "auth0|outsider", org: "org_new1" })).status).toBe(403);
@@ -288,6 +288,30 @@ describe("several companies in one API", () => {
     expect((await ask(companyServiceToken(SLACK_SECRET, "org_other"), "org_new1")).status).toBe(401);
     expect((await ask(SLACK_SECRET)).status).toBe(401);
     expect((await ask(companyServiceToken(SLACK_SECRET, "org_new1"), HOME)).status).toBe(401);
+  });
+
+  it("keeps a personal workspace to its owner: no team step, and no one else can be added", async () => {
+    expect((await call("POST", "/v1/signup", undefined, { kind: "personal", name: "Pat Solo", email: "pat@gmail.test" })).status).toBe(202);
+    const row = tables.organizations.find(item => item.created_by_email === "pat@gmail.test")!;
+    expect(row.kind).toBe("personal");
+    emails["auth0|pat"] = { email: "pat@gmail.test", verified: true };
+    const pat = { sub: "auth0|pat", org: row.org_id };
+    expect((await call("GET", "/v1/admin/company", pat)).body).toMatchObject({ address: null, personal: true });
+    const added = await call("POST", "/v1/admin/people", pat, { name: "Friend", email: "friend@gmail.test", role: "member" });
+    expect(added.status).toBe(409);
+    expect(added.body.error).toContain("personal workspace");
+    expect(tables.workspace_users.some(item => item.email === "friend@gmail.test")).toBe(false);
+    // A company still can.
+    expect((await call("GET", "/v1/admin/company", { sub: "auth0|dana", org: "org_new1" })).body).toMatchObject({ personal: false });
+  });
+
+  it("works out the kind of a workspace listed before kinds were recorded, from its address, and records it", async () => {
+    expect((await call("POST", "/v1/signup", undefined, { kind: "personal", name: "Old Timer", email: "old@gmail.test" })).status).toBe(202);
+    const row = tables.organizations.find(item => item.created_by_email === "old@gmail.test")!;
+    delete row.kind;
+    emails["auth0|old"] = { email: "old@gmail.test", verified: true };
+    expect((await call("GET", "/v1/admin/company", { sub: "auth0|old", org: row.org_id })).body).toMatchObject({ personal: true });
+    expect(row.kind).toBe("personal");
   });
 
   it("lets a second company take the same name, at its own address, without touching the first", async () => {

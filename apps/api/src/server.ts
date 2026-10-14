@@ -35,6 +35,8 @@ interface Tenant {
   orgId: string;
   /** The company set up by hand with AUTH0_ORG_ID, which also has the Slack app and the service identity. */
   isHome: boolean;
+  /** One person's own workspace, from personal sign-up: it has no team, so nobody else can be added. */
+  personal: boolean;
   brain: Brain;
   orchestrator: SyncOrchestrator;
   directory?: UserDirectory;
@@ -210,6 +212,23 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   // call that address from inside its own network. Only the company set up by hand may.
   const orgModelOf = (persistence: Persistence | undefined, isHome: boolean) => persistence ? new OrgModel(persistence, undefined, undefined, { customAddress: isHome }) : undefined;
 
+  /**
+   * Whether a signed-up workspace is personal. Sign-up records it; a workspace from before that was recorded is worked out
+   * once from its Auth0 address and written back. If neither can be read it counts as a company, which only shows the
+   * team step and allows invitations, as before.
+   */
+  const personalWorkspace = async (orgId: string): Promise<boolean> => {
+    if (!companies) return false;
+    try {
+      const recorded = await companies.kind(orgId);
+      if (recorded) return recorded === "personal";
+      if (!management) return false;
+      const kind = isPersonalAddress((await management.forOrg(orgId).organization()).name) ? "personal" : "company";
+      await companies.recordKind(orgId, kind).catch(() => undefined);
+      return kind === "personal";
+    } catch { return false; }
+  };
+
   /** Everything one company owns: its people, its sources, its brain and its sign-in rules. Nothing here is shared between companies. */
   const buildTenant = async (orgId: string, isHome: boolean): Promise<Tenant> => {
     const tenantDirectory = isHome ? directory : directory?.forOrg(orgId);
@@ -270,7 +289,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       });
     }
     if (options.startOrchestrator ?? true) orchestrator.start();
-    return { orgId, isHome, brain, orchestrator, directory: tenantDirectory, users, people, oauth, connectors, orgModel, slackInstallation, slackCombined,
+    return { orgId, isHome, personal: !isHome && await personalWorkspace(orgId), brain, orchestrator, directory: tenantDirectory, users, people, oauth, connectors, orgModel, slackInstallation, slackCombined,
       jiraAsUser, applySite, reloadUsers, agentActions: new AgentActions() };
   };
 
@@ -526,6 +545,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const [, id, verb] = personRoute;
         if (!id && request.method === "GET") return await reply(response, 200, { people: await people.list(), invitations: people.canInvite });
         if (!id && request.method === "POST") {
+          if (tenant.personal) return await reply(response, 409, { error: "A personal workspace is just for you. Sign up a company to work with a team." });
           const result = await people.add(user, await body(request));
           brain.audit.append("person_added", user.id, { userId: result.person.id, role: result.person.role, auth0: result.auth0 });
           await reloadUsers();
@@ -574,7 +594,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!own || signupMode === "off") return await reply(response, 404, { error: "Not found" });
         const found = await own.organization();
         // A personal workspace is found from its owner's email, so its address is never typed.
-        return await reply(response, 200, { address: isPersonalAddress(found.name) ? null : found.name, name: found.displayName });
+        const personal = tenant.personal || isPersonalAddress(found.name);
+        return await reply(response, 200, { address: personal ? null : found.name, name: found.displayName, personal });
       }
 
       if (url.pathname === "/v1/admin/model") {

@@ -35,6 +35,15 @@ test("adding a team and choosing an AI can be skipped, then the last step opens"
   assert.equal(currentStep(setupSteps({ ...ready, skipped: ["team"], model: { provider: "anthropic", model: "m" } })), "ready");
 });
 
+test("a personal workspace has four steps and no team step", () => {
+  const ready = { connections: [connection("jira", { scope: { mode: "all" }, count: 5 })], people: [{ status: "active" }], personal: true };
+  const steps = setupSteps(ready);
+  assert.deepEqual(steps.map(step => step.id), ["connect", "read", "ai", "ready"]);
+  assert.deepEqual(steps.map(step => step.number), [1, 2, 3, 4]);
+  assert.equal(currentStep(steps), "ai", "a lone person goes straight from reading to the AI step");
+  assert.equal(currentStep(setupSteps({ ...ready, skipped: ["model"] })), "ready");
+});
+
 test("reads work emails from pasted text, once each, and sets aside what is not an email", () => {
   const { valid, invalid } = parseEmails("Priya@Company.test, raj@company.test;\npriya@company.test  <Wei@company.test>\nnot an email\nx@y");
   assert.deepEqual(valid, ["priya@company.test", "raj@company.test", "wei@company.test"]);

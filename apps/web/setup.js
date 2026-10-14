@@ -38,13 +38,17 @@ function notice(message) {
 
 // ---- the five steps, opened one at a time ----
 function renderSteps() {
-  const steps = setupSteps({ connections: state.connections, jobs: state.jobs, people: state.people, model: state.model, skipped: state.skipped });
+  const steps = setupSteps({ connections: state.connections, jobs: state.jobs, people: state.people, model: state.model, skipped: state.skipped, personal: state.personal });
   const current = currentStep(steps);
   if (current !== state.lastCurrent) { state.open = current; state.lastCurrent = current; }
   const done = steps.filter(step => step.status === "done").length;
-  $("bar").style.width = `${Math.round(100 * done / 4)}%`;
+  const total = steps.length - 1;
+  // A personal workspace has no team step at all.
+  document.querySelector('[data-step="team"]').hidden = state.personal;
+  $("bar").style.width = `${Math.round(100 * done / total)}%`;
+  $("progress").setAttribute("aria-valuemax", String(total));
   $("progress").setAttribute("aria-valuenow", String(done));
-  $("progress-label").textContent = done === 4 ? "All set. Broppy is ready for your team." : `${done} of 4 steps done`;
+  $("progress-label").textContent = done === total ? `All set. Broppy is ready${state.personal ? "" : " for your team"}.` : `${done} of ${total} steps done`;
   for (const step of steps) {
     const item = document.querySelector(`[data-step="${step.id}"]`);
     const button = item.querySelector("button"), panel = item.querySelector(".panel");
@@ -222,7 +226,7 @@ function renderReady() {
   $("summary").replaceChildren(
     h("li", {}, `${connected.length} tool${connected.length === 1 ? "" : "s"} connected: ${connected.map(connection => toolName(connection.source)).join(", ") || "none yet"}`),
     h("li", {}, `${items} item${items === 1 ? "" : "s"} ready to ask about`),
-    h("li", {}, team > 1 ? `${team} people on your team` : "Just you so far. Add your team any time from People and access."),
+    ...(state.personal ? [] : [h("li", {}, team > 1 ? `${team} people on your team` : "Just you so far. Add your team any time from People and access.")]),
     h("li", {}, state.model ? `Answers written by ${state.model.model}` : "Answers written by Broppy's built-in assistant"));
   $("questions").replaceChildren(...FIRST_QUESTIONS.map(question => h("a", { class: "question", href: `./index.html?${new URLSearchParams({ ask: question })}` }, question)));
 }
@@ -251,9 +255,10 @@ async function start() {
     const message = returnMessage(new URLSearchParams(location.search));
     if (message) { notice(message); history.replaceState(null, "", location.pathname + (persona ? `?user=${encodeURIComponent(persona)}` : "")); }
     $("setup").hidden = false;
-    void request("/v1/admin/company").then(company => {
-      if (company?.address) { $("address-value").textContent = company.address; $("address").hidden = false; }
-    }).catch(() => undefined);
+    // Known before the first render, so a personal workspace never flashes a team step.
+    const company = await request("/v1/admin/company").catch(() => undefined);
+    state.personal = company?.personal === true;
+    if (company?.address) { $("address-value").textContent = company.address; $("address").hidden = false; }
     await refresh();
   } catch (error) {
     $("gate").hidden = false; $("gate-title").textContent = "We couldn't open setup";

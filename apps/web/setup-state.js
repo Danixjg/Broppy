@@ -24,26 +24,27 @@ export function toolState(connection, job) {
 
 /**
  * The five steps, each done, current (the first not done), or waiting. Connecting a tool is required; adding a team and
- * choosing an AI can be skipped. `skipped` holds the steps the admin chose to skip.
+ * choosing an AI can be skipped. `skipped` holds the steps the admin chose to skip. A personal workspace has no team, so
+ * it has four steps and no "Add your team".
  */
-export function setupSteps({ connections = [], jobs = [], people = [], model, skipped = [] } = {}) {
+export function setupSteps({ connections = [], jobs = [], people = [], model, skipped = [], personal = false } = {}) {
   const states = TOOLS.map(tool => toolState(connections.find(item => item.source === tool.source), jobs.find(job => job.source === tool.source)));
   const connected = states.filter(item => item.state !== "not_connected" && item.state !== "attention");
   const connect = connected.length > 0;
   const reading = connect && connected.every(item => item.state === "ready");
   const team = people.filter(person => person.status !== "removed").length > 1 || skipped.includes("team");
   const ai = Boolean(model) || skipped.includes("model");
-  const done = [connect, reading, team, ai];
-  const current = done.indexOf(false);
-  const steps = [
-    { id: "connect", title: "Connect your tools" },
-    { id: "read", title: "Choose what Broppy reads" },
-    { id: "team", title: "Add your team" },
-    { id: "ai", title: "Pick your AI" },
+  const all = [
+    { id: "connect", title: "Connect your tools", done: connect },
+    { id: "read", title: "Choose what Broppy reads", done: reading },
+    { id: "team", title: "Add your team", done: team },
+    { id: "ai", title: "Pick your AI", done: ai },
     { id: "ready", title: "You're ready" }
-  ];
-  return steps.map((step, index) => ({ ...step, number: index + 1,
-    status: index < 4 ? (done[index] ? "done" : index === current ? "current" : "waiting") : current === -1 ? "current" : "waiting" }));
+  ].filter(step => !(personal && step.id === "team"));
+  const last = all.length - 1;
+  const current = all.findIndex((step, index) => index < last && !step.done);
+  return all.map(({ done, ...step }, index) => ({ ...step, number: index + 1,
+    status: index < last ? (done ? "done" : index === current ? "current" : "waiting") : current === -1 ? "current" : "waiting" }));
 }
 
 /** Step to open first: the first one not done. */

@@ -43,7 +43,7 @@ describe("a company signing itself up", () => {
     const { signup, management, companies, add, invite, created } = setup();
     await expect(signup.create({ company: "Acme", name: "Dana", email: " Dana@Acme.test " })).resolves.toEqual({ sent: true });
     expect(management.createOrganization).toHaveBeenCalledWith({ name: "acme-aaaaaa", displayName: "Acme", connectionId: "con_1" });
-    expect(companies.register).toHaveBeenCalledWith({ orgId: "org_1", name: "Acme", createdBy: "dana@acme.test" });
+    expect(companies.register).toHaveBeenCalledWith({ orgId: "org_1", name: "Acme", createdBy: "dana@acme.test", kind: "company" });
     expect(add).toHaveBeenCalledWith({ id: "dana", name: "Dana", email: "dana@acme.test", role: "admin", groups: [] });
     expect(invite).toHaveBeenCalledWith("dana@acme.test", "Broppy");
     expect(created).toHaveBeenCalledWith("org_1");
@@ -139,7 +139,7 @@ describe("a person signing up for themselves", () => {
     const { signup, management, companies, add, invite } = setup();
     await expect(signup.create({ kind: "personal", name: "Dana Lee", email: "Dana@Gmail.test" })).resolves.toEqual({ sent: true });
     expect(management.createOrganization).toHaveBeenCalledWith({ name: personalAddress("dana@gmail.test"), displayName: "Dana Lee", connectionId: "con_1" });
-    expect(companies.register).toHaveBeenCalledWith({ orgId: "org_1", name: "Dana Lee", createdBy: "dana@gmail.test" });
+    expect(companies.register).toHaveBeenCalledWith({ orgId: "org_1", name: "Dana Lee", createdBy: "dana@gmail.test", kind: "personal" });
     expect(add).toHaveBeenCalledWith({ id: "dana", name: "Dana Lee", email: "dana@gmail.test", role: "admin", groups: [] });
     expect(invite).toHaveBeenCalledWith("dana@gmail.test", "Broppy");
   });

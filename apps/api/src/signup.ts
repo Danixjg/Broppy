@@ -123,7 +123,7 @@ export class Signup {
       const created = personal ? await this.createPersonalOrganization(email, name) : await this.createOrganization(company);
       if (!created) return { sent: true };
       try {
-        await this.companies.register({ orgId: created.id, name: created.displayName, createdBy: email });
+        await this.companies.register({ orgId: created.id, name: created.displayName, createdBy: email, kind: personal ? "personal" : "company" });
         await this.management.forOrg(created.id).invite(email, "Broppy");
         // The admin's entry comes last: until the invitation is out there is nothing in the directory to undo, and a failed
         // attempt leaves nothing that would stop the same person trying again.

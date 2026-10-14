@@ -2,6 +2,9 @@ import { normalizeEmail } from "./user-directory.js";
 
 interface Config { url: string; secretKey: string; fetch?: typeof fetch }
 
+/** A company (people invited by its admins) or a personal workspace (one person's own, with no team). */
+export type WorkspaceKind = "company" | "personal";
+
 /**
  * The companies that may use this API. The company set up by hand (AUTH0_ORG_ID) is always allowed; every other one is a
  * row written when it signed itself up. A valid sign-in from an Auth0 organization that is not here is turned away, so
@@ -41,10 +44,32 @@ export class Companies {
     return Array.isArray(rows) && rows.some(row => row.org_id === orgId && row.status === "active");
   }
 
-  async register(company: { orgId: string; name: string; createdBy: string }): Promise<void> {
+  async register(company: { orgId: string; name: string; createdBy: string; kind?: WorkspaceKind }): Promise<void> {
     const response = await this.transport(`${this.baseUrl}/rest/v1/organizations`, {
       method: "POST", headers: this.headers(), signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ org_id: company.orgId, name: company.name, created_by_email: normalizeEmail(company.createdBy), status: "active" })
+      body: JSON.stringify({ org_id: company.orgId, name: company.name, created_by_email: normalizeEmail(company.createdBy), status: "active",
+        kind: company.kind ?? "company" })
+    });
+    if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+  }
+
+  /** Whether this workspace is a company or one person's own; undefined for one listed before that was recorded. */
+  async kind(orgId: string): Promise<WorkspaceKind | undefined> {
+    if (orgId === this.homeOrgId || !/^org_[A-Za-z0-9]{1,64}$/.test(orgId)) return orgId === this.homeOrgId ? "company" : undefined;
+    const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?select=kind&org_id=eq.${encodeURIComponent(orgId)}`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+    const rows = await response.json() as Array<{ kind?: unknown }>;
+    const kind = Array.isArray(rows) ? rows[0]?.kind : undefined;
+    return kind === "company" || kind === "personal" ? kind : undefined;
+  }
+
+  /** Records the kind of a workspace listed before kinds were, once it has been worked out. Never changes a recorded one. */
+  async recordKind(orgId: string, kind: WorkspaceKind): Promise<void> {
+    if (orgId === this.homeOrgId) return;
+    const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?org_id=eq.${encodeURIComponent(orgId)}&kind=is.null`, {
+      method: "PATCH", headers: this.headers(), signal: AbortSignal.timeout(5000), body: JSON.stringify({ kind })
     });
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
   }
