@@ -102,8 +102,12 @@ Redeploy both projects.
   A new company's installation starts with no people list, channel projects or Jira destinations, so the bot proposes
   no Jira tasks on its own, and **Track with Broppy** refuses to create an issue until the company has a Jira site and
   declared destinations. Declaring those from the workspace is not built yet.
-- The AI usage budget (`LLM_USAGE_FILE`) is shared by every company using the built-in or operator model. A company that
-  picks its own model on the Connectors page is not counted against it.
+- The AI usage budget (`LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS`) is shared by every company using the
+  built-in or operator model. Set `LLM_COMPANY_DAILY_ANSWERS`, `LLM_COMPANY_TOKEN_BUDGET` and
+  `EMBEDDING_COMPANY_TOKEN_BUDGET` to give each signed-up company its own share as well, counted in its own file next to
+  the shared one, so one company can't use up everyone's. A company past its share gets the built-in writer and keyword
+  search; the shared limits still apply to all. A company that picks its own model on the Connectors page is not
+  counted against either. The existing company (`AUTH0_ORG_ID`) has no share of its own.
 - The Slack app reaches the API with `SLACK_SERVICE_TOKEN` for the existing company. Each other company's installation is
   given a secret derived from it for that company alone (`companyServiceToken`), and the API looks the person up in that
   company's directory only, so one company's installation can never act as someone in another. Changing

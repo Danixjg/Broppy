@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
-import { modelsFromEnv } from "./llm-budget.js";
+import { companyLimitsFromEnv, companyModels, modelsFromEnv } from "./llm-budget.js";
 import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
@@ -194,6 +194,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const useRemoteFga = Boolean(process.env.FGA_API_URL || process.env.FGA_STORE_ID ||
     process.env.FGA_MODEL_ID || process.env.FGA_CLIENT_ID || process.env.FGA_CLIENT_SECRET);
   const models = modelsFromEnv(process.env);
+  // A mistyped company allowance stops startup, rather than leaving companies without one.
+  companyLimitsFromEnv();
   const embedding = models.embedding;
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
   if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
@@ -234,6 +236,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const tenantDirectory = isHome ? directory : directory?.forOrg(orgId);
     const users = hasAuth0 ? await tenantDirectory!.list() : undefined;
     const persistence = options.brain ? undefined : Persistence.fromEnv(orgId);
+    // A signed-up company uses the built-in or operator model within its own allowance as well as the shared budget.
+    const own = isHome ? models : companyModels(models, orgId);
     const supabase = embedding ? SupabaseIndex.fromEnv(isHome ? undefined : orgId) : null;
     const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
     // Every company can add the shared Slack app to its own Slack. A company that signed itself up is given its own service secret.
@@ -255,9 +259,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
     if (isHome && oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
     const orgModel = orgModelOf(persistence, isHome);
-    const brain = isHome && options.brain ? options.brain : new Brain(models.llm,
+    const brain = isHome && options.brain ? options.brain : new Brain(own.llm,
       { orgLlm: orgModel, orgId: isHome ? process.env.AUTH0_ORG_ID : orgId, persistence, audit: await configuredAudit(persistence),
-        remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding, supabase: supabase ?? undefined,
+        remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding: own.embedding, supabase: supabase ?? undefined,
         taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
           ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
         slackUserIds: isHome ? slackUserIdsFromEnv() : undefined, users, connectors, corpus });
