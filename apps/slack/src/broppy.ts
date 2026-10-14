@@ -31,7 +31,9 @@ export class JiraRefusedError extends Error {}
  * only what they may read. Slack gives no Auth0 token, which is why there is no per-user sign-in here.
  */
 export class BroppyClient implements BroppyApi {
-  constructor(private readonly apiUrl: string, private readonly serviceToken: string, private readonly transport: typeof fetch = fetch) {
+  /** orgId names the company the installation belongs to; the API checks the service secret was issued for that company. */
+  constructor(private readonly apiUrl: string, private readonly serviceToken: string, private readonly transport: typeof fetch = fetch,
+    private readonly orgId?: string) {
     const url = new URL(apiUrl);
     if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
       throw new Error("BROPPY_API_URL must be HTTPS");
@@ -40,7 +42,8 @@ export class BroppyClient implements BroppyApi {
 
   private post(path: string, slackEmail: string, body: unknown, timeout = 25_000): Promise<Response> {
     return this.transport(`${this.apiUrl.replace(/\/$/, "")}${path}`, {
-      method: "POST", headers: { "content-type": "application/json", "x-broppy-service": this.serviceToken, "x-act-as-slack-email": slackEmail },
+      method: "POST", headers: { "content-type": "application/json", "x-broppy-service": this.serviceToken, "x-act-as-slack-email": slackEmail,
+        ...(this.orgId ? { "x-broppy-org": this.orgId } : {}) },
       body: JSON.stringify(body), signal: AbortSignal.timeout(timeout), redirect: "error"
     });
   }

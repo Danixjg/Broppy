@@ -2,7 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import type { User } from "@brain/types";
 import type { BotGrant, InstallationRegistry, InstallationStatus } from "../../slack/src/installations.js";
 import { SupabaseInstallationRegistry } from "../../slack/src/installations.js";
-import { nonempty, record, runtimeFromEnv, type TrustedRuntime } from "../../slack/src/runtime.js";
+import { nonempty, parseRuntime, record, runtimeFromEnv, type TrustedRuntime } from "../../slack/src/runtime.js";
+import { DEFAULT_THRESHOLD } from "../../slack/src/score.js";
+import { companyServiceToken } from "./service-actor.js";
 
 import { SLACK_BOT_SCOPES } from "../../slack/src/app-manifest.js";
 export type CallbackOutcome = "installed" | "denied" | "failed" | "unsupported" | "conflict";
@@ -24,11 +26,24 @@ export interface SlackSourceLink {
   /** Called when the install was refused after the token was stored. */
   discard(): Promise<void>;
 }
+/**
+ * What the shared Slack app is told about a company that signed itself up: where to reach the API, the task store, and
+ * a service secret for that company alone. The people, channel projects and Jira destinations a company's Slack setup
+ * may later declare start empty, so the bot answers questions and offers nothing to Jira until they are set.
+ */
+export function companyRuntime(env: NodeJS.ProcessEnv, orgId: string, jiraBaseUrl?: string): TrustedRuntime {
+  if (!env.SLACK_SERVICE_TOKEN) throw new SlackSetupError("Slack for other companies needs SLACK_SERVICE_TOKEN");
+  return parseRuntime({ orgId, apiUrl: env.API_ORIGIN, webUrl: env.WEB_ORIGIN, storeUrl: env.SUPABASE_URL, storeKey: env.SUPABASE_SECRET_KEY,
+    serviceToken: companyServiceToken(env.SLACK_SERVICE_TOKEN, orgId), people: [], channelProjects: {}, defaultProject: "",
+    threshold: env.TASK_SCORE_THRESHOLD ? Number(env.TASK_SCORE_THRESHOLD) : DEFAULT_THRESHOLD,
+    ...(jiraBaseUrl ? { jiraBaseUrl } : {}), destinations: [], completionPolicies: [] });
+}
+
 export class SlackInstallationOAuth {
   readonly redirectUri: string;
   link?: SlackSourceLink;
   readonly returnUrl: string;
-  constructor(readonly config: SlackOAuthConfig, private readonly registry: InstallationRegistry, private readonly runtime: () => TrustedRuntime,
+  constructor(readonly config: SlackOAuthConfig, private readonly registry: InstallationRegistry, private readonly runtime: () => TrustedRuntime | Promise<TrustedRuntime>,
     private readonly directory: (sub: string) => Promise<User | undefined>, private readonly transport: typeof fetch = fetch) {
     this.redirectUri = `${secureOrigin(config.apiOrigin)}/v1/admin/slack-installation/callback`;
     this.returnUrl = `${secureOrigin(config.webOrigin)}/workspace/connectors.html`;
@@ -39,6 +54,14 @@ export class SlackInstallationOAuth {
     return new SlackInstallationOAuth({ appId: env.SLACK_APP_ID ?? "", clientId: env.SLACK_CLIENT_ID ?? "", clientSecret: env.SLACK_CLIENT_SECRET ?? "",
       orgId: env.AUTH0_ORG_ID ?? "", apiOrigin: env.API_ORIGIN ?? "", webOrigin: env.WEB_ORIGIN ?? "" }, SupabaseInstallationRegistry.fromEnv(env), () => runtimeFromEnv(env), directory);
   }
+  /** The same Slack app, installed by a company that signed itself up. Undefined when the app isn't configured. */
+  static forCompany(env: NodeJS.ProcessEnv, orgId: string, directory: (sub: string) => Promise<User | undefined>,
+    jiraSite: () => Promise<string | undefined>): SlackInstallationOAuth | undefined {
+    if (!env.SLACK_APP_ID || !env.SLACK_CLIENT_ID || !env.SLACK_CLIENT_SECRET || !env.SLACK_SERVICE_TOKEN) return undefined;
+    return new SlackInstallationOAuth({ appId: env.SLACK_APP_ID, clientId: env.SLACK_CLIENT_ID, clientSecret: env.SLACK_CLIENT_SECRET,
+      orgId, apiOrigin: env.API_ORIGIN ?? "", webOrigin: env.WEB_ORIGIN ?? "" }, SupabaseInstallationRegistry.fromEnv(env),
+      async () => companyRuntime(env, orgId, await jiraSite()), directory);
+  }
   private async admin(actor: User): Promise<User> {
     if (!actor.auth0Sub) throw new Error("Forbidden");
     const current = await this.directory(actor.auth0Sub);
@@ -48,7 +71,7 @@ export class SlackInstallationOAuth {
   async begin(actor: User): Promise<string> {
     const admin = await this.admin(actor);
     if (!nonempty(admin.platformIdentities?.slack)) throw new Error("Your Broppy profile needs a Slack email before you can add Broppy to Slack. Ask your administrator to update it.");
-    this.runtime();
+    await this.runtime();
     const state = randomBytes(32).toString("base64url");
     await this.registry.begin(this.config.orgId, this.config.appId, this.hash(state), admin.id, admin.auth0Sub!);
     const url = new URL("https://slack.com/oauth/v2/authorize");
@@ -104,7 +127,7 @@ export class SlackInstallationOAuth {
     try {
       const grant = await this.grant(input.code, actor);
       if (grant.user) await this.link!.store(actor, grant.user);
-      if (await this.registry.publish(attempt, grant.bot, this.runtime())) return "installed";
+      if (await this.registry.publish(attempt, grant.bot, await this.runtime())) return "installed";
       if (grant.user) await this.link!.discard();
       return "conflict";
     } catch (error) {
@@ -114,7 +137,7 @@ export class SlackInstallationOAuth {
     }
   }
   async status(actor: User): Promise<InstallationStatus> { await this.admin(actor); return this.registry.status(this.config.orgId, this.config.appId); }
-  async refresh(actor: User, generation: number): Promise<boolean> { await this.admin(actor); return this.registry.refresh(this.config.orgId, this.config.appId, generation, this.runtime()); }
+  async refresh(actor: User, generation: number): Promise<boolean> { await this.admin(actor); return this.registry.refresh(this.config.orgId, this.config.appId, generation, await this.runtime()); }
   async disconnect(actor: User, generation: number): Promise<boolean> {
     await this.admin(actor);
     const status = await this.registry.status(this.config.orgId, this.config.appId);

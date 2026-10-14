@@ -2,6 +2,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import { createApiServer, type ApiServer } from "./server.js";
+import { companyServiceToken } from "./service-actor.js";
 
 /**
  * The whole API with several companies, against a pretend Supabase (it filters rows exactly as the requests ask, so a
@@ -28,6 +29,8 @@ const invitations: Array<{ org: string; email: string }> = [];
 const emails: Record<string, { email: string; verified: boolean }> = {};
 let orgCounter = 0;
 let failInvites = false;
+const rpcCalls: Array<{ name: string; body: Row }> = [];
+const SLACK_SECRET = "s".repeat(40);
 
 const json = (data: unknown, status = 200) => new Response(data === undefined ? "" : JSON.stringify(data), { status });
 function filterRows(rows: Row[], params: URLSearchParams): Row[] {
@@ -86,6 +89,7 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
   if (url.origin === supabase) {
     const rpc = /^\/rest\/v1\/rpc\/(.+)$/.exec(url.pathname);
     if (rpc) {
+      rpcCalls.push({ name: rpc[1], body });
       if (rpc[1] === "save_brain_state") {
         snapshotWrites += 1;
         const rows = tables.brain_state; const at = rows.findIndex(row => row.org_id === body.organization);
@@ -117,7 +121,8 @@ const settings: Record<string, string> = {
   AUDIT_SIGNING_KEY: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   AUTH0_MANAGEMENT_CLIENT_ID: "m2m", AUTH0_MANAGEMENT_CLIENT_SECRET: "m2m-secret", AUTH0_CLIENT_ID: "web-app",
   AUTH0_SIGNUP_CONNECTION_ID: "con_db", SELF_SIGNUP: "on", API_ORIGIN: "https://api.example.test", WEB_ORIGIN: "https://app.example.test",
-  SOURCE_OAUTH_JSON: JSON.stringify({ jira: { clientId: "c", clientSecret: "s", scopes: ["read:jira-work"] } })
+  SOURCE_OAUTH_JSON: JSON.stringify({ jira: { clientId: "c", clientSecret: "s", scopes: ["read:jira-work"] } }),
+  SLACK_APP_ID: "A123", SLACK_CLIENT_ID: "slack-client", SLACK_CLIENT_SECRET: "slack-secret", SLACK_SERVICE_TOKEN: SLACK_SECRET
 };
 
 async function call(method: string, path: string, who?: { sub: string; org: string }, data?: unknown) {
@@ -257,6 +262,32 @@ describe("several companies in one API", () => {
     // Someone the admin never added gets nothing, whatever organization their sign-in names.
     emails["auth0|outsider"] = { email: "outsider@acme.test", verified: true };
     expect((await call("GET", "/v1/admin/company", { sub: "auth0|outsider", org: "org_new1" })).status).toBe(403);
+  });
+
+  it("lets a company that signed itself up add Broppy to its own Slack", async () => {
+    const dana = { sub: "auth0|dana", org: "org_new1" };
+    const begun = await call("POST", "/v1/admin/slack-installation/authorize", dana, { via: "setup" });
+    expect(begun.status).toBe(200);
+    const state = new URL(begun.body.url).searchParams.get("state")!;
+    // The approval comes back without a sign-in, so the state names the company; the attempt is stored inside it.
+    expect(state).toMatch(/~org_new1\.setup$/);
+    expect(rpcCalls.filter(item => item.name === "begin_slack_install").at(-1)!.body).toMatchObject({ organization: "org_new1", application: "A123", person: "dana" });
+    // An approval whose stored attempt can't be found in that company fails, and goes back to setup.
+    const back = await call("GET", `/v1/admin/slack-installation/callback?code=x&state=${encodeURIComponent(state)}`);
+    expect(back.status).toBe(302);
+    expect(back.location).toContain("/workspace/setup.html?slack_install=failed");
+    expect(rpcCalls.filter(item => item.name === "consume_slack_install").at(-1)!.body).toMatchObject({ organization: "org_new1" });
+  });
+
+  it("answers the company's Slack app only with that company's own service secret, as its own people", async () => {
+    const ask = (secret: string, org?: string) => fetch(`${base}/v1/query`, { method: "POST", body: JSON.stringify({ question: "What is new?" }),
+      headers: { "content-type": "application/json", "x-broppy-service": secret, "x-act-as-slack-email": "dana@acme.test", ...(org ? { "x-broppy-org": org } : {}) } });
+    expect((await ask(companyServiceToken(SLACK_SECRET, "org_new1"), "org_new1")).status).toBe(200);
+    // The home company's secret, another company's secret, or no company at all never reach this company's people.
+    expect((await ask(SLACK_SECRET, "org_new1")).status).toBe(401);
+    expect((await ask(companyServiceToken(SLACK_SECRET, "org_other"), "org_new1")).status).toBe(401);
+    expect((await ask(SLACK_SECRET)).status).toBe(401);
+    expect((await ask(companyServiceToken(SLACK_SECRET, "org_new1"), HOME)).status).toBe(401);
   });
 
   it("lets a second company take the same name, at its own address, without touching the first", async () => {

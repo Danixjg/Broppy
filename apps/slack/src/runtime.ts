@@ -13,9 +13,11 @@ export interface TrustedRuntime {
   storeKey: string;
   people: Person[];
   channelProjects: Record<string, string>;
+  /** Empty for a company that hasn't chosen one: suggestions then carry no project until someone picks it. */
   defaultProject: string;
   threshold: number;
-  jiraBaseUrl: string;
+  /** The company's Jira site. A company that hasn't connected Jira has none, and no Jira destination can be declared. */
+  jiraBaseUrl?: string;
   destinations: NonNullable<Deps["destinations"]>;
   completionPolicies: NonNullable<Deps["completionPolicies"]>;
 }
@@ -32,7 +34,7 @@ function origin(value: unknown): string {
 function stringList(value: unknown): value is string[] { return Array.isArray(value) && value.every(item => typeof item === "string"); }
 export function parseRuntime(input: unknown): TrustedRuntime {
   if (!record(input) || !nonempty(input.orgId) || !nonempty(input.serviceToken) || input.serviceToken.length < 32 || !nonempty(input.storeKey)
-    || !nonempty(input.defaultProject) || !nonempty(input.jiraBaseUrl) || typeof input.threshold !== "number" || !Number.isFinite(input.threshold)
+    || typeof input.defaultProject !== "string" || (input.jiraBaseUrl !== undefined && !nonempty(input.jiraBaseUrl)) || typeof input.threshold !== "number" || !Number.isFinite(input.threshold)
     || input.threshold < 0 || input.threshold > 1 || !Array.isArray(input.people) || !record(input.channelProjects)
     || !Array.isArray(input.destinations) || !Array.isArray(input.completionPolicies)) throw new Error("Invalid trusted Slack runtime");
   const people: Person[] = input.people.map(person => {
@@ -57,8 +59,10 @@ export function parseRuntime(input: unknown): TrustedRuntime {
     });
     return { channel: policy.channel, project: policy.project, allowedSlackIds: policy.allowedSlackIds, disclosureFields };
   });
-  return { orgId: input.orgId, apiUrl: origin(input.apiUrl), webUrl: origin(input.webUrl), storeUrl: origin(input.storeUrl), jiraBaseUrl: origin(input.jiraBaseUrl),
-    serviceToken: input.serviceToken, storeKey: input.storeKey, people, channelProjects, defaultProject: input.defaultProject, threshold: input.threshold, destinations, completionPolicies };
+  // Declaring where Jira issues go only makes sense once there is a Jira site to check their links against.
+  if ((destinations.length || completionPolicies.length) && input.jiraBaseUrl === undefined) throw new Error("Slack Jira destinations need a Jira site");
+  return { orgId: input.orgId, apiUrl: origin(input.apiUrl), webUrl: origin(input.webUrl), storeUrl: origin(input.storeUrl),
+    ...(input.jiraBaseUrl === undefined ? {} : { jiraBaseUrl: origin(input.jiraBaseUrl) }), serviceToken: input.serviceToken, storeKey: input.storeKey, people, channelProjects, defaultProject: input.defaultProject, threshold: input.threshold, destinations, completionPolicies };
 }
 function json(env: NodeJS.ProcessEnv, key: string, fallback: unknown): unknown { return env[key] ? JSON.parse(env[key]) : fallback; }
 export function runtimeFromEnv(env: NodeJS.ProcessEnv): TrustedRuntime {
@@ -78,7 +82,7 @@ export function installedDeps(runtime: TrustedRuntime, token: string, scope: Wor
     await requireCurrent(scope);
     return fetch(input, init);
   };
-  return { ...runtime, signingSecret, slack: new SlackWebApi(token, transport), broppy: new BroppyClient(runtime.apiUrl, runtime.serviceToken, transport),
+  return { ...runtime, signingSecret, slack: new SlackWebApi(token, transport), broppy: new BroppyClient(runtime.apiUrl, runtime.serviceToken, transport, runtime.orgId),
     store: new SupabaseTaskStore(scope.orgId, runtime.storeUrl, runtime.storeKey), workspace: scope,
     webUrl: runtime.webUrl, defer, workerToken, now: () => new Date() };
 }

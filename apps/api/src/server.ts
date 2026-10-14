@@ -216,8 +216,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const users = hasAuth0 ? await tenantDirectory!.list() : undefined;
     const persistence = options.brain ? undefined : Persistence.fromEnv(orgId);
     const supabase = embedding ? SupabaseIndex.fromEnv(isHome ? undefined : orgId) : null;
-    const slackInstallation = isHome && directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
     const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
+    // Every company can add the shared Slack app to its own Slack. A company that signed itself up is given its own service secret.
+    const slackInstallation = !directory ? undefined : isHome ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub))
+      : SlackInstallationOAuth.forCompany(process.env, orgId, sub => tenantDirectory!.bySub(sub), async () => (await oauth?.orgSite("jira"))?.baseUrl);
     const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
     const connectors = (isHome ? liveConnectorsFromEnv(users ?? loadMockCorpus().users) : undefined) ?? (oauth ? Object.fromEntries(
       (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
@@ -336,10 +338,12 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       const webOrigin = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001";
       if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
-        const slackInstallation = home.slackInstallation;
-        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
         const returned = splitReturnPage(url.searchParams.get("state") ?? "");
-        const outcome = returned.company ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+        // The company rides on the state. A made-up one finds no stored attempt, since attempts are looked up inside that company.
+        const owner = returned.company ? await tenants.get(returned.company).catch(() => undefined) : home;
+        const slackInstallation = owner?.slackInstallation ?? home.slackInstallation;
+        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
+        const outcome = returned.company && !owner?.slackInstallation ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
           .catch(() => "failed");
         const destination = new URL(returned.page === "setup" ? returnLocation(webOrigin, "setup", {}) : slackInstallation.returnUrl);
         destination.searchParams.set("slack_install", outcome);
@@ -404,7 +408,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!slackInstallation) return await reply(response, request.method === "GET" && !route ? 200 : 503,
           request.method === "GET" && !route ? { state: "not_installed", configured: false } : { error: "Add to Slack is not available in this workspace yet." });
         if (request.method === "GET" && !route) return await reply(response, 200, await slackInstallation.status(user));
-        if (request.method === "POST" && route === "/authorize") return await reply(response, 200, { url: await slackInstallation.begin(user) });
+        if (request.method === "POST" && route === "/authorize") {
+          const page = pageFor((await body(request).catch((): Record<string, unknown> => ({}))).via);
+          return await reply(response, 200, { url: withReturnPage(await slackInstallation.begin(user), page, tenant.isHome ? undefined : tenant.orgId) });
+        }
         if ((request.method === "POST" && route === "/refresh") || (request.method === "DELETE" && !route)) {
           const input = await body(request);
           if (typeof input.generation !== "number" || !Number.isSafeInteger(input.generation) || input.generation < 1) return await reply(response, 400, { error: "Reload the Slack installation status and try again." });
