@@ -317,6 +317,8 @@ function renderSuggestions() {
     for (const field of [summary, owner, due]) field.addEventListener("input", dirty);
     if (item.canCreate && state.workspace.capabilities.createTask === true) {
       create.addEventListener("click", () => createTask(item, create)); card.append(create);
+      if (state.workspace.capabilities.mode === "live") appendText(card, "p", "muted",
+        `This creates the issue in your company's Jira. Everyone who can see the ${item.project} project there will see its title.`);
     } else if (item.jiraUrl) card.append(externalLink(item.jiraUrl, `Open ${item.project} in Jira ↗`));
     const dismiss = node("button", "text-button", "Dismiss"); dismiss.type = "button";
     dismiss.addEventListener("click", () => reviewCommitment(item, { action: "dismiss" }, dismiss)); card.append(dismiss);

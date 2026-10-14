@@ -255,6 +255,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
       discard: async () => { await oauth!.remove("slack"); } };
     const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
+    // With live sources, the workspace creates and closes Jira tasks through the same shared connection.
+    if (jiraAsUser && connectors && oauthConfigs?.jira) brain.liveJira = jiraAsUser;
     const people = hasAuth0 ? new People(tenantDirectory!, isHome ? management : management?.forOrg(orgId)) : undefined;
     // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
     const reloadUsers = async () => { users!.splice(0, users!.length, ...await tenantDirectory!.list()); };

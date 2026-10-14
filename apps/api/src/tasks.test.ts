@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { loadMockCorpus } from "@brain/connectors";
-import { Brain } from "./brain.js";
+import { Brain, type LiveJira } from "./brain.js";
 import type { Persistence } from "./persistence.js";
 import { createApiServer } from "./server.js";
 
@@ -124,5 +124,70 @@ describe("task routes", () => {
     expect((await post("/v1/tasks", "david", { threadDocId: thread })).status).toBe(400);
     expect(await post("/v1/tasks/done", "david", { docId: "jira:DB-16" })).toEqual({ status: 200, body: { ok: true } });
     expect((await post("/v1/tasks/done", "wei", { docId: "jira:DB-16" })).status).toBe(404);
+  });
+});
+
+describe("tasks with live sources and a connected Jira", () => {
+  function fakeJira(overrides: Partial<LiveJira> = {}) {
+    const created: Array<{ user: string; input: { project: string; summary: string; description: string } }> = [];
+    const closed: string[] = [];
+    const jira: LiveJira = {
+      canCreate: async () => true,
+      createIssue: async (user, input) => { created.push({ user: user.id, input }); return { key: "DB-77", url: "https://acme.atlassian.net/browse/DB-77" }; },
+      markDone: async (_user, key) => { closed.push(key); return true; },
+      ...overrides
+    };
+    return { jira, created, closed };
+  }
+
+  it("creates the reviewed task in Jira with only the summary and an operation marker, once", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors });
+    const { jira, created } = fakeJira();
+    live.liveJira = jira;
+    const david = live.user("david")!;
+    expect((await live.workspace(david)).capabilities).toMatchObject({ mode: "live", createTask: true, markDone: true });
+    expect(await live.createTask(david, thread, sentence)).toEqual({ docId: "jira:DB-77", title: "DB-77 Maya raises the replica storage quota before the final wave" });
+    expect(created).toHaveLength(1);
+    expect(created[0].user).toBe("david");
+    expect(created[0].input.project).toBe("DB");
+    expect(created[0].input.summary).toBe("Maya raises the replica storage quota before the final wave");
+    // Jira never receives the thread's text or name.
+    expect(created[0].input.description).toMatch(/^Approved summary: Maya raises the replica storage quota before the final wave\nBroppy operation: [a-f0-9-]{36}$/);
+    expect(created[0].input.description).not.toContain("db-migration");
+    expect(live.audit.entries).toContainEqual(expect.objectContaining({ type: "task_created", actor: "david",
+      data: expect.objectContaining({ docId: "jira:DB-77", fromDocId: thread, project: "DB" }) }));
+    await expect(live.createTask(david, thread, sentence)).rejects.toThrow();
+    expect(created).toHaveLength(1);
+  });
+
+  it("refuses a person whose Jira account can't create there, and someone who can't open the thread", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors });
+    const { jira, created } = fakeJira({ canCreate: async () => false });
+    live.liveJira = jira;
+    await expect(live.createTask(live.user("david")!, thread, sentence)).rejects.toThrow("can't create issues in that project");
+    await expect(live.createTask(live.user("alex")!, thread, sentence)).rejects.toThrow("Unknown document");
+    expect(created).toEqual([]);
+  });
+
+  it("blocks a retry when Jira's answer was lost, so a task is never created twice", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors });
+    let calls = 0;
+    live.liveJira = fakeJira({ createIssue: async () => { calls++; throw new Error("socket hang up"); } }).jira;
+    await expect(live.createTask(live.user("david")!, thread, sentence)).rejects.toThrow("couldn't confirm");
+    await expect(live.createTask(live.user("david")!, thread, sentence)).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
+  it("marks a task done in Jira only for someone who can open it", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors });
+    const { jira, closed } = fakeJira();
+    live.liveJira = jira;
+    await live.markDone(live.user("david")!, "jira:DB-15");
+    expect(closed).toEqual(["DB-15"]);
+    expect(live.audit.entries).toContainEqual(expect.objectContaining({ type: "task_status_changed", actor: "david" }));
+    await expect(live.markDone(live.user("wei")!, "jira:DB-15")).rejects.toThrow("Unknown document");
+    live.liveJira = fakeJira({ markDone: async () => false }).jira;
+    await expect(live.markDone(live.user("ravi")!, "jira:DB-15")).rejects.toThrow("didn't let you");
+    expect(closed).toEqual(["DB-15"]);
   });
 });

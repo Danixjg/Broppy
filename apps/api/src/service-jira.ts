@@ -67,6 +67,49 @@ export class JiraAsUser {
     return Array.isArray(list) && list.some((item: any) => item?.accountId === accountId);
   }
 
+  /** Whether the person's own Jira account holds this permission, for a project or an issue. Without a Jira identity, no. */
+  private async holds(user: User, permission: "CREATE_ISSUES" | "TRANSITION_ISSUES", target: { projectKey: string } | { issueKey: string }): Promise<boolean> {
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return false;
+    const email = (user.platformIdentities?.jira ?? "").trim().toLowerCase();
+    const accountId = email && await this.accountId?.(email);
+    if (!accountId) return false;
+    const [name, value] = "projectKey" in target ? ["projectKey", target.projectKey] : ["issueKey", target.issueKey];
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/user/permission/search?accountId=${encodeURIComponent(accountId)}&permissions=${permission}&${name}=${encodeURIComponent(value)}&maxResults=10`,
+      { headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (response.status === 403 || response.status === 404) return false;
+    if (!response.ok) throw new Error(`Jira access check failed (${response.status})`);
+    const list: unknown = await response.json();
+    return Array.isArray(list) && list.some((item: any) => item?.accountId === accountId);
+  }
+
+  /** The shared connection can create in any project the admin can, so the person must be allowed to create there too. */
+  canCreate(user: User, project: string): Promise<boolean> {
+    if (!/^[A-Z][A-Z0-9]{0,9}$/.test(project) || user.active === false) return Promise.resolve(false);
+    return this.holds(user, "CREATE_ISSUES", { projectKey: project });
+  }
+
+  /**
+   * Moves an issue to a done status, when the person may both see it and change its status in Jira. Returns false when
+   * they may not, or the workflow has no transition into done from where the issue is.
+   */
+  async markDone(user: User, key: string): Promise<boolean> {
+    if (!/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(key) || user.active === false) return false;
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return false;
+    if (!await this.mayView(user, key, authorization, site) || !await this.holds(user, "TRANSITION_ISSUES", { issueKey: key })) return false;
+    const base = `https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`;
+    const listed = await this.transport(base, { headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!listed.ok) throw new Error(`Jira transitions failed (${listed.status})`);
+    const transitions: unknown = (await listed.json() as { transitions?: unknown }).transitions;
+    const done = Array.isArray(transitions) ? transitions.find((item: any) => item?.to?.statusCategory?.key === "done" && typeof item.id === "string") : undefined;
+    if (!done) return false;
+    const moved = await this.transport(base, { method: "POST", headers: { authorization, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ transition: { id: (done as { id: string }).id } }), signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!moved.ok) throw new Error(`Jira transition failed (${moved.status})`);
+    return true;
+  }
+
   private async request(user: User, path: string, body: unknown) {
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
     if (!authorization || !site) return undefined;

@@ -65,6 +65,45 @@ describe("JiraAsUser", () => {
   });
 });
 
+describe("JiraAsUser for the workspace", () => {
+  it("lets the person create only where their own Jira account may", async () => {
+    const urls: string[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async url => {
+      urls.push(String(url));
+      return Response.json(String(url).includes("projectKey=DB") ? [{ accountId: "acct-maya" }] : []);
+    });
+    expect(await jira.canCreate(maya, "DB")).toBe(true);
+    expect(await jira.canCreate(maya, "SEC")).toBe(false);
+    expect(urls[0]).toContain("permissions=CREATE_ISSUES");
+    // No Jira identity, an inactive person or a malformed project never reach Jira.
+    expect(await jira.canCreate({ ...maya, platformIdentities: {} } as unknown as User, "DB")).toBe(false);
+    expect(await jira.canCreate({ ...maya, active: false }, "DB")).toBe(false);
+    expect(await jira.canCreate(maya, "db")).toBe(false);
+    expect(urls).toHaveLength(2);
+  });
+
+  it("moves an issue to done through a transition into the done category, when the person may", async () => {
+    const posted: any[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async (url, init) => {
+      const href = String(url);
+      if (href.includes("user/permission/search")) return Response.json([{ accountId: "acct-maya" }]);
+      if ((init as any)?.method === "POST") { posted.push(JSON.parse((init as any).body)); return new Response(null, { status: 204 }); }
+      return Response.json({ transitions: [{ id: "11", to: { statusCategory: { key: "indeterminate" } } }, { id: "31", to: { statusCategory: { key: "done" } } }] });
+    });
+    expect(await jira.markDone(maya, "DB-9")).toBe(true);
+    expect(posted).toEqual([{ transition: { id: "31" } }]);
+  });
+
+  it("refuses to mark done without permission, or when the workflow has no way to done", async () => {
+    const denied = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async url =>
+      Response.json(String(url).includes("TRANSITION_ISSUES") ? [] : [{ accountId: "acct-maya" }]));
+    expect(await denied.markDone(maya, "DB-9")).toBe(false);
+    const stuck = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async url =>
+      String(url).includes("user/permission/search") ? Response.json([{ accountId: "acct-maya" }]) : Response.json({ transitions: [{ id: "11", to: { statusCategory: { key: "new" } } }] }));
+    expect(await stuck.markDone(maya, "DB-9")).toBe(false);
+  });
+});
+
 describe("request validation", () => {
   it("accepts what the Slack app sends and rejects the rest", () => {
     expect(parseIssue({ project: "DB", summary: "s", description: "d", dueDate: "2026-10-16" })).toMatchObject({ project: "DB" });
