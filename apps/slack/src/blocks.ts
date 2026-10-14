@@ -25,7 +25,7 @@ const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&l
 
 export function suggestionBlocks(s: Suggestion, assigneeName: string, openUrl: string, reference: { id: string; revision: number }, candidates: Array<{ issueKey: string; issueUrl: string }> = [], sourcePointer?: string, audience: string[] = []) {
   const line = ["Looks like a task: *" + escape(s.t) + "*", escape(assigneeName),
-    ...(s.d ? [`due ${formatDue(s.d)}`] : []), `Jira project ${s.p}`].join(" · ");
+    ...(s.d ? [`due ${formatDue(s.d)}`] : []), s.p ? `Jira project ${s.p}` : "no Jira project yet"].join(" · ");
   return [
     { type: "section", text: text(line + "\nJira receives the reviewed summary, owner, and due date." + (sourcePointer ? "\nApproved source pointer: " + escape(sourcePointer) : "")
       + "\nDeclared Jira recipients: " + (audience.length ? audience.map(id => `<@${id}>`).join(", ") : "No approved audience. Creation is disabled.")) },

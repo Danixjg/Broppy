@@ -177,10 +177,13 @@ person may also open.
   merge is a preview that changes nothing.
 - **From conversation to task:** sentences such as "Agreed: …" or "Decision: …" in a thread become a suggested Jira
   task in the thread's project.
-  - Creating it and marking a task done work on mock sources only.
-  - The task's text comes from the agreed sentence alone. It links back to the thread and copies the permissions of
-    the issue it is modelled on.
-  - With live sources the app stays read-only and links to the project in Jira.
+  - On mock sources, the task's text comes from the agreed sentence alone. It links back to the thread and copies the
+    permissions of the issue it is modelled on.
+  - With live sources and Jira connected, Create and Mark done go to the company's Jira through the shared connection,
+    for a person whose own Jira account may create in that project, or see and move that issue. Jira receives the
+    reviewed summary and an operation marker only, never the thread's text or name. Each attempt is reserved first; one
+    whose result is unknown is blocked until it is reconciled, so a task is never created twice. Who can see the new
+    issue is up to the Jira project, which the page says before creating.
 - **Catch-up** (`/v1/catch-up`): chosen by role and groups, and asked like any question.
   - Interns get what a new hire should read first.
   - People in no group see what is shared with them.
@@ -267,7 +270,8 @@ person may also open.
 - **Audit volume:** every ranked candidate and every access decision is an audit entry. At the brief's scale a broad
   question writes up to about 25,000 entries: the slowest took 1.0 seconds, and 0.4 without writing them.
 - **Live imports:** they read current text only: no revision history, Jira comments or text from images.
-- **Workspace writes:** creating a task and Mark done change mock sources only. Live connectors keep read-only scopes.
+- **Workspace writes:** with live sources, creating a task and Mark done need Jira connected, and act with the admin's
+  shared connection after checking the person's own Jira permission. Slack, Confluence and Drive stay read-only.
 - **Links by path:** a link is recognised by its path, whatever the host. A link to another company's Jira issue with
   the same key would point at ours, though that item still passes every access check.
 - **Saved demo data:** an API that saves its state to Supabase keeps the mock data it first saved, with its dates.

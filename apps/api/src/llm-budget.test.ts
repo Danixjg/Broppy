@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BudgetedEmbedding, BudgetedLlm, modelsFromEnv, UsageMeter } from "./llm-budget.js";
+import { BudgetedEmbedding, BudgetedLlm, companyLimitsFromEnv, companyModels, modelsFromEnv, UsageMeter } from "./llm-budget.js";
 import { ModelCallError, ModelUnavailable, type TokenUsage } from "./llm.js";
 
 const context = [{ citation: "jira:PAY-101:0", text: "Cutover starts at 2 PM." }];
@@ -142,6 +142,58 @@ describe("BudgetedEmbedding", () => {
     const inner = { embedWithUsage: vi.fn(async () => { throw new ModelCallError("Hunyuan embedding request failed"); }) };
     await expect(new BudgetedEmbedding(inner, meter).embed("x".repeat(30))).rejects.toThrow(ModelCallError);
     expect(meter.usage().embeddingTokens).toBe(10);
+  });
+});
+
+describe("each company's own allowance", () => {
+  it("stops one company at its own daily allowance without touching another's, and counts both in the shared budget", async () => {
+    const inner = model(100);
+    const shared = new BudgetedLlm(inner, new UsageMeter(undefined, { chatTokens: 10_000 }));
+    const env = { LLM_COMPANY_DAILY_ANSWERS: "2" };
+    const acme = companyModels({ llm: shared }, "org_acme1", env).llm!;
+    const zeta = companyModels({ llm: shared }, "org_zeta1", env).llm!;
+    await acme.generate(context, "q"); await acme.generate(context, "q");
+    expect(await reason(acme.generate(context, "q"))).toBe("daily_limit");
+    // The other company still has its own two answers.
+    await zeta.generate(context, "q");
+    expect(inner.generateWithUsage).toHaveBeenCalledTimes(3);
+    expect(shared.meter.usage().chatTokens).toBe(300);
+    expect(acme.meter.usage().answersToday).toBe(2);
+  });
+
+  it("still stops every company at the shared budget", async () => {
+    const shared = new BudgetedLlm(model(600), new UsageMeter(undefined, { chatTokens: 1000 }));
+    const acme = companyModels({ llm: shared }, "org_acme1", { LLM_COMPANY_TOKEN_BUDGET: "1000000" }).llm!;
+    await acme.generate(context, "q"); await acme.generate(context, "q");
+    expect(await reason(acme.generate(context, "q"))).toBe("budget");
+  });
+
+  it("keeps each company's counts in a file of its own next to the shared one", async () => {
+    const file = usageFile();
+    const shared = new BudgetedLlm(model(100), new UsageMeter(file, {}));
+    const env = { LLM_USAGE_FILE: file, LLM_COMPANY_DAILY_ANSWERS: "5" };
+    await companyModels({ llm: shared }, "org_acme1", env).llm!.generate(context, "q");
+    expect(new UsageMeter(file.replace(/\.json$/, ".org_acme1.json"), {}).usage().answersToday).toBe(1);
+    // A restart picks up the same company's count.
+    expect(companyModels({ llm: shared }, "org_acme1", env).llm!.meter.usage().answersToday).toBe(1);
+  });
+
+  it("limits each company's embeddings too, and says so before sync asks", async () => {
+    const inner = { embedWithUsage: vi.fn(async () => ({ vector: [1, 0], tokens: 30 })) };
+    const shared = new BudgetedEmbedding(inner, new UsageMeter(undefined, {}));
+    const acme = companyModels({ embedding: shared }, "org_acme1", { EMBEDDING_COMPANY_TOKEN_BUDGET: "50" }).embedding!;
+    await acme.embed("one"); await acme.embed("two");
+    expect(acme.available()).toBe(false);
+    expect(shared.available()).toBe(true);
+    expect(shared.meter.usage().embeddingTokens).toBe(60);
+  });
+
+  it("is the shared models without company settings, and refuses bad numbers", () => {
+    const shared = new BudgetedLlm(model(1), new UsageMeter(undefined, {}));
+    expect(companyModels({ llm: shared }, "org_acme1", {}).llm).toBe(shared);
+    expect(companyLimitsFromEnv({})).toBeUndefined();
+    expect(() => companyLimitsFromEnv({ LLM_COMPANY_DAILY_ANSWERS: "lots" })).toThrow("LLM_COMPANY_DAILY_ANSWERS");
+    expect(() => companyModels({ llm: shared }, "../etc", { LLM_COMPANY_DAILY_ANSWERS: "1" })).toThrow("Invalid organization");
   });
 });
 

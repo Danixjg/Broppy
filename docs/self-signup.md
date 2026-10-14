@@ -17,8 +17,9 @@ The front page offers **Sign up** (personal) and **Enterprise sign up** (a compa
   always gives the same workspace, and an email already on any workspace gets the same answer as everyone else and creates
   nothing. A repeated sign-up for an unopened personal workspace sends the invitation again.
 - There is no separate switch: both need `SELF_SIGNUP=on`, and `SIGNUP_ACCESS_CODE` applies to both.
-- Not built yet: the guided setup still shows the "Add your team" step to a personal workspace (it can be skipped), and
-  nothing marks a workspace as personal in the database.
+- `organizations.kind` records `company` or `personal` at sign-up (migration 013). A personal workspace's guided setup has
+  four steps, with no "Add your team", and the API refuses to add anyone else to it. A workspace listed before kinds were
+  recorded is worked out once from its Auth0 address and written back.
 
 ## What happens
 
@@ -44,7 +45,8 @@ listing it, that organization is left holding its name; delete it in the Auth0 d
 
 ## Switching it on
 
-Apply `infra/supabase/migrations/012_company_signup.sql` first (fresh projects: `infra/supabase/schema.sql`).
+Apply `infra/supabase/migrations/012_company_signup.sql` and `013_workspace_kind.sql` first (fresh projects:
+`infra/supabase/schema.sql`).
 
 **Auth0**
 - In Auth0, open **Applications → Applications**, choose the machine-to-machine application used for invitations (the
@@ -94,12 +96,22 @@ Redeploy both projects.
   company keeps it.
 - Don't pin `cloudId` or `baseUrl` for Jira or Confluence in `SOURCE_OAUTH_JSON` when self-signup is on: those pin one
   company's site, and other companies would be refused.
-- **The Slack app (`apps/slack`) and its `/broppy` command serve the existing company only.** A new company still
-  connects Slack as a source through the guided setup; installing the Broppy bot into a second company's Slack is not
-  built yet.
-- The AI usage budget (`LLM_USAGE_FILE`) is shared by every company using the built-in or operator model. A company that
-  picks its own model on the Connectors page is not counted against it.
-- The service identity the Slack app uses (`SLACK_SERVICE_TOKEN`) belongs to the existing company.
+- **Every company can add the Broppy bot to its own Slack** (Connectors page, or the Slack step of the guided setup),
+  when the API has `SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` and `SLACK_SERVICE_TOKEN`. One Slack workspace
+  belongs to one company. The bot then answers `/broppy` and **Ask Broppy** as the person asking, with their own access.
+  A new company's installation starts with no people list, channel projects or Jira destinations, so the bot proposes
+  no Jira tasks on its own, and **Track with Broppy** refuses to create an issue until the company has a Jira site and
+  declared destinations. Declaring those from the workspace is not built yet.
+- The AI usage budget (`LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS`) is shared by every company using the
+  built-in or operator model. Set `LLM_COMPANY_DAILY_ANSWERS`, `LLM_COMPANY_TOKEN_BUDGET` and
+  `EMBEDDING_COMPANY_TOKEN_BUDGET` to give each signed-up company its own share as well, counted in its own file next to
+  the shared one, so one company can't use up everyone's. A company past its share gets the built-in writer and keyword
+  search; the shared limits still apply to all. A company that picks its own model on the Connectors page is not
+  counted against either. The existing company (`AUTH0_ORG_ID`) has no share of its own.
+- The Slack app reaches the API with `SLACK_SERVICE_TOKEN` for the existing company. Each other company's installation is
+  given a secret derived from it for that company alone (`companyServiceToken`), and the API looks the person up in that
+  company's directory only, so one company's installation can never act as someone in another. Changing
+  `SLACK_SERVICE_TOKEN` means every company's admin presses **Refresh workspace settings** afterwards.
 - Removing or suspending a company is a database change: set `organizations.status` to `suspended`. The API stops serving it
   within a minute.
 - The API keeps up to 25 companies' workspaces in memory per instance and rebuilds one from the database when needed.

@@ -29,3 +29,7 @@ llm-usage.json.tmp
 # Agent skills installed locally by other tools (npx skills add)
 .agents/
 skills-lock.json
+
+# Per-company model usage counts (one file per company next to LLM_USAGE_FILE)
+llm-usage.*.json
+llm-usage.*.json.tmp

@@ -34,6 +34,13 @@ const EMBEDDING_PAUSE_MS = 5 * 60_000;
  * a company generated in memory, as `pnpm bench` does at the brief's scale. */
 export type Corpus = "curated" | "demo";
 
+/** The Jira writes the workspace makes for live sources. JiraAsUser implements it with the company's shared connection. */
+export interface LiveJira {
+  canCreate(user: User, project: string): Promise<boolean>;
+  createIssue(user: User, input: { project: string; summary: string; description: string }): Promise<{ key: string; url: string } | undefined>;
+  markDone(user: User, key: string): Promise<boolean>;
+}
+
 export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
@@ -43,6 +50,8 @@ export class Brain {
   readonly users: User[];
   readonly connectors: Record<Source, MockConnector>;
   readonly liveMode: boolean;
+  /** Jira writes through the company's shared connection, for live sources. Without it, live sources stay read-only. */
+  liveJira?: LiveJira;
   readonly index = new HybridIndex();
   readonly fga = new FgaAdapter();
   readonly remoteFga?: RemoteFgaAdapter;
@@ -879,7 +888,7 @@ export class Brain {
       const example = documents.find(doc => doc.source === "jira" && doc.metadata.project === proposal.suggestion.p);
       return [{ id: proposal.id, revision: proposal.revision, status: proposal.status, threadDocId, sentence: proposal.suggestion.s,
         project: proposal.suggestion.p, summary: proposal.suggestion.t, ownerSlackId: proposal.suggestion.a, dueDate: proposal.suggestion.d,
-        canCreate: !this.liveMode && proposal.status === "pending", permalink: proposal.permalink, candidates,
+        canCreate: (!this.liveMode || Boolean(this.liveJira)) && proposal.status === "pending", permalink: proposal.permalink, candidates,
         ...(example ? { jiraUrl: example.url.replace(/\/browse\/[^/?#]+.*$/, `/browse/${proposal.suggestion.p}`) } : {}),
         ...(linked ? { issueDocId: linked.docId, issueTitle: linked.title, issueUrl: linked.url } : {}),
         notice: `Possible untracked commitment. Review visible ${proposal.suggestion.p} Jira candidates before creating work. ` +
@@ -888,7 +897,7 @@ export class Brain {
     });
     return { documents, projects, latest: latestFor(documents, projects, now), duplicates: duplicatesFor(documents, now),
       suggestions: commitments.filter(item => item.status === "pending"), commitments, importNotice: this.importNotice(),
-      capabilities: { mode: this.liveMode ? "live" : "demo", createTask: !this.liveMode, markDone: !this.liveMode },
+      capabilities: { mode: this.liveMode ? "live" : "demo", createTask: !this.liveMode || Boolean(this.liveJira), markDone: !this.liveMode || Boolean(this.liveJira) },
       owners: this.users.filter(person => person.active !== false && (person.orgId ?? "demo-company-a") === this.orgId && this.slackId(person))
         .map(person => ({ slackId: this.slackId(person)!, name: person.name })) };
   }
@@ -904,7 +913,7 @@ export class Brain {
 
   private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
     this.assertOrg(actor);
-    if (this.liveMode) throw new Error("Live sources are read-only");
+    if (this.liveMode && !this.liveJira) throw new Error("Live sources are read-only");
     let reviewed = approved ? await this.proposalSource(actor, approved.proposalId, approved.revision) : undefined;
     if (reviewed && (`slack:${reviewed.proposal.suggestion.c}` !== threadDocId || reviewed.proposal.suggestion.s !== sentence)) throw new Error("Unknown document");
     const documents = reviewed?.documents ?? await this.visibleDocuments(actor);
@@ -912,7 +921,8 @@ export class Brain {
     if (!thread) throw new Error("Unknown document");
     const issues = documents.filter(doc => doc.source === "jira");
     const summary = reviewed ? reviewed.proposal.suggestion.t : sentences(thread.content).includes(sentence) ? agreementSummary(sentence) : undefined;
-    const project = projectOf(thread, issues);
+    // A reviewed live commitment goes to the project it was reviewed for; otherwise the project the thread works in.
+    const project = this.liveMode && reviewed?.proposal.suggestion.p ? reviewed.proposal.suggestion.p : projectOf(thread, issues);
     if (!summary || !project || !/^[A-Z][A-Z0-9]{0,9}$/.test(project)) throw new Error("Not an agreement in that thread");
     if (!approved && tracked(sentence, issues)) throw new Error("Already tracked");
     if (!reviewed) {
@@ -925,6 +935,7 @@ export class Brain {
       if (!existing && !await this.taskStore.saveProposal(proposal)) throw new Error("Stale commitment revision");
       reviewed = { proposal, documents };
     }
+    if (this.liveMode) return this.createLiveTask(actor, reviewed.proposal, thread, summary, project);
     const declared = this.index.documents.get(threadDocId)?.links ?? [];
     const inProject = issues.filter(issue => issue.metadata.project === project);
     const model = inProject.find(issue => declared.includes(issue.docId)) ??
@@ -982,6 +993,50 @@ export class Brain {
   }
 
   /**
+   * Creates the reviewed task in the company's Jira, through the shared connection, for a person whose own Jira account may
+   * create issues in that project. Jira receives the approved summary and an operation marker only, never the thread's
+   * text or name. Each attempt is reserved first, so a repeat never creates a second issue, and an attempt whose result
+   * is unknown stays blocked until it is reconciled.
+   */
+  private async createLiveTask(actor: User, proposal: Proposal, thread: { docId: string }, summary: string, project: string): Promise<{ docId: string; title: string }> {
+    const jira = this.liveJira!;
+    if (!await jira.canCreate(actor, project)) throw new Error("Your Jira account can't create issues in that project");
+    let operation = await this.taskStore.reserveOperation(proposal, `workspace:${actor.id}`);
+    if (!operation || operation.proposalId !== proposal.id || operation.proposalRevision !== proposal.revision ||
+      operation.actorSlackId !== `workspace:${actor.id}` || operation.existing) throw new Error("Stale commitment revision");
+    if (operation.state === "reserved" || operation.state === "refused") {
+      const creating = await this.taskStore.advanceOperation(operation.id, operation.state, { state: "creating" });
+      if (!creating) throw new Error("Stale commitment revision");
+      operation = creating;
+      let created: { key: string; url: string } | undefined;
+      try { created = await jira.createIssue(actor, { project, summary, description: `Approved summary: ${summary}\nBroppy operation: ${operation.id}` }); }
+      catch (error) {
+        await this.taskStore.advanceOperation(operation.id, "creating", { state: "uncertain" }).catch(() => undefined);
+        console.error("Jira task needs reconciliation", { operationId: operation.id, error: error instanceof Error ? error.message : String(error) });
+        throw new Error("We couldn't confirm whether Jira created the task. Check Jira before trying again.");
+      }
+      if (!created) {
+        await this.taskStore.advanceOperation(operation.id, "creating", { state: "refused" });
+        throw new Error("Connect Jira first");
+      }
+      const receipt = await this.taskStore.advanceOperation(operation.id, "creating", { state: "remote_succeeded", issueKey: created.key, issueUrl: created.url });
+      if (!receipt) throw new Error("Stale commitment revision");
+      operation = receipt;
+    }
+    if (operation.state !== "remote_succeeded" || !operation.issueKey || !operation.issueUrl) {
+      throw new Error("We couldn't confirm whether Jira created the task. Check Jira before trying again.");
+    }
+    const completed = await this.taskStore.completeProposal(proposal.id, proposal.revision, operation.id, actor.id, new Date().toISOString());
+    if (!completed) throw new Error("Stale commitment revision");
+    await this.rememberCommitmentLink(actor, completed, operation.issueKey, operation.issueUrl);
+    const docId = `jira:${operation.issueKey}`;
+    this.audit.append("task_created", actor.id, { docId, source: "jira", project, fromDocId: thread.docId });
+    // The new issue shows in the workspace once the next Jira sync reads it; a failed sync here is retried by the scheduler.
+    await this.sync("jira").catch(() => undefined);
+    return { docId, title: `${operation.issueKey} ${summary}` };
+  }
+
+  /**
    * The task quotes the thread, so its readers must be a subset of the thread's readers. When the model issue would
    * let anyone in who can't open the thread, the permissions shrink to exactly the people who can open both.
    */
@@ -1004,11 +1059,18 @@ export class Brain {
   /** Marks a Jira task done, on mock sources only. A status is metadata, so nothing is re-chunked or re-embedded. */
   async markDone(actor: User, docId: string): Promise<void> {
     this.assertOrg(actor);
-    if (this.liveMode) throw new Error("Live sources are read-only");
+    if (this.liveMode && !this.liveJira) throw new Error("Live sources are read-only");
     if (!docId.startsWith("jira:")) throw new Error("Only Jira tasks can be marked done");
     const issue = this.fga.check(actor, docId).allowed ? await this.liveAuthorizedDocument(actor, docId) : undefined;
     if (!issue) throw new Error("Unknown document");
     if (issue.metadata.status === "done") return;
+    if (this.liveMode) {
+      // Jira decides: the person's own account must be allowed to move the issue, and the workflow must reach done.
+      if (!await this.liveJira!.markDone(actor, docId.slice("jira:".length))) throw new Error("Jira didn't let you mark this task done");
+      this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });
+      await this.sync("jira").catch(() => undefined);
+      return;
+    }
     this.connectors.jira.updateMetadata(docId, { status: "done" });
     await this.sync("jira");
     this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });

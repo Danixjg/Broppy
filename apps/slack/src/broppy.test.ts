@@ -13,6 +13,14 @@ describe("BroppyClient", () => {
     expect(seen.headers).toMatchObject({ "x-broppy-service": "s".repeat(32), "x-act-as-slack-email": "maya@x.test" });
     expect(seen.headers["x-demo-user"]).toBeUndefined();
   });
+  it("names the installation's company when it has one", async () => {
+    let headers: any;
+    const client = new BroppyClient("https://api.test", "s".repeat(32), async (_url, init) => {
+      headers = (init as any).headers; return new Response(JSON.stringify({ text: "ok", citations: [] }));
+    }, "org_acme1");
+    await client.ask("lee@acme.test", "q");
+    expect(headers["x-broppy-org"]).toBe("org_acme1");
+  });
   it("reports an unmapped Slack user as not linked", async () => {
     const client = new BroppyClient("https://api.test", "s".repeat(32), async () => new Response("{}", { status: 401 }));
     await expect(client.ask("x@x.test", "q")).rejects.toBeInstanceOf(NotLinkedError);

@@ -164,6 +164,26 @@ export class BudgetedLlm implements LlmClient {
     return (await this.generateWithUsage(context, question)).text;
   }
 
+  /**
+   * The same model behind a second meter, for one company: a call must fit both that company's allowance and this
+   * shared one, and is counted in both. When the company's allowance is spent, it gets the built-in writer.
+   */
+  within(meter: UsageMeter): BudgetedLlm {
+    const inner = this.inner;
+    return new BudgetedLlm({
+      reservation: (context, question) => inner.reservation(context, question),
+      generateWithUsage: (context, question) => this.generateWithUsage(context, question),
+      ...(inner.converseWithUsage && inner.conversationReservation ? {
+        conversationReservation: (system: string, turns: ChatTurn[]) => inner.conversationReservation!(system, turns),
+        converseWithUsage: (system: string, turns: ChatTurn[]) => this.converseWithUsage(system, turns)
+      } : {})
+    }, meter);
+  }
+
+  private converseWithUsage(system: string, turns: ChatTurn[]): Promise<{ text: string; usage: TokenUsage }> {
+    return this.metered(this.inner.conversationReservation!(system, turns), () => this.inner.converseWithUsage!(system, turns));
+  }
+
   async generateWithUsage(context: Array<{ citation: string; text: string }>, question: string):
     Promise<{ text: string; usage: TokenUsage }> {
     return this.metered(this.inner.reservation(context, question), () => this.inner.generateWithUsage(context, question));
@@ -194,21 +214,25 @@ export interface UsageReportingEmbedding {
 }
 
 /** An embedding client that stops at its budget; sync asks `available()` first and keeps keyword search. */
-export class BudgetedEmbedding implements SemanticEmbeddingClient {
-  constructor(private readonly inner: UsageReportingEmbedding, readonly meter: UsageMeter) {}
+export class BudgetedEmbedding implements SemanticEmbeddingClient, UsageReportingEmbedding {
+  constructor(private readonly inner: UsageReportingEmbedding, readonly meter: UsageMeter, private readonly parent?: BudgetedEmbedding) {}
 
   available(): boolean {
-    return this.meter.embeddingAvailable();
+    return this.meter.embeddingAvailable() && (this.parent?.available() ?? true);
   }
 
   async embed(text: string): Promise<number[]> {
+    return (await this.embedWithUsage(text)).vector;
+  }
+
+  async embedWithUsage(text: string): Promise<{ vector: number[]; tokens: number }> {
     const reserved = estimateTokens(text);
     this.meter.beforeEmbedding(reserved);
     let tokens = 0;
     try {
       const result = await this.inner.embedWithUsage(text);
       tokens = result.tokens;
-      return result.vector;
+      return result;
     } catch (error) {
       if (error instanceof ModelCallError) tokens = error.usage?.total ?? reserved;
       throw error;
@@ -216,6 +240,36 @@ export class BudgetedEmbedding implements SemanticEmbeddingClient {
       this.meter.afterEmbedding(reserved, tokens);
     }
   }
+
+  /** The same embeddings behind a second meter, for one company, counted in both. */
+  within(meter: UsageMeter): BudgetedEmbedding {
+    return new BudgetedEmbedding(this, meter, this);
+  }
+}
+
+/** Each signed-up company's own share of the built-in or operator model, on top of the shared budget. */
+export function companyLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): BudgetLimits | undefined {
+  const limits: BudgetLimits = {
+    chatTokens: positiveInteger(env.LLM_COMPANY_TOKEN_BUDGET, "LLM_COMPANY_TOKEN_BUDGET"),
+    embeddingTokens: positiveInteger(env.EMBEDDING_COMPANY_TOKEN_BUDGET, "EMBEDDING_COMPANY_TOKEN_BUDGET"),
+    dailyAnswers: positiveInteger(env.LLM_COMPANY_DAILY_ANSWERS, "LLM_COMPANY_DAILY_ANSWERS")
+  };
+  return Object.values(limits).some(value => value !== undefined) ? limits : undefined;
+}
+
+/**
+ * The models one signed-up company uses, each behind its own meter as well as the shared one. Its counts are kept next
+ * to LLM_USAGE_FILE, one file per company, so they survive restarts. Without company limits it is the shared models.
+ */
+export function companyModels(models: { llm?: BudgetedLlm; embedding?: BudgetedEmbedding }, orgId: string,
+  env: NodeJS.ProcessEnv = process.env): { llm?: BudgetedLlm; embedding?: BudgetedEmbedding } {
+  const limits = companyLimitsFromEnv(env);
+  if (!limits || (!models.llm && !models.embedding)) return models;
+  if (!/^org_[A-Za-z0-9]{1,64}$/.test(orgId)) throw new Error("Invalid organization");
+  const shared = env.LLM_USAGE_FILE?.trim();
+  const file = shared ? `${shared.replace(/\.json$/, "")}.${orgId}.json` : undefined;
+  const meter = new UsageMeter(file, limits);
+  return { ...(models.llm ? { llm: models.llm.within(meter) } : {}), ...(models.embedding ? { embedding: models.embedding.within(meter) } : {}) };
 }
 
 /**

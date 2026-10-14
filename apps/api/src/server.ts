@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
-import { modelsFromEnv } from "./llm-budget.js";
+import { companyLimitsFromEnv, companyModels, modelsFromEnv } from "./llm-budget.js";
 import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
 import { Auth0Management } from "./auth0-management.js";
@@ -35,6 +35,8 @@ interface Tenant {
   orgId: string;
   /** The company set up by hand with AUTH0_ORG_ID, which also has the Slack app and the service identity. */
   isHome: boolean;
+  /** One person's own workspace, from personal sign-up: it has no team, so nobody else can be added. */
+  personal: boolean;
   brain: Brain;
   orchestrator: SyncOrchestrator;
   directory?: UserDirectory;
@@ -192,6 +194,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const useRemoteFga = Boolean(process.env.FGA_API_URL || process.env.FGA_STORE_ID ||
     process.env.FGA_MODEL_ID || process.env.FGA_CLIENT_ID || process.env.FGA_CLIENT_SECRET);
   const models = modelsFromEnv(process.env);
+  // A mistyped company allowance stops startup, rather than leaving companies without one.
+  companyLimitsFromEnv();
   const embedding = models.embedding;
   const oauthConfigs = process.env.SOURCE_OAUTH_JSON ? JSON.parse(process.env.SOURCE_OAUTH_JSON) : undefined;
   if (oauthConfigs && process.env.LIVE_SOURCES_JSON) throw new Error("Choose OAuth or manually managed source credentials");
@@ -210,14 +214,35 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   // call that address from inside its own network. Only the company set up by hand may.
   const orgModelOf = (persistence: Persistence | undefined, isHome: boolean) => persistence ? new OrgModel(persistence, undefined, undefined, { customAddress: isHome }) : undefined;
 
+  /**
+   * Whether a signed-up workspace is personal. Sign-up records it; a workspace from before that was recorded is worked out
+   * once from its Auth0 address and written back. If neither can be read it counts as a company, which only shows the
+   * team step and allows invitations, as before.
+   */
+  const personalWorkspace = async (orgId: string): Promise<boolean> => {
+    if (!companies) return false;
+    try {
+      const recorded = await companies.kind(orgId);
+      if (recorded) return recorded === "personal";
+      if (!management) return false;
+      const kind = isPersonalAddress((await management.forOrg(orgId).organization()).name) ? "personal" : "company";
+      await companies.recordKind(orgId, kind).catch(() => undefined);
+      return kind === "personal";
+    } catch { return false; }
+  };
+
   /** Everything one company owns: its people, its sources, its brain and its sign-in rules. Nothing here is shared between companies. */
   const buildTenant = async (orgId: string, isHome: boolean): Promise<Tenant> => {
     const tenantDirectory = isHome ? directory : directory?.forOrg(orgId);
     const users = hasAuth0 ? await tenantDirectory!.list() : undefined;
     const persistence = options.brain ? undefined : Persistence.fromEnv(orgId);
+    // A signed-up company uses the built-in or operator model within its own allowance as well as the shared budget.
+    const own = isHome ? models : companyModels(models, orgId);
     const supabase = embedding ? SupabaseIndex.fromEnv(isHome ? undefined : orgId) : null;
-    const slackInstallation = isHome && directory ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub)) : undefined;
     const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
+    // Every company can add the shared Slack app to its own Slack. A company that signed itself up is given its own service secret.
+    const slackInstallation = !directory ? undefined : isHome ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub))
+      : SlackInstallationOAuth.forCompany(process.env, orgId, sub => tenantDirectory!.bySub(sub), async () => (await oauth?.orgSite("jira"))?.baseUrl);
     const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
     const connectors = (isHome ? liveConnectorsFromEnv(users ?? loadMockCorpus().users) : undefined) ?? (oauth ? Object.fromEntries(
       (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
@@ -234,9 +259,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const slackCombined = Boolean(oauth && slackInstallation && slackConfig && slackConfig.clientId === slackInstallation.config.clientId);
     if (isHome && oauth && slackInstallation && slackConfig && !slackCombined) console.warn("SLACK_CLIENT_ID differs from the slack entry in SOURCE_OAUTH_JSON; Slack is installed and connected in two steps");
     const orgModel = orgModelOf(persistence, isHome);
-    const brain = isHome && options.brain ? options.brain : new Brain(models.llm,
+    const brain = isHome && options.brain ? options.brain : new Brain(own.llm,
       { orgLlm: orgModel, orgId: isHome ? process.env.AUTH0_ORG_ID : orgId, persistence, audit: await configuredAudit(persistence),
-        remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding, supabase: supabase ?? undefined,
+        remoteFga: useRemoteFga ? RemoteFgaAdapter.fromEnv(process.env, isHome ? undefined : orgId) : undefined, embedding: own.embedding, supabase: supabase ?? undefined,
         taskStore: persistence && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
           ? new SupabaseTaskStore(persistence.orgId, process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : undefined,
         slackUserIds: isHome ? slackUserIdsFromEnv() : undefined, users, connectors, corpus });
@@ -253,6 +278,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
       discard: async () => { await oauth!.remove("slack"); } };
     const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
+    // With live sources, the workspace creates and closes Jira tasks through the same shared connection.
+    if (jiraAsUser && connectors && oauthConfigs?.jira) brain.liveJira = jiraAsUser;
     const people = hasAuth0 ? new People(tenantDirectory!, isHome ? management : management?.forOrg(orgId)) : undefined;
     // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
     const reloadUsers = async () => { users!.splice(0, users!.length, ...await tenantDirectory!.list()); };
@@ -266,7 +293,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       });
     }
     if (options.startOrchestrator ?? true) orchestrator.start();
-    return { orgId, isHome, brain, orchestrator, directory: tenantDirectory, users, people, oauth, connectors, orgModel, slackInstallation, slackCombined,
+    return { orgId, isHome, personal: !isHome && await personalWorkspace(orgId), brain, orchestrator, directory: tenantDirectory, users, people, oauth, connectors, orgModel, slackInstallation, slackCombined,
       jiraAsUser, applySite, reloadUsers, agentActions: new AgentActions() };
   };
 
@@ -336,10 +363,12 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       const webOrigin = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3001";
       if (url.pathname === "/v1/admin/slack-installation/callback" && request.method === "GET") {
-        const slackInstallation = home.slackInstallation;
-        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
         const returned = splitReturnPage(url.searchParams.get("state") ?? "");
-        const outcome = returned.company ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
+        // The company rides on the state. A made-up one finds no stored attempt, since attempts are looked up inside that company.
+        const owner = returned.company ? await tenants.get(returned.company).catch(() => undefined) : home;
+        const slackInstallation = owner?.slackInstallation ?? home.slackInstallation;
+        if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
+        const outcome = returned.company && !owner?.slackInstallation ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
           .catch(() => "failed");
         const destination = new URL(returned.page === "setup" ? returnLocation(webOrigin, "setup", {}) : slackInstallation.returnUrl);
         destination.searchParams.set("slack_install", outcome);
@@ -404,7 +433,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!slackInstallation) return await reply(response, request.method === "GET" && !route ? 200 : 503,
           request.method === "GET" && !route ? { state: "not_installed", configured: false } : { error: "Add to Slack is not available in this workspace yet." });
         if (request.method === "GET" && !route) return await reply(response, 200, await slackInstallation.status(user));
-        if (request.method === "POST" && route === "/authorize") return await reply(response, 200, { url: await slackInstallation.begin(user) });
+        if (request.method === "POST" && route === "/authorize") {
+          const page = pageFor((await body(request).catch((): Record<string, unknown> => ({}))).via);
+          return await reply(response, 200, { url: withReturnPage(await slackInstallation.begin(user), page, tenant.isHome ? undefined : tenant.orgId) });
+        }
         if ((request.method === "POST" && route === "/refresh") || (request.method === "DELETE" && !route)) {
           const input = await body(request);
           if (typeof input.generation !== "number" || !Number.isSafeInteger(input.generation) || input.generation < 1) return await reply(response, 400, { error: "Reload the Slack installation status and try again." });
@@ -517,6 +549,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const [, id, verb] = personRoute;
         if (!id && request.method === "GET") return await reply(response, 200, { people: await people.list(), invitations: people.canInvite });
         if (!id && request.method === "POST") {
+          if (tenant.personal) return await reply(response, 409, { error: "A personal workspace is just for you. Sign up a company to work with a team." });
           const result = await people.add(user, await body(request));
           brain.audit.append("person_added", user.id, { userId: result.person.id, role: result.person.role, auth0: result.auth0 });
           await reloadUsers();
@@ -565,7 +598,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!own || signupMode === "off") return await reply(response, 404, { error: "Not found" });
         const found = await own.organization();
         // A personal workspace is found from its owner's email, so its address is never typed.
-        return await reply(response, 200, { address: isPersonalAddress(found.name) ? null : found.name, name: found.displayName });
+        const personal = tenant.personal || isPersonalAddress(found.name);
+        return await reply(response, 200, { address: personal ? null : found.name, name: found.displayName, personal });
       }
 
       if (url.pathname === "/v1/admin/model") {
