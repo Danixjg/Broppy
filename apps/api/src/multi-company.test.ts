@@ -90,10 +90,14 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
     const rpc = /^\/rest\/v1\/rpc\/(.+)$/.exec(url.pathname);
     if (rpc) {
       rpcCalls.push({ name: rpc[1], body });
-      if (rpc[1] === "save_brain_state") {
-        snapshotWrites += 1;
+      if (rpc[1] === "save_brain_state" || rpc[1] === "save_brain_state_at") {
         const rows = tables.brain_state; const at = rows.findIndex(row => row.org_id === body.organization);
-        const row = { org_id: body.organization, snapshot: body.snapshot }; if (at >= 0) rows[at] = row; else rows.push(row);
+        const current = at >= 0 ? rows[at].revision ?? 0 : 0;
+        // Like the database: a save that started from an older revision is refused.
+        if (rpc[1] === "save_brain_state_at" && body.expected !== current) return json(null);
+        snapshotWrites += 1;
+        const row = { org_id: body.organization, snapshot: body.snapshot, revision: current + 1 }; if (at >= 0) rows[at] = row; else rows.push(row);
+        if (rpc[1] === "save_brain_state_at") return json(current + 1);
       }
       return json(null);
     }

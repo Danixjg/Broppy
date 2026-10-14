@@ -1,4 +1,4 @@
-import type { Persistence } from "./persistence.js";
+import { StaleState, type Persistence } from "./persistence.js";
 import { ModelUnavailable } from "./llm.js";
 import { balanceBySource, planQuery, type QueryPlan } from "./query-plan.js";
 import { agreementSummary, agreementsFor, auditSummary, catchUpQuestion, duplicatesFor, latestFor, projectOf, projectsFor,
@@ -67,6 +67,8 @@ export class Brain {
   private readonly fallbackLlm = new LocalGroundedLlm();
   readonly lastTraceIds = new Map<string, string>();
   private readonly syncQueues = new Map<Source, Promise<void>>();
+  /** Told about work that carries on after a request's reply, so a serverless host keeps running until it finishes. */
+  onBackground?: (work: Promise<unknown>) => void;
   private readonly remoteSynced = new Set<string>();
   private readonly supabaseSynced = new Set<string>();
   private embeddingPausedUntil = 0;
@@ -117,6 +119,18 @@ export class Brain {
     if (!this.liveMode && snapshot.users) this.users.splice(0, this.users.length, ...snapshot.users);
   }
 
+  /**
+   * Reloads the workspace when another API instance has saved it since this one did, so this instance never answers or
+   * saves from an old copy. Waits for this instance's own saves first; cheap when nothing changed (one small read).
+   */
+  async refreshIfStale(): Promise<boolean> {
+    if (!this.persistence) return false;
+    await this.persistQueue.catch(() => undefined);
+    if (await this.persistence.currentRevision() === this.persistence.revision) return false;
+    await this.restore();
+    return true;
+  }
+
   async persist(): Promise<void> {
     const next = this.persistQueue.catch(() => undefined).then(async () => {
       await this.audit.flush();
@@ -128,7 +142,12 @@ export class Brain {
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
-        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], connectorDocuments });
+        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], connectorDocuments })
+        .catch(async error => {
+          // Another instance saved first. Take its state rather than overwrite it; the caller is told to try again.
+          if (error instanceof StaleState) await this.restore();
+          throw error;
+        });
     });
     this.persistQueue = next;
     return next;
@@ -168,6 +187,7 @@ export class Brain {
       if (this.syncQueues.get(source) === settled) this.syncQueues.delete(source);
     });
     this.syncQueues.set(source, settled);
+    this.onBackground?.(settled);
     return next;
   }
 
@@ -364,6 +384,7 @@ export class Brain {
       if (this.syncQueues.get(source) === settled) this.syncQueues.delete(source);
     });
     this.syncQueues.set(source, settled);
+    this.onBackground?.(settled);
   }
 
   async disconnect(actor: User, source: Source): Promise<void> {

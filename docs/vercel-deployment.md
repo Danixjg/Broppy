@@ -63,4 +63,10 @@ Configure connector credentials separately through [Slack onboarding](slack-onbo
 
 If Connectors reports that the workspace API audience and organization are not configured, check the web project's `AUTH0_AUDIENCE` and `AUTH0_ORG_ID`. If API logs report `MODULE_NOT_FOUND` for `../brain-core.node`, check the API build command and function artifact.
 
-Before using Vercel for ongoing imports, review the [current deployment limits](live-sources-and-sign-in.md). The API uses process-local sync state and timers, and its documented operating model requires one API writer per organization. Packaging the native module does not establish that background imports or concurrent function instances satisfy that model.
+Vercel runs several copies of the API at once, each keeping a company's workspace in memory. Apply migration
+`014_brain_state_revision.sql`: each saved workspace then carries a revision, a copy reloads before a request when another
+copy has saved since, and a save from an older copy is refused (the person is asked to reload) instead of overwriting newer
+state. Without it, the copies can show different states and the last save wins. Imports that carry on after a reply are
+kept running with Vercel's `waitUntil`, up to the function's maximum duration; a larger import continues on the next
+**Import** or question. There is no background sync timer on Vercel, so new items at a source are read when the admin
+imports again or when a question checks the source live. Review the [current deployment limits](live-sources-and-sign-in.md).

@@ -14,11 +14,22 @@ export class SourceOAuth {
     const origin = new URL(callbackOrigin);
     if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["127.0.0.1", "localhost"].includes(origin.hostname))) throw new Error("Invalid OAuth callback origin");
   }
+  /**
+   * Jira and Confluence both sign in through Atlassian. When both use the same Atlassian app, one approval asks for both
+   * products' permissions and connects both; this is the other one.
+   */
+  partner(source: Source): Source | undefined {
+    const other: Source | undefined = source === "jira" ? "confluence" : source === "confluence" ? "jira" : undefined;
+    const mine = this.configs[source], theirs = other && this.configs[other];
+    return mine && theirs && mine.clientId === theirs.clientId ? other : undefined;
+  }
   private callback(source: Source) { return `${this.callbackOrigin.replace(/\/$/, "")}/v1/admin/connections/${source}/callback`; }
   /** Starts a sign-in. The single-use state lives in Supabase, so the callback can reach any API instance. */
   async begin(source: Source, user: User): Promise<string> {
     if (user.role !== "admin" || user.orgId !== this.persistence.orgId || user.active !== true) throw new Error("Forbidden");
-    const config = this.configs[source]; if (!config) throw new Error("Source OAuth is not configured");
+    const own = this.configs[source]; if (!own) throw new Error("Source OAuth is not configured");
+    const partner = this.partner(source);
+    const config = partner ? { ...own, scopes: [...new Set([...own.scopes, ...this.configs[partner]!.scopes])] } : own;
     const provider = oauthProviders[source];
     const state = randomBytes(32).toString("base64url"), verifier = randomBytes(32).toString("base64url");
     await this.persistence.request("rpc/begin_oauth_flow", "POST", { organization: this.persistence.orgId, state_hash: this.hash(state), provider: source, flow_mode: "org",
@@ -40,6 +51,15 @@ export class SourceOAuth {
     return result;
   }
   async complete(source: Source, state: string, code: string, currentUser: (sub: string) => Promise<User | undefined>): Promise<User> {
+    return (await this.completeAll(source, state, code, currentUser)).user;
+  }
+
+  /**
+   * Completes an approval and says which sources it connected: the one asked for, and its Atlassian partner when the
+   * same approval granted every permission the partner needs, the person's account for it is the same, and its site
+   * is the same one.
+   */
+  async completeAll(source: Source, state: string, code: string, currentUser: (sub: string) => Promise<User | undefined>): Promise<{ user: User; sources: Source[] }> {
     const provider = oauthProviders[source];
     const flow = state ? await this.persistence.request("rpc/consume_oauth_flow", "POST", { organization: this.persistence.orgId, state_hash: this.hash(state) }) : undefined;
     if (!flow || flow.provider !== source || flow.flow_mode !== "org" || !code) throw new Error("Invalid OAuth state");
@@ -54,9 +74,19 @@ export class SourceOAuth {
     if (typeof email !== "string" || email.toLowerCase() !== user.email.toLowerCase() ||
       email.toLowerCase() !== user.platformIdentities?.[source]?.toLowerCase()) throw new Error("Source identity could not be matched");
     const tokens = this.tokensFrom(source, user, result);
-    if (provider.sites) tokens.site = this.chooseSite(source, await this.accessibleSites(result.access_token));
+    const sites = provider.sites ? await this.accessibleSites(result.access_token) : [];
+    if (provider.sites) tokens.site = this.chooseSite(source, sites);
     await this.store(source, user, tokens);
-    return user;
+    const partner = this.partner(source);
+    if (!partner) return { user, sources: [source] };
+    const granted = typeof result.scope === "string" ? result.scope.split(/[ ,]/).filter(Boolean) : [];
+    const needed = this.configs[partner]!.scopes;
+    let site: Site | undefined;
+    try { site = this.chooseSite(partner, sites); } catch { site = undefined; }
+    if (!needed.every(scope => granted.includes(scope)) || email.toLowerCase() !== user.platformIdentities?.[partner]?.toLowerCase()
+      || !site || site.cloudId !== tokens.site?.cloudId) return { user, sources: [source] };
+    await this.store(partner, user, { ...tokens, site });
+    return { user, sources: [source, partner] };
   }
   private tokensFrom(source: Source, user: User, result: any): Tokens {
     return { access_token: result.access_token, refresh_token: result.refresh_token,

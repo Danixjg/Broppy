@@ -3,14 +3,15 @@ import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { atlassianAccountIds } from "./atlassian-identity.js";
 import { connectFailure, pageFor, returnLocation, splitReturnPage, withReturnPage } from "./connect-return.js";
 import { SourceOAuth } from "./source-oauth.js";
-import { Persistence } from "./persistence.js";
+import { Persistence, StaleState } from "./persistence.js";
+import { waitUntil } from "@vercel/functions";
 import { searchAudit } from "./audit-search.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
 import { SyncOrchestrator } from "./orchestrator.js";
-import { AccessDenied, createAuth0TokenValidatorFromEnv, type Auth0TokenValidator } from "./auth.js";
+import { AccessDenied, createAuth0TokenValidatorFromEnv, WorkspaceUnavailable, type Auth0TokenValidator } from "./auth.js";
 import { companyLimitsFromEnv, companyModels, modelsFromEnv } from "./llm-budget.js";
 import { CUSTOM_ADDRESS_REFUSED, ModelCheckFailed, OrgModel } from "./org-model.js";
 import { UserDirectory } from "./user-directory.js";
@@ -277,6 +278,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
       store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
       discard: async () => { await oauth!.remove("slack"); } };
+    // On a serverless host the function may stop once a reply is sent; imports keep it running until they finish.
+    if (process.env.VERCEL) brain.onBackground = work => waitUntil(work);
     const jiraAsUser = oauth ? new JiraAsUser(oauth, accountIds) : undefined;
     // With live sources, the workspace creates and closes Jira tasks through the same shared connection.
     if (jiraAsUser && connectors && oauthConfigs?.jira) brain.liveJira = jiraAsUser;
@@ -386,11 +389,12 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           // The company comes from the state; the stored single-use state is then looked up inside that company only.
           const owner = returned.company ? await tenants.get(returned.company) : home;
           if (!owner?.oauth || !owner.directory) throw new Error("Invalid OAuth state");
-          const approved = await owner.oauth.complete(source, returned.state, url.searchParams.get("code") ?? "", sub => owner.directory!.bySub(sub));
-          await owner.applySite(source);
-          owner.brain.markConnected(approved, source);
+          await owner.brain.refreshIfStale();
+          const { user: approved, sources: connected } = await owner.oauth.completeAll(source, returned.state, url.searchParams.get("code") ?? "", sub => owner.directory!.bySub(sub));
+          // One Atlassian approval can connect both Jira and Confluence.
+          for (const item of connected) { await owner.applySite(item); owner.brain.markConnected(approved, item); }
           await owner.brain.persist();
-          location = returnLocation(webOrigin, returned.page, { connected: source });
+          location = returnLocation(webOrigin, returned.page, { connected: connected.join(",") });
         } catch (error) {
           location = returnLocation(webOrigin, returned.page, { connect_failed: source, reason: connectFailure(error, url.searchParams.get("error") ?? "") });
         }
@@ -411,6 +415,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!person) return undefined;
         const tenant = hasAuth0 ? await tenants.get(person.orgId) : home;
         if (!tenant) return undefined;
+        // Another instance may have changed this workspace since this one loaded it.
+        await tenant.brain.refreshIfStale().catch(error => { throw new WorkspaceUnavailable(error); });
         // Another instance may have added or linked this person after this one loaded the directory.
         if (tenant.users) {
           const known = tenant.users.findIndex(item => item.id === person.id);
@@ -859,6 +865,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // A real organization sign-in that isn't on the admin's list: say so, so the person knows what to ask for.
       if (error instanceof AccessDenied) return await reply(response, 403, { error: error.message, code: error.code });
       if (error instanceof PeopleError || error instanceof SignupError) return await reply(response, error.status, { error: error.message });
+      if (error instanceof WorkspaceUnavailable) return await reply(response, 503, { error: "Broppy couldn't load your workspace just now. Wait a moment and try again.", code: "workspace_unavailable" });
+      if (error instanceof StaleState) return await reply(response, 409, { error: "This workspace was just changed somewhere else. Reload the page and try again." });
       const message = error instanceof Error ? error.message : "Request failed";
       if (message === "Unauthorized") return await reply(response, 401, { error: "Unauthorized" });
       if (message === "Forbidden") return await reply(response, 403, { error: "Forbidden" });
