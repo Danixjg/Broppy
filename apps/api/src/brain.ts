@@ -161,6 +161,40 @@ export class Brain {
     return this.users.find(item => item.id === id);
   }
 
+  /**
+   * Where each of this company's sources stands, for its Sync health page: connected or not, the import in progress or
+   * last finished, how many items are indexed, and when the source last synced. Only this company's own state.
+   */
+  syncHealth(): Array<{ source: Source; status: string; connectedAt?: string; error?: string; items: number; lastSync?: string;
+    job?: { status: string; found: number; indexed: number; failed: number; finishedAt?: string }; pending?: number }> {
+    return sources.map(source => {
+      const connection = this.connections.get(source);
+      const job = this.jobs.get(source);
+      const run = this.runs.get(source);
+      const connected = Boolean(connection) && connection!.status !== "Not connected";
+      return { source, status: connection?.status ?? (this.liveMode ? "Not connected" : "Connected"),
+        ...(connection?.connectedAt ? { connectedAt: connection.connectedAt } : {}), ...(connection?.error ? { error: connection.error } : {}),
+        items: [...this.index.documents.values()].filter(doc => doc.source === source && !doc.deletedAt).length,
+        // A source that isn't connected has no sync to report, whatever older state says.
+        ...(connected || !this.liveMode ? {
+          ...(this.states.get(source)?.lastSuccessfulSyncAt ? { lastSync: this.states.get(source)!.lastSuccessfulSyncAt } : {}),
+          ...(job ? { job: { status: job.status, found: job.found, indexed: job.indexed, failed: job.failed, ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}) } } : {}),
+          ...(run && run.status === "running" ? { pending: run.pendingIds.length } : {})
+        } : {}) };
+    });
+  }
+
+  /** Syncs the sources this company has connected, and says which ones failed; unconnected sources are skipped, not errors. */
+  async syncConnected(): Promise<Array<{ source: Source; ok: boolean; error?: string }>> {
+    const results: Array<{ source: Source; ok: boolean; error?: string }> = [];
+    for (const source of sources) {
+      if (this.liveMode && (this.connections.get(source)?.status ?? "Not connected") === "Not connected") continue;
+      try { await this.sync(source); results.push({ source, ok: true }); }
+      catch (error) { results.push({ source, ok: false, error: error instanceof Error ? error.message : "Sync failed" }); }
+    }
+    return results;
+  }
+
   async syncAll(): Promise<void> {
     const failures: unknown[] = [];
     for (const source of sources) {

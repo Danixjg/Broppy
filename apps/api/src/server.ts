@@ -343,15 +343,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "OPTIONS") return await reply(response, 204, null);
-      if (request.method === "GET" && url.pathname === "/health") {
-        return await reply(response, 200, {
-          ok: true,
-          sync: [...home.brain.states.values()],
-          pending: [...home.brain.runs.values()].filter(run => run.status !== "complete"),
-          auditEntries: home.brain.audit.entries.length,
-          merkleBatches: home.brain.audit.batches.length
-        });
-      }
+      // Open to anyone, so it says only that the API is up. Each company's own sync state is at /v1/sync-health.
+      if (request.method === "GET" && url.pathname === "/health") return await reply(response, 200, { ok: true });
 
       // A company signing itself up, and a person finding their company at sign-in. Both are open to anyone, so they
       // are limited, answer the same whoever asks, and give nothing away about the people or data inside a company.
@@ -799,8 +792,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 
       if (request.method === "POST" && url.pathname === "/v1/admin/sync") {
         if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
-        await brain.syncAll();
-        return await reply(response, 200, { states: [...brain.states.values()] });
+        const results = await brain.syncConnected();
+        return await reply(response, 200, { results, sources: brain.syncHealth() });
+      }
+
+      // The signed-in person's own company: its sources, imports and last syncs, and its audit trail's size.
+      if (request.method === "GET" && url.pathname === "/v1/sync-health") {
+        return await reply(response, 200, { sources: brain.syncHealth(), live: brain.liveMode,
+          auditEntries: brain.audit.entries.length, merkleBatches: brain.audit.batches.length });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/admin/preview") {

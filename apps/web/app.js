@@ -788,19 +788,49 @@ async function adminAction(path, body, success) {
   try { await post(path, body); if (generation !== state.identity || role() !== "admin") return; $("adminStatus").textContent = success; await loadWorkspace(); }
   catch (error) { if (generation === state.identity && role() === "admin") $("adminStatus").textContent = error.message; }
 }
+// "3 minutes ago", for when a source last synced; the exact time is in the title.
+function timeAgo(value) {
+  const seconds = Math.round((Date.now() - Date.parse(value)) / 1000);
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 60) return "just now";
+  for (const [size, unit] of [[86400, "day"], [3600, "hour"], [60, "minute"]]) {
+    const count = Math.floor(seconds / size);
+    if (count >= 1) return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  }
+  return "";
+}
+// One plain line for where a source stands, from the API's view of this company only.
+function healthLine(item) {
+  if (item.status === "Not connected") return { text: "Not connected", kind: "muted" };
+  if (item.status === "Error") return { text: `Needs attention${item.error ? `: ${item.error}` : ""}`, kind: "bad" };
+  if (item.job?.status === "running" || item.status === "Importing") {
+    const done = item.job ? item.job.indexed : 0;
+    return { text: item.job?.found ? `Reading · ${done} of ${item.job.found} items` : "Reading…", kind: "" };
+  }
+  if (item.job?.status === "failed") return { text: "The last import failed. Try Sync now, or reconnect it.", kind: "bad" };
+  if (!item.job && item.items === 0) return { text: "Connected · choose what Broppy reads in setup", kind: "" };
+  return { text: `Ready · ${item.items} item${item.items === 1 ? "" : "s"}${item.job?.failed ? ` · ${item.job.failed} couldn't be read` : ""}`, kind: "good" };
+}
 async function loadHealth() {
-  const generation = state.identity; $("healthStatus").textContent = "Loading health…";
+  const generation = state.identity; $("healthStatus").textContent = "Loading…";
   try {
-    const result = await call("/health"); if (generation !== state.identity) return;
+    const result = await call("/v1/sync-health"); if (generation !== state.identity) return;
     clear($("healthCards"));
-    for (const item of result.sync || []) {
+    for (const item of result.sources || []) {
       const card = node("div", "surface"); appendText(card, "h2", "", sourceName(item.source));
-      appendText(card, "p", "", `Cursor ${item.cursor} · Last sync ${fmtDate(item.lastSuccessfulSyncAt)}`);
-      const pending = (result.pending || []).find(run => run.source === item.source);
-      appendText(card, "p", "muted", pending ? `Run: ${pending.status} · ${pending.pendingIds?.length || 0} pending` : "No pending run");
+      const line = healthLine(item); appendText(card, "p", line.kind, line.text);
+      if (item.status !== "Not connected") {
+        const synced = node("p", "muted", item.lastSync ? `Last synced ${timeAgo(item.lastSync) || fmtDate(item.lastSync)}` : "Not synced yet");
+        if (item.lastSync) synced.title = fmtDate(item.lastSync);
+        card.append(synced);
+        if (item.pending) appendText(card, "p", "muted", `${item.pending} item${item.pending === 1 ? "" : "s"} still to read`);
+      } else if (role() === "admin" && state.authMode !== "demo") {
+        const link = node("a", "", "Connect it in setup"); link.href = "./setup.html"; card.append(link);
+      }
       $("healthCards").append(card);
     }
-    $("healthStatus").textContent = `${result.auditEntries || 0} audit events · ${result.merkleBatches || 0} Merkle batches`;
+    const connected = (result.sources || []).filter(item => item.status !== "Not connected").length;
+    $("healthStatus").textContent = `${connected} of ${(result.sources || []).length} tools connected · ${result.auditEntries || 0} audit events`;
   } catch (error) { if (generation === state.identity) $("healthStatus").textContent = error.message; }
 }
 function eventSummary(entry) {
@@ -1048,8 +1078,16 @@ $("exportAudit").addEventListener("click", exportAudit);
 $("hideRoutine").addEventListener("change", () => renderAudit(state.auditEntries));
 $("refreshHealth").addEventListener("click", loadHealth);
 $("retrySync").addEventListener("click", async () => {
-  const generation = state.identity; $("healthStatus").textContent = "Running connector sync…";
-  try { await post("/v1/admin/sync", {}); if (generation !== state.identity || role() !== "admin") return; await Promise.all([loadHealth(), loadWorkspace()]); $("healthStatus").textContent = "Connector sync complete."; }
+  const generation = state.identity; $("healthStatus").textContent = "Syncing your connected tools…";
+  try {
+    const result = await post("/v1/admin/sync", {}); if (generation !== state.identity || role() !== "admin") return;
+    await Promise.all([loadHealth(), loadWorkspace()]); if (generation !== state.identity) return;
+    const results = Array.isArray(result?.results) ? result.results : [];
+    const failed = results.filter(item => !item.ok).map(item => sourceName(item.source));
+    $("healthStatus").textContent = !results.length ? "No tools are connected yet, so there was nothing to sync."
+      : failed.length ? `Synced, except ${failed.join(", ")}. Check ${failed.length === 1 ? "it" : "them"} below.`
+      : `Synced ${results.map(item => sourceName(item.source)).join(", ")}.`;
+  }
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
 });
 $("loginButton").addEventListener("click", () => location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname + location.search })}`));

@@ -18,13 +18,12 @@ export async function proxy(request: NextRequest) {
     // Fail with the fix instead of bouncing through Auth0 and ending on a bare 500 at /auth/callback.
     return NextResponse.json({ error: orgProblem }, { status: 503 });
   }
-  // With several companies a sign-in has to name one. Any link to plain /auth/login (an expired session, an old bookmark)
-  // goes through the company page first; invitation links and the company page's own links already name one.
-  if (path === "/auth/login" && asksForCompany() && !request.nextUrl.searchParams.has("organization") && !request.nextUrl.searchParams.has("invitation")) {
-    return NextResponse.redirect(new URL(signInPath(request.nextUrl.searchParams.get("returnTo") ?? undefined), process.env.APP_BASE_URL));
-  }
+  // With several companies, a plain sign-in names none: Auth0 asks for the email and password first, then for the
+  // company if the person belongs to more than one (the application's login flow is "Prompt for Credentials").
+  // A signed-out visit to the workspace goes straight there, and comes back to the same page.
   if (path.startsWith("/workspace/") && !demo && !await auth0.getSession(request)) {
-    return NextResponse.redirect(new URL(signInPath(request.nextUrl.pathname + request.nextUrl.search), process.env.APP_BASE_URL));
+    const returnTo = request.nextUrl.pathname + request.nextUrl.search;
+    return NextResponse.redirect(new URL(asksForCompany() ? `/auth/login?${new URLSearchParams({ returnTo })}` : signInPath(returnTo), process.env.APP_BASE_URL));
   }
   return await auth0.middleware(request);
 }

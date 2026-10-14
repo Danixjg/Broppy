@@ -318,6 +318,18 @@ describe("several companies in one API", () => {
     expect(row.kind).toBe("personal");
   });
 
+  it("shows each company only its own sync state, and the public health check nothing about anyone", async () => {
+    expect((await call("GET", "/health")).body).toEqual({ ok: true });
+    const dana = { sub: "auth0|dana", org: "org_new1" };
+    const health = (await call("GET", "/v1/sync-health", dana)).body;
+    expect(health.live).toBe(true);
+    expect(health.sources.map((item: Row) => item.source)).toEqual(["slack", "jira", "confluence", "drive"]);
+    // Nothing is connected here, so nothing claims a sync, whatever the home company has done.
+    for (const item of health.sources) { expect(item.status).toBe("Not connected"); expect(item.lastSync).toBeUndefined(); expect(item.items).toBe(0); }
+    // Sync now skips tools that aren't connected instead of failing on them.
+    expect((await call("POST", "/v1/admin/sync", dana, {})).body.results).toEqual([]);
+  });
+
   it("lets a second company take the same name, at its own address, without touching the first", async () => {
     const second = await call("POST", "/v1/signup", undefined, { company: "Acme & Sons", name: "Eve", email: "eve@elsewhere.test" });
     expect(second.status).toBe(202);

@@ -1003,6 +1003,17 @@ td button {
 .health-grid .surface p {
   font-size:.8rem
 }
+.health-grid .surface p.good {
+  color:#1f6b4f;
+  font-weight:600
+}
+.health-grid .surface p.bad {
+  color:#943b35;
+  font-weight:600
+}
+.health-grid .surface a {
+  font-size:.8rem
+}
 .empty {
   color:var(--muted-foreground, #61717f);
   font-size:.8rem;
