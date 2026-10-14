@@ -165,5 +165,9 @@ ul, ol { padding: 0; list-style: none; }
 .choice .form-points { margin: 1rem 0 1.4rem; }
 .choice .btn { justify-self: start; }
 @media (max-width: 720px) { .choices { grid-template-columns: 1fr; } }
+.form-actions { margin-top: 1.2rem; }
+.form-more { margin-top: 1.6rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.form-more summary { cursor: pointer; color: var(--muted); font-size: .95rem; }
+.form-more .form { margin-top: .8rem; }
 .form-sub { margin-top: 1.6rem; font-size: 1.05rem; letter-spacing: -.01em; }
 .form-sub + .form, .form-sub + .form-error { margin-top: .8rem; }

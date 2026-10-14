@@ -47,25 +47,24 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
     }
   }
   const hidden = returnTo !== "/workspace/index.html" && <input type="hidden" name="returnTo" value={returnTo} />;
+  const login = `/auth/login?${new URLSearchParams({ returnTo })}`;
   return <AuthShell>
     <section className="form-card">
       <h1>Sign in</h1>
-      <p className="form-lead">Sign in to your personal workspace with your email, or to your company with its sign-in address. We'll take you to the right sign-in.</p>
-      <h2 className="form-sub">Personal</h2>
-      {problem?.for === "email" && <p className="form-error" role="alert">{problem.text}</p>}
-      <form method="get" action="/signin" className="form">
-        <label>Email<input name="email" type="email" required maxLength={254} autoComplete="email" defaultValue={email} placeholder="dana@example.com" /></label>
-        {hidden}
-        <button className="btn primary" type="submit">Continue</button>
-      </form>
-      <h2 className="form-sub">Company</h2>
-      {problem?.for === "company" && <p className="form-error" role="alert">{problem.text}</p>}
-      <form method="get" action="/signin" className="form">
-        <label>Company address<input name="company" required maxLength={80} autoComplete="off" spellCheck={false} defaultValue={company} placeholder="acme-7k2qmx" /></label>
-        {hidden}
-        <button className="btn" type="submit">Continue</button>
-      </form>
+      <p className="form-lead">Sign in with your email and password. If you belong to more than one company, you'll choose which one next.</p>
+      <p className="form-actions"><a className="btn primary" href={login}>Sign in</a></p>
       {signupMode() === "on" && <p className="form-foot">New to Broppy? <a href={signupPath("personal")}>Sign up</a> · <a href={signupPath("enterprise")}>Enterprise sign up</a></p>}
+      {/* Rarely needed: someone told an address, or an account that isn't a member of its company yet. */}
+      <details className="form-more" open={Boolean(problem)}>
+        <summary>Sign in with a company address instead</summary>
+        {problem?.for === "company" && <p className="form-error" role="alert">{problem.text}</p>}
+        <form method="get" action="/signin" className="form">
+          <label>Company address<input name="company" required maxLength={80} autoComplete="off" spellCheck={false} defaultValue={company} placeholder="acme-7k2qmx" /></label>
+          {hidden}
+          <button className="btn" type="submit">Continue</button>
+        </form>
+        {problem?.for === "email" && <p className="form-error" role="alert">{problem.text}</p>}
+      </details>
     </section>
   </AuthShell>;
 }

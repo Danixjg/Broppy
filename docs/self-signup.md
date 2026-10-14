@@ -24,10 +24,11 @@ The front page offers **Sign up** (personal) and **Enterprise sign up** (a compa
 ## What happens
 
 1. The sign-up form posts to the web app, which calls `POST /v1/signup` on the API.
-2. The API creates an Auth0 organization for the company. Its short name, the sign-in address people type, is the
-   company name in lowercase letters, digits and hyphens followed by a random ending, such as `acme-7k2qmx`, so two
-   companies may share a name and nobody can take a name before the real company signs up. The admin sees the address at
-   the top of the guided setup. It then turns on the sign-in database
+2. The API creates an Auth0 organization for the company. Its short name, the company's address, is the company name in
+   lowercase letters, digits and hyphens followed by a random ending, such as `acme-7k2qmx`, so two companies may share a
+   name and nobody can take a name before the real company signs up. Nobody needs to type it: **Sign in** asks for an
+   email and password, then for the company only if the person belongs to more than one. The address stays as a fallback
+   on the sign-in page and at the top of the guided setup. It then turns on the sign-in database
    for it, lists the company in `public.organizations`, sends an Auth0 organization invitation to that email, and only then
    adds the person as the company's admin in `workspace_users`.
 3. The admin is whoever can open the invitation. At their first sign-in the directory entry becomes theirs only if
@@ -59,8 +60,10 @@ Apply `infra/supabase/migrations/012_company_signup.sql` and `013_workspace_kind
 - Copy the ID of the sign-in database (Authentication → Database → your connection, `con_...`). New companies use it.
 - Set the web application's **Application Login URI** (Applications → your web app → Settings → Application URIs) to
   `https://YOUR-WEB-DOMAIN/invited`. On the same application's **Login Experience** tab (older dashboards: Organizations
-  tab), **Types of Users** must be Business Users or Both; if the application requires an organization, new companies
-  work with it as is, because sign-in always names one. On its **Connections** tab, switch on the sign-in database too.
+  tab), set **Types of Users** to **Business Users** and **Login Flow** to **Prompt for Credentials**. Sign-in then asks
+  for the email and password first and picks the company from the person's memberships, showing a list only when there
+  are several. (With **Prompt for Organization**, Auth0 instead asks people to type their company's address.) On its
+  **Connections** tab, switch on the sign-in database too.
 
 **API project (`broppy-beii`)**
 
