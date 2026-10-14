@@ -37,6 +37,12 @@ function filterRows(rows: Row[], params: URLSearchParams): Row[] {
   let out = rows;
   for (const [key, value] of params) {
     if (["select", "order", "limit", "offset"].includes(key)) continue;
+    if (key === "or") {
+      // Only the form the API sends: or=(field.is.null,field.eq.value)
+      const parts = value.slice(1, -1).split(",").map(part => part.split("."));
+      out = out.filter(row => parts.some(([field, op, wanted]) => op === "is" ? row[field] === null || row[field] === undefined : String(row[field]) === wanted));
+      continue;
+    }
     const [op, ...rest] = value.split(".");
     const wanted = rest.join(".");
     out = out.filter(row => {
@@ -252,8 +258,8 @@ describe("several companies in one API", () => {
   it("serves the company address lookup for sign-in", async () => {
     const address = auth0Orgs[0].name;
     expect((await call("GET", `/v1/companies/find?name=${address.toUpperCase()}`)).body).toEqual({ organization: "org_new1", name: "Acme & Sons" });
-    // The name alone is not an address.
-    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).status).toBe(404);
+    // The name works too, in any case, while only one company has it.
+    expect((await call("GET", "/v1/companies/find?name=acme%20%26%20sons")).body).toEqual({ organization: "org_new1", name: "Acme & Sons" });
     expect((await call("GET", "/v1/companies/find?name=nobody")).status).toBe(404);
     // An organization that exists in Auth0 but never signed up here is not offered.
     auth0Orgs.push({ id: "org_other9", name: "unrelated", display_name: "Unrelated" });
@@ -336,6 +342,9 @@ describe("several companies in one API", () => {
     const both = auth0Orgs.filter(item => item.display_name === "Acme & Sons");
     expect(both).toHaveLength(2);
     expect(both[0].name).not.toBe(both[1].name);
+    // Now the name is shared, so it alone can't say which company; the address still can.
+    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).status).toBe(409);
+    expect((await call("GET", `/v1/companies/find?name=${both[1].name}`)).body).toMatchObject({ organization: both[1].id });
     const eve = tables.organizations.find(row => row.created_by_email === "eve@elsewhere.test")!;
     expect(eve.org_id).not.toBe("org_new1");
     expect(tables.workspace_users.filter(row => row.org_id === "org_new1").map(row => row.email)).not.toContain("eve@elsewhere.test");

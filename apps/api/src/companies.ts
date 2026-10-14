@@ -74,6 +74,24 @@ export class Companies {
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
   }
 
+  /**
+   * Active companies (not personal workspaces) whose name is this one, ignoring case and spacing. At most two are
+   * returned: one is an answer, two means the name alone can't say which.
+   */
+  async withName(name: string): Promise<Array<{ orgId: string; name: string }>> {
+    const wanted = name.trim().replace(/\s+/g, " ");
+    if (wanted.length < 2 || wanted.length > 60) return [];
+    const pattern = wanted.replace(/[\\%_*]/g, "\\$&");
+    const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?select=org_id,name&name=ilike.${encodeURIComponent(pattern)}&status=eq.active&or=(kind.is.null,kind.eq.company)&limit=2`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+    const rows = await response.json() as Array<{ org_id?: unknown; name?: unknown }>;
+    return Array.isArray(rows) ? rows.filter(row => typeof row.org_id === "string" && /^org_[A-Za-z0-9]{1,64}$/.test(row.org_id)
+      && typeof row.name === "string" && row.name.trim().replace(/\s+/g, " ").toLowerCase() === wanted.toLowerCase())
+      .map(row => ({ orgId: row.org_id as string, name: row.name as string })) : [];
+  }
+
   async remove(orgId: string): Promise<void> {
     if (orgId === this.homeOrgId) throw new Error("The home company cannot be removed");
     const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?org_id=eq.${encodeURIComponent(orgId)}`, {

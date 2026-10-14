@@ -12,7 +12,9 @@ function setup(overrides: { create?: (input: { name: string; displayName: string
     forOrg: vi.fn(() => ({ invite }))
   };
   const companies = { emailInUse: vi.fn(async () => overrides.inUse === true), register: vi.fn(async () => {}), remove: vi.fn(async () => {}),
-    isKnown: vi.fn(async (id: string) => id === "org_1") };
+    isKnown: vi.fn(async (id: string) => id === "org_1"),
+    withName: vi.fn(async (name: string) => name.toLowerCase() === "acme" ? [{ orgId: "org_1", name: "Acme" }]
+      : name.toLowerCase() === "twins" ? [{ orgId: "org_1", name: "Twins" }, { orgId: "org_9", name: "Twins" }] : []) };
   const add = vi.fn(async () => ({}));
   const created = vi.fn();
   const signup = new Signup(management as any, companies as any, () => ({ add }) as any,
@@ -122,6 +124,8 @@ describe("a company signing itself up", () => {
     expect(await signup.find("ACME")).toEqual({ organization: "org_1", name: "Acme" });
     expect(management.findOrganization).toHaveBeenCalledWith("acme");
     expect(await signup.find("nobody")).toBeUndefined();
+    // A name shared by several companies can't say which one.
+    expect(await signup.find("Twins")).toEqual({ ambiguous: true });
     expect(await signup.find("!")).toBeUndefined();
     management.findOrganization.mockResolvedValueOnce({ id: "org_2", name: "other", displayName: "Other" });
     expect(await signup.find("other")).toBeUndefined();

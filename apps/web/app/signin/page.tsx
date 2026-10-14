@@ -11,12 +11,13 @@ export const metadata = { title: "Sign in · Broppy" };
 const one = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? "";
 
 /** The company's ID and name, asked of the API. Nothing about the company's people or data is revealed. */
-async function findCompany(query: { name: string } | { email: string }): Promise<{ organization: string } | "none" | "busy"> {
+async function findCompany(query: { name: string } | { email: string }): Promise<{ organization: string } | "none" | "ambiguous" | "busy"> {
   const origin = apiOrigin();
   if (!origin) return "busy";
   try {
     const response = await fetch(new URL(`/v1/companies/find?${new URLSearchParams(query)}`, origin), { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000) });
     if (response.status === 404) { await response.body?.cancel(); return "none"; }
+    if (response.status === 409) { await response.body?.cancel(); return "ambiguous"; }
     if (!response.ok) { await response.body?.cancel(); return "busy"; }
     const found = await response.json() as { organization?: unknown };
     return typeof found.organization === "string" && /^org_[A-Za-z0-9]+$/.test(found.organization) ? { organization: found.organization } : "none";
@@ -40,8 +41,10 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
     else {
       const found = await findCompany(search.find);
       if (typeof found === "object") redirect(`/auth/login?${new URLSearchParams({ organization: found.organization, returnTo })}`);
-      problem = { for: search.for, text: found === "none"
-        ? search.for === "company" ? "We couldn't find a company at that address. Check the spelling, or ask your admin: it is shown on their setup page."
+      problem = { for: search.for, text: found === "ambiguous"
+        ? "More than one company has that name. Enter its address instead (such as acme-7k2qmx); your admin can see it on their setup page."
+        : found === "none"
+        ? search.for === "company" ? "We couldn't find a company with that name or address. Check the spelling, or just use Sign in above."
           : "We couldn't find a personal workspace for that email. Check the spelling, or sign up for one."
         : "We couldn't reach Broppy just now. Please try again in a minute." };
     }
@@ -56,10 +59,10 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
       {signupMode() === "on" && <p className="form-foot">New to Broppy? <a href={signupPath("personal")}>Sign up</a> · <a href={signupPath("enterprise")}>Enterprise sign up</a></p>}
       {/* Rarely needed: someone told an address, or an account that isn't a member of its company yet. */}
       <details className="form-more" open={Boolean(problem)}>
-        <summary>Sign in with a company address instead</summary>
+        <summary>Sign in to a specific company instead</summary>
         {problem?.for === "company" && <p className="form-error" role="alert">{problem.text}</p>}
         <form method="get" action="/signin" className="form">
-          <label>Company address<input name="company" required maxLength={80} autoComplete="off" spellCheck={false} defaultValue={company} placeholder="acme-7k2qmx" /></label>
+          <label>Company name or address<input name="company" required maxLength={80} autoComplete="organization" spellCheck={false} defaultValue={company} placeholder="Acme" /></label>
           {hidden}
           <button className="btn" type="submit">Continue</button>
         </form>
