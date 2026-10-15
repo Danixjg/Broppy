@@ -1,3 +1,53 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Connectors · Internal Brain</title><link rel="stylesheet" href="./styles.css"><script type="module" src="./connectors.js"></script></head>
-<body><main style="max-width:960px;margin:3rem auto;padding:1rem"><a href="./">Back to workspace</a> · <a href="./setup.html">Guided setup</a> · <a href="./people.html">People and access</a><h1>Connectors</h1><p id="status" role="status"></p><button id="onboard" hidden>Onboard Company A</button><section id="slack-bot" aria-labelledby="slack-bot-title"><h2 id="slack-bot-title">Slack bot</h2><p>Add Broppy to your Slack workspace to ask questions and review commitments. Connecting Slack below does this and connects your Slack account in the same step.</p><p id="slack-bot-status" role="status"></p><div id="slack-bot-actions"></div></section><section id="model" aria-labelledby="model-title"><h2 id="model-title">AI model</h2><p id="model-status" role="status"></p><p>Broppy sends only the passages a person is allowed to see, with their question, to the model you choose. Your API key is stored encrypted and is never shown again.</p><form id="model-form"><label>Provider <select id="model-provider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openai_compatible">OpenAI-compatible (Azure, self-hosted)</option></select></label> <label>Model <input id="model-name" required maxlength="200" autocomplete="off"></label> <label id="model-url-label" hidden>Address <input id="model-url" type="url" placeholder="https://example.com/v1" autocomplete="off"></label> <label>API key <input id="model-key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key"></label> <button type="submit">Save and test</button> <button type="button" id="model-remove" hidden>Remove</button></form></section><div id="connections"></div><h2>People matching</h2><p>People without a source identity receive no access to that source.</p><ul id="unmatched"></ul></main></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#172a3a">
+<title>Connectors · Broppy</title><link rel="stylesheet" href="./setup.css"><script type="module" src="./connectors.js"></script></head>
+<body>
+<a class="skip" href="#main">Skip to connectors</a>
+<header class="bar"><a class="logo" href="./index.html"><span class="logo-mark" aria-hidden="true">B</span>Broppy</a>
+  <nav class="bar-links" aria-label="Settings"><a href="./setup.html">Setup</a><a href="./people.html">People</a><a class="exit" href="./index.html">Go to my workspace</a></nav></header>
+<main id="main" class="wrap">
+  <div class="intro">
+    <p class="eyebrow">Settings</p>
+    <h1>Connectors</h1>
+    <p class="lead">The tools Broppy reads, what it reads from each, and the AI that writes its answers. Everyone still only sees what they can already open in each tool.</p>
+  </div>
+  <p id="status" class="notice" role="status" hidden></p>
+
+  <section class="section" aria-labelledby="tools-title">
+    <h2 id="tools-title">Tools</h2>
+    <div id="connections" class="tools"><p class="muted">Loading…</p></div>
+    <p id="unmatched" class="hint" hidden></p>
+    <button id="onboard" class="btn" type="button" hidden>Load the demo company's tools</button>
+  </section>
+
+  <section class="section card" id="slack-bot" aria-labelledby="slack-bot-title">
+    <h2 id="slack-bot-title">Slack bot</h2>
+    <p class="muted">Lets your team ask Broppy in Slack with <code>/broppy</code>. Adding it connects Slack for reading too.</p>
+    <p id="slack-bot-status" class="tool-status" role="status"></p>
+    <div id="slack-bot-actions" class="row"></div>
+    <details class="hint">
+      <summary>Before you add it</summary>
+      <ul class="checklist">
+        <li>Approve it with the Slack account that uses the same email as your Broppy sign-in.</li>
+        <li>You need permission to install apps in your Slack workspace, or your Slack admin's approval.</li>
+        <li>Broppy reads the messages in every channel you invite it to. Invite it with <code>/invite @Broppy</code>.</li>
+        <li>Each teammate's Slack email must match their Broppy account for Broppy to answer them.</li>
+        <li>One Slack workspace per Broppy company. To remove the bot completely, also uninstall it in Slack.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="section card" id="model" aria-labelledby="model-title">
+    <h2 id="model-title">AI model</h2>
+    <p id="model-status" class="tool-status" role="status"></p>
+    <p class="muted">Broppy sends only the passages a person is allowed to see, with their question, to the model you choose. Your API key is stored encrypted and never shown again.</p>
+    <form id="model-form" class="form">
+      <label>Provider <select id="model-provider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="openai_compatible">OpenAI-compatible (Azure, self-hosted)</option></select></label>
+      <label>Model <input id="model-name" type="text" required maxlength="200" autocomplete="off"></label>
+      <label id="model-url-label" hidden>Address <input id="model-url" type="url" placeholder="https://example.com/v1" autocomplete="off"></label>
+      <label>API key <input id="model-key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key"></label>
+      <div class="row"><button type="submit" class="btn primary">Save and test</button> <button type="button" class="btn" id="model-remove" hidden>Remove</button></div>
+    </form>
+  </section>
+</main>
+</body></html>

@@ -90,3 +90,12 @@ test("lists the tools that don't know a person's email, and words each invitatio
   assert.match(addedMessage("a@b.test", { auth0: "not_configured" }), /aren't switched on/);
   assert.match(addedMessage("a@b.test", { auth0: "failed" }), /could not be sent/);
 });
+
+test("a refused sign-in asks to reconnect; any other failed reading stays connected and is read again", () => {
+  const revoked = toolState(connection("jira", { status: "Error", error: "jira credential was rejected; reconnect the source" }));
+  assert.equal(revoked.reconnect, true);
+  const stopped = toolState(connection("jira", { status: "Error", error: "Reading stopped before it finished; it will carry on at the next sync" }));
+  assert.equal(stopped.reconnect, false);
+  assert.equal(setupSteps({ connections: [connection("jira", { status: "Error", error: "Source changed during ingestion" })] })[0].status, "done");
+  assert.equal(setupSteps({ connections: [connection("jira", { status: "Error", error: "jira credential was rejected; reconnect the source" })] })[0].status, "current");
+});

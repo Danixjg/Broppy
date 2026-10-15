@@ -78,16 +78,26 @@ async function connect(source, button) {
     await refresh();
   } catch (error) { notice({ kind: "bad", text: `${toolName(source)}: ${error.message}` }); button.disabled = false; }
 }
+async function readAgain(source, button) {
+  button.disabled = true; notice(undefined);
+  try { await request(`/v1/admin/connections/${source}/import`, "POST", {}); await refresh(); }
+  catch (error) { notice({ kind: "bad", text: `${toolName(source)}: ${error.message}` }); button.disabled = false; }
+}
 function renderTools() {
   $("tools").replaceChildren(...TOOLS.map(tool => {
     const connection = state.connections.find(item => item.source === tool.source);
     const status = toolState(connection, state.jobs.find(job => job.source === tool.source));
-    const connected = status.state !== "not_connected" && status.state !== "attention";
-    const button = h("button", { type: "button", class: connected ? "btn" : "btn primary" }, connected ? "Connect again" : status.state === "attention" ? "Try again" : "Connect");
-    button.onclick = () => connect(tool.source, button);
+    const attention = status.state === "attention";
+    const connected = status.state !== "not_connected" && !attention;
+    const add = tool.source === "slack" ? "Add to Slack" : "Connect";
+    const label = connected ? "Connect again" : attention ? (status.reconnect ? "Reconnect" : "Read again") : add;
+    const button = h("button", { type: "button", class: connected ? "btn" : "btn primary" }, label);
+    button.onclick = () => attention && !status.reconnect ? readAgain(tool.source, button) : connect(tool.source, button);
     return h("article", { class: `tool ${status.state}` },
       h("h3", {}, tool.name), h("p", { class: "muted" }, tool.reads),
-      h("p", { class: "tool-status" }, connected ? "✓ Connected" : status.label, status.detail ? ` · ${status.detail}` : ""), button);
+      h("p", { class: "tool-status" }, connected ? "✓ Connected" : attention
+        ? (status.reconnect ? "Broppy's access was turned off or expired" : "Connected · the last reading didn't finish")
+        : status.label), button);
   }));
 }
 
@@ -112,7 +122,10 @@ function readPanel(source) {
         h("input", { type: "checkbox", value: item.id, checked: (scope.containers || []).includes(item.id) }), ` ${item.name}`)) : [h("p", { class: "muted" }, "Nothing to choose from yet.")]));
     } catch (error) { loaded = false; picker.replaceChildren(h("p", { class: "bad" }, error.message)); }
   };
-  const sync = () => { picker.hidden = chosen() !== "selected"; if (chosen() === "selected") void loadPicker(panel.scope); };
+  const sync = () => {
+    picker.hidden = chosen() !== "selected"; if (chosen() === "selected") void loadPicker(panel.scope);
+    save.textContent = chosen() === "none" ? "Save" : "Save and start reading";
+  };
   for (const label of radios) label.firstChild.onchange = sync;
   form.onsubmit = async event => {
     event.preventDefault(); save.disabled = true; notice(undefined);
@@ -130,7 +143,8 @@ function readPanel(source) {
       const info = toolState(connection, job);
       // Leave the admin's choices alone while they are working in the form.
       if (!form.contains(document.activeElement) && !radios.some(label => label.firstChild.checked)) {
-        const initial = panel.scope.mode || "all";
+        // A tool just connected starts at "nothing"; suggest the recommended choice rather than the one that reads nothing.
+        const initial = panel.scope.mode && !(panel.scope.mode === "none" && !(connection.count > 0)) ? panel.scope.mode : "all";
         for (const label of radios) label.firstChild.checked = label.firstChild.value === initial;
         sync();
       }
