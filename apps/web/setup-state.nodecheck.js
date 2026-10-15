@@ -67,7 +67,7 @@ test("says what happened when the admin comes back from a tool's approval page",
   assert.match(message("connect_failed=drive&reason=unknown").text, /didn't accept/);
   assert.equal(message("slack_install=installed").kind, "good");
   assert.equal(message("slack_install=denied").kind, "bad");
-  assert.match(message("slack_install=conflict").text, /another company/);
+  assert.match(message("slack_install=conflict").text, /another Broppy company.*Disconnect the bot/);
   assert.equal(message("slack_install=failed").kind, "bad");
   assert.match(message("slack_install=email_mismatch").text, /^Slack: .*same email/);
   assert.match(message("slack_install=unsupported").text, /token rotation/);
