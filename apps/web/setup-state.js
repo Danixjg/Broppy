@@ -82,6 +82,8 @@ export function returnMessage(params) {
   if (failed) return { kind: "bad", text: `${toolName(failed)}: ${REASONS[params.get("reason")] ?? REASONS.failed}` };
   if (slack === "installed") return { kind: "good", text: "Broppy was added to Slack and Slack is connected." };
   if (slack === "denied") return { kind: "bad", text: `Slack: ${REASONS.denied}` };
+  if (slack === "email_mismatch") return { kind: "bad", text: `Slack: ${REASONS.email_mismatch}` };
+  if (slack === "unsupported") return { kind: "bad", text: "Slack: this Slack app has token rotation turned on, which Broppy can't use. Turn it off under OAuth & Permissions in the app's settings, then try again." };
   if (slack === "conflict") return { kind: "bad", text: "That Slack workspace is already connected to another company. Contact whoever runs Broppy for your company." };
   if (slack) return { kind: "bad", text: "Slack didn't accept the connection. Try again in a minute; if it keeps happening, tell whoever runs Broppy for your company." };
   return undefined;

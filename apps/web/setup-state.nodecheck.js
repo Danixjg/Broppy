@@ -69,6 +69,8 @@ test("says what happened when the admin comes back from a tool's approval page",
   assert.equal(message("slack_install=denied").kind, "bad");
   assert.match(message("slack_install=conflict").text, /another company/);
   assert.equal(message("slack_install=failed").kind, "bad");
+  assert.match(message("slack_install=email_mismatch").text, /^Slack: .*same email/);
+  assert.match(message("slack_install=unsupported").text, /token rotation/);
   assert.equal(message(""), undefined);
 });
 

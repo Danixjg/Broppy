@@ -34,6 +34,10 @@ describe("admin Slack installation", () => {
     const ctx = setup(invalid); expect(await ctx.callback(await ctx.begin())).toBe("failed");
     expect((await ctx.oauth.status(admin)).state).toBe("not_installed");
   });
+  it("accepts an app that asks Slack for more permissions than Broppy needs", async () => {
+    const ctx = setup({ scope: [...SLACK_BOT_SCOPES, "app_mentions:read", "im:history"].join(",") });
+    expect(await ctx.callback(await ctx.begin())).toBe("installed");
+  });
   it.each([{ expires_in: 43200 }, { refresh_token: "refresh" }, { is_enterprise_install: true }])("refuses unsupported installs %j without replacement", async invalid => {
     const ctx = setup(invalid); await ctx.registry.seed("TONE","org-a","xoxb-current");
     expect(await ctx.callback(await ctx.begin())).toBe("unsupported");
@@ -55,7 +59,7 @@ describe("admin Slack installation", () => {
     expect(await ctx.callback(state)).toBe("failed"); expect(ctx.transport).not.toHaveBeenCalled();
     const other = setup(); other.transport.mockImplementation(async input => String(input).endsWith("users.info") ? Response.json({ ok: true, user: { id: "UMAYA", profile: { email: "other@example.test" } } })
       : String(input).endsWith("auth.test") ? Response.json({ ok: true, team_id: "TONE", user_id: "UBOT", bot_id: "BBOT" }) : Response.json({ ok: true, app_id: "AAPP", token_type: "bot", access_token: "xoxb-test", bot_user_id: "UBOT", team: { id: "TONE" }, scope: SLACK_BOT_SCOPES.join(","), authed_user: { id: "UMAYA" }, is_enterprise_install: false }));
-    expect(await other.callback(await other.begin())).toBe("failed");
+    expect(await other.callback(await other.begin())).toBe("email_mismatch");
   });
   it.each([undefined, "", "   "])("requires configured Slack identity %j before consent and again at callback", async identity => {
     const ctx = setup(); const state = await ctx.begin();
