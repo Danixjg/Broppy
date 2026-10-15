@@ -7,10 +7,12 @@ type Context = { params: Promise<{ path: string[] }> };
 
 const signedOut = { error: "Your sign-in session has ended. Log in again.", code: "signed_out" };
 // One message for every API rejection cause, so configuration and directory details are not revealed.
-const tokenUnavailable = { error: "Your sign-in is missing the access token for the workspace API. Log out and log in again; if it persists, check Auth0 offline access and the API audience.", code: "token_unavailable" };
-const apiNotConfigured = { error: "BRAIN_API_URL is not set on this deployment, so the web app does not know where the workspace API is.", code: "api_not_configured" };
-const accountRejected = { error: "You are signed in, but the workspace API did not accept your account. " +
-  "Ask an administrator to check the API's Auth0 settings and your workspace directory entry.", code: "account_rejected" };
+// Written for the person using Broppy; the technical cause is logged on the server, not shown.
+const tokenUnavailable = { error: "Your sign-in needs refreshing. Log out and log in again.", code: "token_unavailable" };
+const apiNotConfigured = { error: "Broppy isn't available on this site just now. Please try again later.", code: "api_not_configured" };
+const accountRejected = { error: "Broppy couldn't confirm your sign-in for this company. Log out and sign in again; if it keeps happening, ask your company's admin to check your email is on its People list.", code: "account_rejected" };
+const busy = { error: "Broppy is starting up or busy. Try again in a moment.", code: "api_busy" };
+const slow = { error: "That's taking longer than usual. Try again in a moment.", code: "api_timeout" };
 const demoRejected = { error: "The demo API did not accept this persona. It must run as the public demo " +
   "(PUBLIC_DEMO=true, or pnpm dev locally).", code: "demo_rejected" };
 // A demo persona is a fixture user ID such as "maya", never a token or free text.
@@ -69,7 +71,10 @@ async function forward(request: NextRequest, context: Context) {
   const outbound = await outgoing(request, context);
   if (outbound instanceof Response) return outbound;
   // On Vercel there is no API on localhost, so a missing BRAIN_API_URL is a configuration error, not an unreachable API.
-  if (!process.env.BRAIN_API_URL && process.env.VERCEL) return Response.json(apiNotConfigured, { status: 503, headers: { "cache-control": "no-store" } });
+  if (!process.env.BRAIN_API_URL && process.env.VERCEL) {
+    console.error("brain proxy: BRAIN_API_URL is not set on this deployment");
+    return Response.json(apiNotConfigured, { status: 503, headers: { "cache-control": "no-store" } });
+  }
   let token: string;
   try { ({ token } = await auth0.getAccessToken()); } catch (error) {
     console.error("brain proxy: no access token for the API", error instanceof Error ? error.name : "unknown");
@@ -81,14 +86,22 @@ async function forward(request: NextRequest, context: Context) {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: outbound.body,
       signal: AbortSignal.timeout(60_000) });
     if (response.status === 401) {
+      // The API's own reason (a company not on the list, an expired token) is logged there; the person gets one plain message.
       await response.body?.cancel();
       return Response.json(accountRejected, { status: 401, headers: { "cache-control": "no-store" } });
+    }
+    // The host's own error page (a cold start or time limit) is HTML, not the API's JSON: answer in words instead.
+    if (response.status >= 500 && !response.headers.get("content-type")?.includes("json")) {
+      await response.body?.cancel();
+      console.error("brain proxy: API answered", response.status, "without JSON");
+      return Response.json(response.status === 504 ? slow : busy, { status: response.status, headers: { "cache-control": "no-store" } });
     }
     return new Response(response.body, { status: response.status, headers: JSON_NO_STORE });
   } catch (error) {
     // The name and cause code say whether this was a timeout, a refused connection or a redirect, without revealing the URL.
     console.error("brain proxy: API request failed", error instanceof Error ? error.name : "unknown", (error as { cause?: { code?: string } })?.cause?.code ?? "");
-    return Response.json({ error: "The workspace API could not be reached. Check that BRAIN_API_URL points at the deployed API and that it is running.", code: "api_unreachable" }, { status: 502, headers: { "cache-control": "no-store" } });
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return Response.json(timedOut ? slow : { ...busy, code: "api_unreachable" }, { status: timedOut ? 504 : 502, headers: { "cache-control": "no-store" } });
   }
 }
 export { forward as GET, forward as POST, forward as PUT, forward as DELETE };

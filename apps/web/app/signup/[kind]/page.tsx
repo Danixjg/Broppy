@@ -37,6 +37,7 @@ export default async function Signup({ params, searchParams }: { params: Promise
       <p className="form-lead">If <strong>{sent}</strong> can start {personal ? "a workspace" : "a company"}, an invitation is on its way. Open it, choose a password, and you will land in the guided setup.</p>
       <ul className="form-points">
         <li><Check size={16} aria-hidden="true" /><span>It can take a minute to arrive. Look in spam if you don't see it.</span></li>
+        <li><Check size={16} aria-hidden="true" /><span>No email after a few minutes? An email that has already signed in to Broppy doesn't get a new invitation. Sign in with it instead.</span></li>
         <li><Check size={16} aria-hidden="true" /><span>{personal ? "Already have a workspace? Sign in with the same email. Part of a company on Broppy? Sign in with your company's name, and ask your admin to add you."
           : "Already part of a company on Broppy? Sign in instead, and ask your admin to add you."}</span></li>
       </ul>

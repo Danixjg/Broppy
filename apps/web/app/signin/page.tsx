@@ -24,11 +24,20 @@ async function findCompany(query: { name: string } | { email: string }): Promise
   } catch { return "busy"; }
 }
 
+/** What went wrong when Auth0 sent someone back without signing them in (see onCallback in lib/auth0.ts). */
+const SIGN_IN_FAILURES: Record<string, string> = {
+  not_member: "That account isn't a member of a Broppy company yet. Ask your company's admin to add your email, or sign up to start your own.",
+  invitation: "That invitation has expired or was already used. Ask your admin to send a new one, or just sign in if you've joined before.",
+  denied: "Sign-in was cancelled, so you weren't signed in. Try again whenever you're ready.",
+  expired: "That sign-in took too long and expired. Please sign in again.",
+  failed: "We couldn't sign you in just now. Please try again; if it keeps happening, tell your company's admin."
+};
+
 export default async function SignIn({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const query = await searchParams;
   if (!authConfigured) redirect("/");
   // With one fixed company there is nothing to choose: go straight to its sign-in.
-  if (!asksForCompany()) redirect(`/auth/login?${new URLSearchParams({ returnTo: safeReturn(query.returnTo) })}`);
+  if (!asksForCompany() && !one(query.error)) redirect(`/auth/login?${new URLSearchParams({ returnTo: safeReturn(query.returnTo) })}`);
   const returnTo = safeReturn(query.returnTo);
   const company = one(query.company).trim().slice(0, 80);
   const email = one(query.email).trim().slice(0, 254);
@@ -37,7 +46,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
   if (search) {
     const list = await headers();
     const visitor = list.get("x-forwarded-for")?.split(",")[0].trim() || list.get("x-real-ip") || "unknown";
-    if (!allow(`find:${visitor}`, 30, 600_000)) problem = { for: search.for, text: "Too many tries. Please wait a few minutes and try again." };
+    if (!allow(`find:${visitor}`, 120, 600_000)) problem = { for: search.for, text: "Too many tries. Please wait a few minutes and try again." };
     else {
       const found = await findCompany(search.find);
       if (typeof found === "object") redirect(`/auth/login?${new URLSearchParams({ organization: found.organization, returnTo })}`);
@@ -49,11 +58,13 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<R
         : "We couldn't reach Broppy just now. Please try again in a minute." };
     }
   }
+  const refused = SIGN_IN_FAILURES[one(query.error)];
   const hidden = returnTo !== "/workspace/index.html" && <input type="hidden" name="returnTo" value={returnTo} />;
   const login = `/auth/login?${new URLSearchParams({ returnTo })}`;
   return <AuthShell>
     <section className="form-card">
       <h1>Sign in</h1>
+      {refused && <p className="form-error" role="alert">{refused}</p>}
       <p className="form-lead">Sign in with your email and password. If you belong to more than one company, you'll choose which one next.</p>
       <p className="form-actions"><a className="btn primary" href={login}>Sign in</a></p>
       {signupMode() === "on" && <p className="form-foot">New to Broppy? <a href={signupPath("personal")}>Sign up</a> · <a href={signupPath("enterprise")}>Enterprise sign up</a></p>}

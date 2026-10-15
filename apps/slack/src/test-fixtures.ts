@@ -35,4 +35,9 @@ export const message = (text: string, ts = "1791195720.000100", extra = {}) => J
 export const interaction = (payload: unknown) => signed(new URLSearchParams({ payload: JSON.stringify(payload) }).toString(), "/slack/interactions");
 export async function suggestion(ctx: ReturnType<typeof setup>, text = AGREED, ts?: string) { await handleSlack(ctx.deps, signed(message(text, ts), "/slack/events")); return ctx.calls.ephemeral.at(-1); }
 export const buttonValue = (eph: any, action = "track_task") => eph.blocks.flatMap((b: any) => b.elements ?? []).find((e: any) => e.action_id === action).value;
-export const click = (ctx: ReturnType<typeof setup>, value: string, user = "UMAYA", action = "track_task") => handleSlack(ctx.deps, interaction({ type: "block_actions", user: { id: user }, trigger_id: "trigger", response_url: "https://hooks.slack.com/x", actions: [{ action_id: action, value }] }));
+// Work Slack's handler hands to defer (after its three-second reply) is awaited here, as the host keeps it running.
+export const click = async (ctx: ReturnType<typeof setup>, value: string, user = "UMAYA", action = "track_task") => {
+  const response = await handleSlack(ctx.deps, interaction({ type: "block_actions", user: { id: user }, trigger_id: "trigger", response_url: "https://hooks.slack.com/x", actions: [{ action_id: action, value }] }));
+  await Promise.all(ctx.deferred.splice(0));
+  return response;
+};
