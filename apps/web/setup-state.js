@@ -17,7 +17,8 @@ export function toolState(connection, job) {
     const done = (job?.indexed ?? 0) + (job?.skipped ?? 0);
     return { state: "reading", label: "Reading", percent: job?.found ? Math.min(100, Math.floor(100 * done / job.found)) : 0, found: job?.found ?? 0, done };
   }
-  const chosen = Boolean(connection.scope?.mode) || (connection.count ?? 0) > 0;
+  // "Nothing for now" leaves the choice open: a connected tool that reads nothing still has a step to finish.
+  const chosen = (Boolean(connection.scope?.mode) && connection.scope.mode !== "none") || (connection.count ?? 0) > 0;
   if (!chosen) return { state: "connected", label: "Connected" };
   return { state: "ready", label: "Ready", items: connection.count ?? 0, failed: job?.failed ?? 0 };
 }

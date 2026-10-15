@@ -165,14 +165,14 @@ export class Brain {
    * Where each of this company's sources stands, for its Sync health page: connected or not, the import in progress or
    * last finished, how many items are indexed, and when the source last synced. Only this company's own state.
    */
-  syncHealth(): Array<{ source: Source; status: string; connectedAt?: string; error?: string; items: number; lastSync?: string;
+  syncHealth(): Array<{ source: Source; status: string; scope?: string; connectedAt?: string; error?: string; items: number; lastSync?: string;
     job?: { status: string; found: number; indexed: number; failed: number; finishedAt?: string }; pending?: number }> {
     return sources.map(source => {
       const connection = this.connections.get(source);
       const job = this.jobs.get(source);
       const run = this.runs.get(source);
       const connected = Boolean(connection) && connection!.status !== "Not connected";
-      return { source, status: connection?.status ?? (this.liveMode ? "Not connected" : "Connected"),
+      return { source, status: connection?.status ?? (this.liveMode ? "Not connected" : "Connected"), ...(connection?.scope?.mode ? { scope: connection.scope.mode } : {}),
         ...(connection?.connectedAt ? { connectedAt: connection.connectedAt } : {}), ...(connection?.error ? { error: connection.error } : {}),
         items: [...this.index.documents.values()].filter(doc => doc.source === source && !doc.deletedAt).length,
         // A source that isn't connected has no sync to report, whatever older state says.

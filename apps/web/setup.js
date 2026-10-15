@@ -3,10 +3,12 @@ import { ANTHROPIC_MODELS, FIRST_QUESTIONS, TOOLS, addedMessage, checkLines, cur
 const api = "/api/brain";
 // In demo mode the workspace links here with the persona it was viewing as; the host ignores it for signed-in users.
 const persona = new URLSearchParams(location.search).get("user");
+const requestedStep = new URLSearchParams(location.search).get("step");
 const $ = id => document.getElementById(id);
 const SKIPPED_KEY = "broppy-setup-skipped";
 
-const state = { connections: [], jobs: [], people: [], peopleAvailable: true, model: undefined, skipped: [], open: undefined, lastCurrent: undefined, timer: undefined };
+const state = { connections: [], jobs: [], people: [], peopleAvailable: true, model: undefined, skipped: [], open: undefined, lastCurrent: undefined, timer: undefined,
+  requested: ["connect", "read", "team", "ai"].includes(requestedStep) ? requestedStep : undefined };
 try { state.skipped = JSON.parse(localStorage.getItem(SKIPPED_KEY) || "[]").filter(item => ["team", "model"].includes(item)); } catch { /* A private window forgets what was skipped; that is fine. */ }
 const skip = step => { if (!state.skipped.includes(step)) state.skipped.push(step); try { localStorage.setItem(SKIPPED_KEY, JSON.stringify(state.skipped)); } catch { /* Nothing to save to. */ } };
 
@@ -40,7 +42,9 @@ function notice(message) {
 function renderSteps() {
   const steps = setupSteps({ connections: state.connections, jobs: state.jobs, people: state.people, model: state.model, skipped: state.skipped, personal: state.personal });
   const current = currentStep(steps);
-  if (current !== state.lastCurrent) { state.open = current; state.lastCurrent = current; }
+  // A link can ask for a step (setup.html?step=read), such as "Change what Broppy reads" on Sync health.
+  if (state.requested) { state.open = state.requested; state.lastCurrent = current; state.requested = undefined; }
+  else if (current !== state.lastCurrent) { state.open = current; state.lastCurrent = current; }
   const done = steps.filter(step => step.status === "done").length;
   const total = steps.length - 1;
   // A personal workspace has no team step at all.
