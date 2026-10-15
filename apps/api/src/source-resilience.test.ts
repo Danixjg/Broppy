@@ -68,7 +68,7 @@ describe("source resilience", () => {
 
   it("marks a reading left running by a copy that was shut down as stopped, so it can be started again", async () => {
     const brain = new Brain();
-    const startedAt = new Date(Date.now() - 11 * 60_000).toISOString();
+    const startedAt = new Date(Date.now() - 4 * 60_000).toISOString();
     brain.jobs.set("jira", { source: "jira", status: "running", found: 13, indexed: 2, skipped: 0, failed: 0, startedAt });
     brain.connections.get("jira")!.status = "Importing";
     brain.settleStaleJobs();
