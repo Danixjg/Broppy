@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-015 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-017 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -871,3 +871,38 @@ grant execute on function public.save_brain_state_at(text, jsonb, bigint) to ser
 create unique index if not exists organizations_company_name_unique
   on public.organizations (lower(regexp_replace(btrim(name), '\s+', ' ', 'g')))
   where kind is distinct from 'personal';
+
+-- Background sync schedule (migration 016). Store broppy_api_origin in Vault; the shared secret is generated here.
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'broppy_sync_cron_secret')
+where not exists (select 1 from vault.secrets where name = 'broppy_sync_cron_secret');
+
+create or replace function public.broppy_sync_cron_secret() returns text
+language sql stable security definer set search_path = '' as $$
+  select decrypted_secret from vault.decrypted_secrets where name = 'broppy_sync_cron_secret'
+$$;
+revoke all on function public.broppy_sync_cron_secret() from public, anon, authenticated;
+grant execute on function public.broppy_sync_cron_secret() to service_role;
+
+select cron.unschedule('broppy-background-sync') where exists (select 1 from cron.job where jobname = 'broppy-background-sync');
+select cron.schedule('broppy-background-sync', '*/10 * * * *', $job$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'broppy_api_origin') || '/v1/cron/sync',
+    headers := jsonb_build_object('content-type', 'application/json', 'authorization',
+      'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'broppy_sync_cron_secret')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000);
+$job$);
+
+-- Slack service secret (migration 017), generated in Vault.
+select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'broppy_slack_service_token')
+where not exists (select 1 from vault.secrets where name = 'broppy_slack_service_token');
+
+create or replace function public.broppy_slack_service_token() returns text
+language sql stable security definer set search_path = '' as $$
+  select decrypted_secret from vault.decrypted_secrets where name = 'broppy_slack_service_token'
+$$;
+revoke all on function public.broppy_slack_service_token() from public, anon, authenticated;
+grant execute on function public.broppy_slack_service_token() to service_role;

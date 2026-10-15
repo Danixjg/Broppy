@@ -1,3 +1,4 @@
+import slackHandler from "@brain/slack/server";
 import { SlackInstallationOAuth } from "./slack-installation.js";
 import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { atlassianAccountIds } from "./atlassian-identity.js";
@@ -6,6 +7,7 @@ import { SourceOAuth } from "./source-oauth.js";
 import { Persistence, StaleState } from "./persistence.js";
 import { waitUntil } from "@vercel/functions";
 import { searchAudit } from "./audit-search.js";
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -205,6 +207,11 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const management = hasAuth0 ? Auth0Management.fromEnv() : undefined;
   const signupMode = hasAuth0 ? Signup.mode() : "off";
   const companies = signupMode !== "off" ? Companies.fromEnv() : undefined;
+  // The Slack service secret is kept in Supabase Vault (migration 017) unless it is set on the API itself.
+  if (companies && process.env.SLACK_APP_ID && !process.env.SLACK_SERVICE_TOKEN) {
+    const token = await companies.vaultSecret("broppy_slack_service_token").catch(() => undefined);
+    if (token) process.env.SLACK_SERVICE_TOKEN = token;
+  }
   if (signupMode !== "off") {
     // Another company's workspace reads its sources through the same Broppy app registrations, so those must be set.
     if (!companies || !management || !oauthConfigs || !process.env.AUTH0_SIGNUP_CONNECTION_ID) {
@@ -323,6 +330,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     { connectionId: process.env.AUTH0_SIGNUP_CONNECTION_ID!, accessCode: process.env.SIGNUP_ACCESS_CODE || undefined, open: signupMode === "on",
       onCreated: orgId => tenants.markKnown(orgId) }) : undefined;
 
+  // The background sync's secret from Supabase Vault, when it isn't set on the API itself; re-read every 5 minutes.
+  let cronSecret: { value?: string; at: number } = { at: 0 };
+  const vaultCronSecret = async (): Promise<string | undefined> => {
+    if (!companies) return undefined;
+    if (Date.now() - cronSecret.at > 300_000) cronSecret = { value: await companies.vaultSecret("broppy_sync_cron_secret").catch(() => undefined), at: Date.now() };
+    return cronSecret.value;
+  };
+
   const server = createServer(async (request, response) => {
     let actor: User | undefined;
     // The company this request belongs to, once known. Until then, only the home company's log is touched.
@@ -343,6 +358,35 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "OPTIONS") return await reply(response, 204, null);
+      // The scheduled background sync (Supabase pg_cron calls this every few minutes; see docs/background-sync.md). It needs
+      // the shared SYNC_CRON_SECRET, syncs the companies with connected sources, least recently synced first, and stops
+      // before the function's time runs out; the next run carries on from the companies it didn't reach.
+      if (url.pathname === "/v1/cron/sync" && (request.method === "POST" || request.method === "GET")) {
+        const secret = process.env.SYNC_CRON_SECRET ?? process.env.CRON_SECRET ?? await vaultCronSecret();
+        const given = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? "";
+        const ok = Boolean(secret) && given.length === secret!.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret!));
+        if (!ok) return send(response, secret ? 401 : 404, { error: secret ? "Unauthorized" : "Not found" });
+        const started = Date.now();
+        const budget = Number(process.env.SYNC_CRON_BUDGET_MS ?? 40_000);
+        const orgs = companies ? await companies.withConnectedSources() : [];
+        if (!companies && home.connectors) orgs.push(home.orgId);
+        const synced: Array<{ orgId: string; results: Array<{ source: Source; ok: boolean; error?: string }> }> = [];
+        const left: string[] = [];
+        for (const orgId of orgs) {
+          if (Date.now() - started > budget) { left.push(orgId); continue; }
+          try {
+            const tenant = await tenants.get(orgId);
+            if (!tenant) continue;
+            await tenant.brain.refreshIfStale();
+            synced.push({ orgId, results: await tenant.brain.syncConnected() });
+          } catch (error) {
+            synced.push({ orgId, results: [{ source: "slack" as Source, ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "Sync failed" }] });
+          }
+        }
+        console.info(JSON.stringify({ event: "background_sync", companies: synced.length, left: left.length, failed: synced.filter(item => item.results.some(result => !result.ok)).length, ms: Date.now() - started }));
+        return send(response, 200, { synced: synced.map(item => ({ orgId: item.orgId, results: item.results })), left: left.length });
+      }
+
       // Open to anyone, so it says only that the API is up. Each company's own sync state is at /v1/sync-health.
       if (request.method === "GET" && url.pathname === "/health") return await reply(response, 200, { ok: true });
 
@@ -900,6 +944,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 let serverless: Promise<ApiServer> | undefined;
 
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  // Slack's events, slash commands and button clicks are answered by the Slack gateway in the same deployment, so one
+  // Vercel project serves both. The gateway reads its installations from Supabase like the API does.
+  if (process.env.SLACK_APP_ID && new URL(request.url ?? "/", "http://localhost").pathname.startsWith("/slack/")) return slackHandler(request, response);
   serverless ??= createApiServer({ startOrchestrator: false }).catch(error => {
     serverless = undefined;
     throw error;

@@ -38,6 +38,9 @@ importers:
       '@brain/rust-core':
         specifier: workspace:*
         version: link:../../packages/rust-core
+      '@brain/slack':
+        specifier: workspace:*
+        version: link:../slack
       '@brain/types':
         specifier: workspace:*
         version: link:../../packages/types

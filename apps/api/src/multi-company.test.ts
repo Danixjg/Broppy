@@ -23,7 +23,7 @@ function token(sub: string, orgId: string): string {
 
 type Row = Record<string, any>;
 let snapshotWrites = 0;
-const tables: Record<string, Row[]> = { workspace_users: [], organizations: [], brain_state: [], audit_entries: [], merkle_batches: [] };
+const tables: Record<string, Row[]> = { workspace_users: [], organizations: [], brain_state: [], audit_entries: [], merkle_batches: [], source_connections: [], connector_state: [] };
 const auth0Orgs: Array<{ id: string; name: string; display_name: string }> = [];
 const invitations: Array<{ org: string; email: string }> = [];
 const emails: Record<string, { email: string; verified: boolean }> = {};
@@ -105,6 +105,8 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
         const row = { org_id: body.organization, snapshot: body.snapshot, revision: current + 1 }; if (at >= 0) rows[at] = row; else rows.push(row);
         if (rpc[1] === "save_brain_state_at") return json(current + 1);
       }
+      // The background sync's secret, which the API reads from Vault when it isn't set as an environment variable.
+      if (rpc[1] === "broppy_sync_cron_secret") return json("c".repeat(40));
       return json(null);
     }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
@@ -272,6 +274,19 @@ describe("several companies in one API", () => {
     // Someone the admin never added gets nothing, whatever organization their sign-in names.
     emails["auth0|outsider"] = { email: "outsider@acme.test", verified: true };
     expect((await call("GET", "/v1/admin/company", { sub: "auth0|outsider", org: "org_new1" })).status).toBe(403);
+  });
+
+  it("runs the scheduled background sync only with its secret, for companies with something connected", async () => {
+    const cron = (secret?: string) => fetch(`${base}/v1/cron/sync`, { method: "POST", headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+    expect((await cron()).status).toBe(401);
+    expect((await cron("c".repeat(39) + "x")).status).toBe(401);
+    // Nothing connected anywhere yet: nothing to do, and no failure.
+    expect(await (await cron("c".repeat(40))).json()).toEqual({ synced: [], left: 0 });
+    // A company whose Jira is connected is synced; one with nothing connected is left alone.
+    tables.source_connections.push({ org_id: "org_new1", source: "jira", status: "Connected" }, { org_id: "org_none9", source: "jira", status: "Not connected" });
+    const ran = await (await cron("c".repeat(40))).json();
+    expect(ran.synced.map((item: Row) => item.orgId)).toEqual(["org_new1"]);
+    tables.source_connections.length = 0;
   });
 
   it("lets a company that signed itself up add Broppy to its own Slack", async () => {

@@ -4,6 +4,11 @@ A provisioned organization admin adds Broppy from the **Slack bot** card on Conn
 
 ## Prepare the deployment
 
+The API's Vercel entry also answers `/slack/*` with the Slack gateway whenever `SLACK_APP_ID` is set, so a single
+deployment can be both the customer API and the gateway: use the API's origin as the gateway origin below
+(`https://API-HOST/slack/events`, `/slack/commands`, `/slack/interactions`). `SLACK_SERVICE_TOKEN` need not be set on
+it; migration 017 generates the service secret in Supabase Vault and the API reads it at startup.
+
 1. Keep the old environment-token Slack server and scheduler stopped during cutover. The new gateway and CLI require `SLACK_APP_ID` and a durable installed-workspace registry. They refuse unknown or disconnected workspaces.
 2. Apply `infra/supabase/migrations/010_slack_installations.sql` after migrations 001–009. For a fresh project, run `infra/supabase/schema.sql` instead. This repository does not apply hosted migrations automatically.
 3. Configure one Slack app with token rotation disabled and workspace installations enabled. Enterprise organization-wide installations and expiring bot grants are refused. Generate its manifest with the shared gateway's HTTPS origin and each customer's exact HTTPS callback URL.

@@ -808,7 +808,7 @@ function healthLine(item) {
     return { text: item.job?.found ? `Reading · ${done} of ${item.job.found} items` : "Reading…", kind: "" };
   }
   if (item.job?.status === "failed") return { text: "The last import failed. Try Sync now, or reconnect it.", kind: "bad" };
-  if (!item.job && item.items === 0) return { text: "Connected · choose what Broppy reads in setup", kind: "" };
+  if ((!item.job || item.scope === "none") && item.items === 0) return { text: "Connected · reading nothing yet", kind: "" };
   return { text: `Ready · ${item.items} item${item.items === 1 ? "" : "s"}${item.job?.failed ? ` · ${item.job.failed} couldn't be read` : ""}`, kind: "good" };
 }
 async function loadHealth() {
@@ -824,6 +824,9 @@ async function loadHealth() {
         if (item.lastSync) synced.title = fmtDate(item.lastSync);
         card.append(synced);
         if (item.pending) appendText(card, "p", "muted", `${item.pending} item${item.pending === 1 ? "" : "s"} still to read`);
+        if (role() === "admin" && state.authMode !== "demo") {
+          const change = node("a", "", "Change what Broppy reads"); change.href = "./setup.html?step=read"; card.append(change);
+        }
       } else if (role() === "admin" && state.authMode !== "demo") {
         const link = node("a", "", "Connect it in setup"); link.href = "./setup.html"; card.append(link);
       }

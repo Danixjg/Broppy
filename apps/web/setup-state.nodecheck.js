@@ -25,6 +25,12 @@ test("the first step not done is the current one, and connecting a tool comes fi
   assert.equal(reading[1].status, "current", "a connected tool still waiting to be read keeps step two open");
 });
 
+test("reading nothing from a connected tool leaves the reading step open", () => {
+  const nothing = setupSteps({ connections: [connection("jira", { scope: { mode: "none" } })] });
+  assert.equal(currentStep(nothing), "read");
+  assert.equal(toolState(connection("jira", { scope: { mode: "none" } })).state, "connected");
+});
+
 test("adding a team and choosing an AI can be skipped, then the last step opens", () => {
   const ready = { connections: [connection("jira", { scope: { mode: "all" }, count: 5 })], people: [{ status: "active" }] };
   assert.equal(currentStep(setupSteps(ready)), "team");
