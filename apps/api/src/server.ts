@@ -324,6 +324,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     { connectionId: process.env.AUTH0_SIGNUP_CONNECTION_ID!, accessCode: process.env.SIGNUP_ACCESS_CODE || undefined, open: signupMode === "on",
       onCreated: orgId => tenants.markKnown(orgId) }) : undefined;
 
+  // The background sync's secret from Supabase Vault, when it isn't set on the API itself; re-read every 5 minutes.
+  let cronSecret: { value?: string; at: number } = { at: 0 };
+  const vaultCronSecret = async (): Promise<string | undefined> => {
+    if (!companies) return undefined;
+    if (Date.now() - cronSecret.at > 300_000) cronSecret = { value: await companies.syncCronSecret().catch(() => undefined), at: Date.now() };
+    return cronSecret.value;
+  };
+
   const server = createServer(async (request, response) => {
     let actor: User | undefined;
     // The company this request belongs to, once known. Until then, only the home company's log is touched.
@@ -348,7 +356,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // the shared SYNC_CRON_SECRET, syncs the companies with connected sources, least recently synced first, and stops
       // before the function's time runs out; the next run carries on from the companies it didn't reach.
       if (url.pathname === "/v1/cron/sync" && (request.method === "POST" || request.method === "GET")) {
-        const secret = process.env.SYNC_CRON_SECRET ?? process.env.CRON_SECRET;
+        const secret = process.env.SYNC_CRON_SECRET ?? process.env.CRON_SECRET ?? await vaultCronSecret();
         const given = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? "";
         const ok = Boolean(secret) && given.length === secret!.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret!));
         if (!ok) return send(response, secret ? 401 : 404, { error: secret ? "Unauthorized" : "Not found" });

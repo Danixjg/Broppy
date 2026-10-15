@@ -120,6 +120,19 @@ export class Companies {
     return [...orgs].sort((a, b) => (last.get(a) ?? 0) - (last.get(b) ?? 0));
   }
 
+  /**
+   * The background sync's shared secret, kept in Supabase Vault and readable only with the service key, so it never has
+   * to be copied by hand. Undefined when it hasn't been created.
+   */
+  async syncCronSecret(): Promise<string | undefined> {
+    const response = await this.transport(`${this.baseUrl}/rest/v1/rpc/broppy_sync_cron_secret`, {
+      method: "POST", headers: this.headers(), body: "{}", signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return undefined;
+    const secret = await response.json() as unknown;
+    return typeof secret === "string" && secret.length >= 32 ? secret : undefined;
+  }
+
   async remove(orgId: string): Promise<void> {
     if (orgId === this.homeOrgId) throw new Error("The home company cannot be removed");
     const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?org_id=eq.${encodeURIComponent(orgId)}`, {

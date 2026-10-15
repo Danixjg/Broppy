@@ -105,6 +105,8 @@ async function fakeFetch(input: string | URL | Request, init: RequestInit = {}):
         const row = { org_id: body.organization, snapshot: body.snapshot, revision: current + 1 }; if (at >= 0) rows[at] = row; else rows.push(row);
         if (rpc[1] === "save_brain_state_at") return json(current + 1);
       }
+      // The background sync's secret, which the API reads from Vault when it isn't set as an environment variable.
+      if (rpc[1] === "broppy_sync_cron_secret") return json("c".repeat(40));
       return json(null);
     }
     const table = /^\/rest\/v1\/([a-z_]+)$/.exec(url.pathname)?.[1];
@@ -132,7 +134,7 @@ const settings: Record<string, string> = {
   AUTH0_MANAGEMENT_CLIENT_ID: "m2m", AUTH0_MANAGEMENT_CLIENT_SECRET: "m2m-secret", AUTH0_CLIENT_ID: "web-app",
   AUTH0_SIGNUP_CONNECTION_ID: "con_db", SELF_SIGNUP: "on", API_ORIGIN: "https://api.example.test", WEB_ORIGIN: "https://app.example.test",
   SOURCE_OAUTH_JSON: JSON.stringify({ jira: { clientId: "c", clientSecret: "s", scopes: ["read:jira-work"] } }),
-  SYNC_CRON_SECRET: "c".repeat(40), SLACK_APP_ID: "A123", SLACK_CLIENT_ID: "slack-client", SLACK_CLIENT_SECRET: "slack-secret", SLACK_SERVICE_TOKEN: SLACK_SECRET
+  SLACK_APP_ID: "A123", SLACK_CLIENT_ID: "slack-client", SLACK_CLIENT_SECRET: "slack-secret", SLACK_SERVICE_TOKEN: SLACK_SECRET
 };
 
 async function call(method: string, path: string, who?: { sub: string; org: string }, data?: unknown) {

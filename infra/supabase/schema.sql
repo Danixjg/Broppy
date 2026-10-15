@@ -872,9 +872,19 @@ create unique index if not exists organizations_company_name_unique
   on public.organizations (lower(regexp_replace(btrim(name), '\s+', ' ', 'g')))
   where kind is distinct from 'personal';
 
--- Background sync schedule (migration 016). Store broppy_api_origin and broppy_sync_cron_secret in Vault first.
+-- Background sync schedule (migration 016). Store broppy_api_origin in Vault; the shared secret is generated here.
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
+
+select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'broppy_sync_cron_secret')
+where not exists (select 1 from vault.secrets where name = 'broppy_sync_cron_secret');
+
+create or replace function public.broppy_sync_cron_secret() returns text
+language sql stable security definer set search_path = '' as $$
+  select decrypted_secret from vault.decrypted_secrets where name = 'broppy_sync_cron_secret'
+$$;
+revoke all on function public.broppy_sync_cron_secret() from public, anon, authenticated;
+grant execute on function public.broppy_sync_cron_secret() to service_role;
 
 select cron.unschedule('broppy-background-sync') where exists (select 1 from cron.job where jobname = 'broppy-background-sync');
 select cron.schedule('broppy-background-sync', '*/10 * * * *', $job$
