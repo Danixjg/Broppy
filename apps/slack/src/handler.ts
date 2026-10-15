@@ -6,7 +6,7 @@ import { proposalId, type Proposal } from "./store.js";
 import { handleMaintenance } from "./feedback.js";
 import type { Deps } from "./config.js";
 import { fingerprint, tokens } from "./fingerprint.js";
-import { scoreMessage } from "./score.js";
+import { scoreMessage, type Person } from "./score.js";
 import { verifySignature } from "./slack.js";
 
 export interface SlackRequest {
@@ -47,7 +47,10 @@ export async function handleSlack(deps: Deps, request: SlackRequest): Promise<Sl
 }
 
 async function offer(deps: Deps, input: { text: string; channel: string; ts: string; threadTs?: string; authorSlackId?: string; teamId?: string }, explicitUser?: string): Promise<void> {
-  const scored = scoreMessage(input.text, deps.people, new Date(Number(input.ts) * 1000), deps.threshold, input.authorSlackId);
+  // A company that signed itself up has no people list in its settings: the people in the message are enough to
+  // recognise who is being asked, by their Slack name.
+  const people = deps.people.length ? deps.people : await peopleInMessage(deps, input.text, input.authorSlackId);
+  const scored = scoreMessage(input.text, people, new Date(Number(input.ts) * 1000), deps.threshold, input.authorSlackId);
   if (!explicitUser && (!scored.suggest || !scored.assignee)) return;
   const id = proposalId(input.channel, input.ts, input.teamId);
   let proposal = await deps.store.getProposal(id);
@@ -65,6 +68,11 @@ async function offer(deps: Deps, input: { text: string; channel: string; ts: str
   if (!explicitUser && !await deps.store.claim(claim)) return;
   try { await showProposal(deps, proposal); }
   catch (error) { await deps.store.release(claim); throw error; }
+}
+
+async function peopleInMessage(deps: Deps, text: string, author?: string): Promise<Person[]> {
+  const ids = [...new Set([...(author ? [author] : []), ...[...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g)].map(match => match[1])])].slice(0, 10);
+  return Promise.all(ids.map(async slackId => ({ slackId, name: await deps.slack.userName?.(slackId).catch(() => undefined) ?? slackId })));
 }
 
 async function showProposal(deps: Deps, proposal: Proposal): Promise<void> {
@@ -88,7 +96,7 @@ async function showProposal(deps: Deps, proposal: Proposal): Promise<void> {
   }
   await requireCurrent(deps.workspace);
   await deps.slack.postEphemeral({ channel: s.c, user: reviewer, text: `Review this commitment: ${s.t}`,
-    blocks: suggestionBlocks(s, (deps.people.find(p => p.slackId === s.a)?.name ?? s.a) || "Owner unknown", proposalUrl(deps, proposal.id),
+    blocks: suggestionBlocks(s, (deps.people.find(p => p.slackId === s.a)?.name ?? (s.a ? await deps.slack.userName?.(s.a).catch(() => undefined) ?? s.a : "")) || "Owner unknown", proposalUrl(deps, proposal.id),
       { id: proposal.id, revision: proposal.revision }, candidates,
       validDestinationPolicy(policy) && policy!.disclosureFields.includes("permalink") ? proposal.permalink ?? `Slack channel ${s.c}, message ${s.ts}` : undefined,
       validDestinationPolicy(policy) ? policy!.allowedSlackIds : []), ...(s.th ? { thread_ts: s.th } : {}) });
@@ -97,10 +105,24 @@ async function showProposal(deps: Deps, proposal: Proposal): Promise<void> {
 async function events(deps: Deps, payload: any): Promise<SlackResponse> {
   if (payload?.type === "url_verification" && typeof payload.challenge === "string") return ok({ challenge: payload.challenge });
   const event = payload?.event;
+  if (payload?.type === "event_callback" && event?.type === "member_joined_channel" && typeof event.channel === "string") {
+    deps.defer(greet(deps, event.channel, event.user).catch(error => console.error("broppy greeting failed", error)));
+    return ok();
+  }
   if (payload?.type !== "event_callback" || event?.type !== "message") return ok();
   if (event.bot_id || event.subtype || typeof event.text !== "string" || typeof event.channel !== "string" || typeof event.ts !== "string") return ok();
+  // A repeat delivery (Slack resends when this is slow) is recognised by the proposal claim and not suggested twice.
   await offer(deps, { text: event.text, channel: event.channel, ts: event.ts, threadTs: event.thread_ts, authorSlackId: event.user, teamId: payload.team_id });
   return ok();
+}
+
+/** When Broppy itself is added to a channel, it says what it does there. Anyone else joining is left alone. */
+async function greet(deps: Deps, channel: string, joined: unknown): Promise<void> {
+  if (typeof joined !== "string" || !deps.slack.botUserId || joined !== await deps.slack.botUserId()) return;
+  await requireCurrent(deps.workspace);
+  await deps.slack.postMessage({ channel, text: "Hi, I'm Broppy. Ask me about anything your team can see with `/broppy <question>`. "
+    + "When someone in this channel commits to something or asks a teammate to do it, I'll privately suggest tracking it. "
+    + "I read this channel's messages to do that, and each answer only uses what the person asking is allowed to see." });
 }
 
 /** /broppy <question>: acknowledged at once, answered through response_url, visible only to the asker. */

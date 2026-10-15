@@ -10,7 +10,6 @@ import { SLACK_BOT_SCOPES } from "../../slack/src/app-manifest.js";
 export type CallbackOutcome = "installed" | "denied" | "failed" | "unsupported" | "conflict" | "email_mismatch";
 export class SlackSetupError extends Error {}
 class SlackGrantError extends Error {}
-class SlackInstallerMismatch extends SlackGrantError {}
 export interface SlackOAuthConfig { appId: string; clientId: string; clientSecret: string; orgId: string; apiOrigin: string; webOrigin: string }
 function secureOrigin(value: string): string {
   const url = new URL(value);
@@ -108,7 +107,9 @@ export class SlackInstallationOAuth {
     if (!record(installer.user) || installer.user.id !== value.authed_user.id || installer.user.deleted === true || installer.user.is_bot === true
       || !record(installer.user.profile) || !nonempty(installer.user.profile.email)) throw new SlackGrantError("Slack installer identity unavailable");
     const email = installer.user.profile.email.trim().toLowerCase();
-    if (!nonempty(admin.platformIdentities?.slack) || email !== admin.email.trim().toLowerCase() || email !== admin.platformIdentities.slack.trim().toLowerCase()) throw new SlackInstallerMismatch("Slack installer does not match the Broppy admin");
+    // The install was started by this signed-in Broppy admin (the single-use state proves it). People often use a
+    // different email in Slack (a personal one, an old one), so a different Slack email is noted, not refused.
+    if (email !== admin.email.trim().toLowerCase()) console.warn(JSON.stringify({ event: "slack_installer_email_differs", org: this.config.orgId }));
     const bot = { accessToken: value.access_token, appId: this.config.appId, teamId: value.team.id, teamName: typeof value.team.name === "string" ? value.team.name : value.team.id, botUserId: value.bot_user_id, scopes };
     if (!this.link?.scopes.length) return { bot };
     const authed = value.authed_user;
@@ -137,7 +138,6 @@ export class SlackInstallationOAuth {
       // Which check refused it, never a token, so a failed install can be diagnosed from the logs.
       if (error instanceof SlackSetupError || error instanceof SlackGrantError) console.warn(JSON.stringify({ event: "slack_install_refused", org: this.config.orgId, reason: error.message }));
       if (error instanceof SlackSetupError) return "unsupported";
-      if (error instanceof SlackInstallerMismatch) return "email_mismatch";
       if (error instanceof SlackGrantError) return "failed";
       throw error;
     }
