@@ -65,4 +65,17 @@ describe("source resilience", () => {
     await expect(brain.sync("slack")).rejects.toThrow("Source is not connected");
     expect(brain.connections.get("slack")).toMatchObject({ status: "Not connected", error: undefined });
   });
+
+  it("marks a reading left running by a copy that was shut down as stopped, so it can be started again", async () => {
+    const brain = new Brain();
+    const startedAt = new Date(Date.now() - 11 * 60_000).toISOString();
+    brain.jobs.set("jira", { source: "jira", status: "running", found: 13, indexed: 2, skipped: 0, failed: 0, startedAt });
+    brain.connections.get("jira")!.status = "Importing";
+    brain.settleStaleJobs();
+    expect(brain.jobs.get("jira")).toMatchObject({ status: "failed" });
+    expect(brain.connections.get("jira")?.status).toBe("Error");
+    brain.jobs.set("drive", { source: "drive", status: "running", found: 1, indexed: 0, skipped: 0, failed: 0, startedAt: new Date().toISOString() });
+    brain.settleStaleJobs();
+    expect(brain.jobs.get("drive")?.status).toBe("running");
+  });
 });

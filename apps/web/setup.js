@@ -245,8 +245,12 @@ async function refresh() {
   state.peopleAvailable = Boolean(people); state.people = people?.people ?? []; state.model = model?.source === "organization" ? model.model : undefined;
   renderAll();
   clearTimeout(state.timer);
-  // Keep watching while something is being read.
-  if (state.jobs.some(job => job.status === "running") || state.connections.some(connection => connection.status === "Importing")) state.timer = setTimeout(() => refresh().catch(() => undefined), 3000);
+  // Keep watching while something is being read. A check that fails (a slow start, a dropped connection) is tried
+  // again rather than ending the watch, or the page would freeze on old progress while the reading carries on.
+  if (state.jobs.some(job => job.status === "running") || state.connections.some(connection => connection.status === "Importing")) state.timer = setTimeout(watch, 3000);
+}
+function watch() {
+  refresh().catch(() => { clearTimeout(state.timer); state.timer = setTimeout(watch, 5000); });
 }
 async function start() {
   try {
@@ -264,6 +268,8 @@ async function start() {
     state.personal = company?.personal === true;
     if (company?.address) { $("address-value").textContent = company.address; $("address").hidden = false; }
     await refresh();
+    // Coming back from another tab or a tool's approval page shows where things are now.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) watch(); });
   } catch (error) {
     $("gate").hidden = false; $("gate-title").textContent = "We couldn't open setup";
     $("gate-text").textContent = error.message;

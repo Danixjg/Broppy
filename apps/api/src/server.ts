@@ -675,6 +675,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (url.pathname.startsWith("/v1/admin/connections") || url.pathname === "/v1/admin/import-jobs" || url.pathname === "/v1/admin/onboard") {
         if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
         const sources: Source[] = ["slack", "jira", "confluence", "drive"];
+        if (request.method === "GET") brain.settleStaleJobs();
         if (url.pathname === "/v1/admin/connections" && request.method === "GET") {
           return await reply(response, 200, { connections: [...brain.connections.values()].map(connection => ({ ...connection,
             lastSync: brain.states.get(connection.source)?.lastSuccessfulSyncAt,

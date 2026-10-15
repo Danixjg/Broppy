@@ -397,9 +397,24 @@ export class Brain {
     await this.persist();
   }
 
+  /**
+   * A reading this copy isn't doing, started over ten minutes ago, stopped when the copy doing it was shut down (a
+   * serverless function has a time limit). Left as "running" it would lock the setup page and block a new reading, so it
+   * is marked as stopped; the next sync carries on from where it got to.
+   */
+  settleStaleJobs(now = Date.now()): void {
+    for (const job of this.jobs.values()) {
+      if (job.status !== "running" || this.syncQueues.has(job.source) || now - Date.parse(job.startedAt) < 600_000) continue;
+      job.status = "failed"; job.error = "Reading stopped before it finished; it will carry on at the next sync";
+      const connection = this.connections.get(job.source);
+      if (connection?.status === "Importing") { connection.status = "Error"; connection.error = job.error; }
+    }
+  }
+
   async startImport(actor: User, source: Source): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
+    this.settleStaleJobs();
     if (this.syncQueues.has(source) || this.jobs.get(source)?.status === "running") return;
     if (this.connections.get(source)?.status === "Not connected") throw new Error("Connect source first");
     this.jobs.set(source, { source, status: "running", found: 0, indexed: 0, skipped: 0, failed: 0, startedAt: new Date().toISOString() });
