@@ -8,6 +8,11 @@ export class CredentialRejected extends Error {
   constructor(source: Source) { super(`${source} credential was rejected; reconnect the source`); }
 }
 
+/** The company holds no credential for this source: it was never connected here, which is not a failure to report. */
+export class SourceNotConnected extends Error {
+  constructor() { super("Source is not connected"); }
+}
+
 export class SourceAccessUnavailable extends Error {
   constructor(source: Source, cause: unknown) {
     super(`${source} access check is unavailable`, { cause });
@@ -289,7 +294,7 @@ export class LiveConnector extends MockConnector {
 
   private async serviceAuthorization(): Promise<string> {
     const value = await this.settings.authorization?.() ?? this.settings.serviceAuthorization;
-    if (!value) throw new Error("Source is not connected");
+    if (!value) throw new SourceNotConnected();
     return value;
   }
 

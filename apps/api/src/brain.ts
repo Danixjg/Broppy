@@ -8,6 +8,7 @@ import { commitmentFingerprint, MemoryTaskStore, proposalId, type Proposal, type
 import { fingerprint as taskFingerprint, tokens as taskTokens } from "../../slack/src/fingerprint.js";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
+import { SourceNotConnected } from "@brain/connectors/live";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
   type SupabaseIndex } from "@brain/retrieval";
@@ -208,7 +209,11 @@ export class Brain {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(() => this.syncSource(source)).catch(async error => {
       const connection = this.connections.get(source);
-      if (connection && connection.status !== "Not connected") {
+      // With no credential at all the source simply isn't connected; marking it Error would have it retried forever.
+      if (connection && connection.status !== "Not connected" && error instanceof SourceNotConnected) {
+        connection.status = "Not connected";
+        connection.error = undefined;
+      } else if (connection && connection.status !== "Not connected") {
         connection.status = "Error";
         connection.error = error instanceof Error ? error.message : "Sync failed";
       }

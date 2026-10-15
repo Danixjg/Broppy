@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadMockCorpus } from "@brain/connectors";
-import { LiveConnector } from "@brain/connectors/live";
+import { LiveConnector, SourceNotConnected } from "@brain/connectors/live";
 import { Brain } from "./brain.js";
 
 describe("source resilience", () => {
@@ -56,5 +56,13 @@ describe("source resilience", () => {
     expect(brain.index.documents.has("jira:PAY-101")).toBe(true);
     expect(brain.states.get("jira")?.lastSuccessfulSyncAt).toBeDefined();
     expect(brain.connections.get("slack")?.status).toBe("Error");
+  });
+
+  it("marks a source with no credential at all as not connected, so background sync stops retrying it", async () => {
+    const brain = new Brain();
+    brain.connections.get("slack")!.status = "Error";
+    vi.spyOn(brain.connectors.slack, "discover").mockRejectedValue(new SourceNotConnected());
+    await expect(brain.sync("slack")).rejects.toThrow("Source is not connected");
+    expect(brain.connections.get("slack")).toMatchObject({ status: "Not connected", error: undefined });
   });
 });
