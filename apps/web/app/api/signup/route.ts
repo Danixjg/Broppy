@@ -11,7 +11,7 @@ const back = (request: NextRequest, params: Record<string, string>, kind?: Retur
 };
 
 // The page shows fixed wording for each of these, so nothing typed into a link can appear on it as a message.
-const reasonFor = (status: number) => status === 400 ? "invalid" : status === 403 ? "code" : status === 429 ? "limit" : "busy";
+const reasonFor = (status: number) => status === 400 ? "invalid" : status === 403 ? "code" : status === 409 ? "taken" : status === 429 ? "limit" : "busy";
 
 const text = (data: FormData, name: string, max: number) => String(data.get(name) ?? "").slice(0, max);
 

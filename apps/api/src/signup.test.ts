@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ManagementError } from "./auth0-management.js";
+import { NameTaken } from "./companies.js";
 import { companyAddress, isPersonalAddress, Limiter, newCompanyAddress, personalAddress, Signup, SignupError } from "./signup.js";
 
 function setup(overrides: { create?: (input: { name: string; displayName: string }) => Promise<{ id: string; name: string; displayName: string }>; invite?: () => Promise<void>; inUse?: boolean; code?: string; open?: boolean } = {}) {
@@ -12,7 +13,9 @@ function setup(overrides: { create?: (input: { name: string; displayName: string
     forOrg: vi.fn(() => ({ invite }))
   };
   const companies = { emailInUse: vi.fn(async () => overrides.inUse === true), register: vi.fn(async () => {}), remove: vi.fn(async () => {}),
-    isKnown: vi.fn(async (id: string) => id === "org_1") };
+    isKnown: vi.fn(async (id: string) => id === "org_1"),
+    withName: vi.fn(async (typed: string) => { const name = typed.trim().replace(/\s+/g, " ").toLowerCase(); return name === "taken co" ? [{ orgId: "org_5", name: "Taken Co" }]
+      : name === "twins" ? [{ orgId: "org_1", name: "Twins" }, { orgId: "org_9", name: "Twins" }] : []; }) };
   const add = vi.fn(async () => ({}));
   const created = vi.fn();
   const signup = new Signup(management as any, companies as any, () => ({ add }) as any,
@@ -49,12 +52,21 @@ describe("a company signing itself up", () => {
     expect(created).toHaveBeenCalledWith("org_1");
   });
 
-  it("lets two companies share a name, each at its own address", async () => {
-    const { signup, management, add } = setup();
-    await signup.create({ company: "Acme", name: "D", email: "d@gmail.test" });
-    await signup.create({ company: "Acme", name: "E", email: "e@gmail.test" });
-    expect(management.createOrganization).toHaveBeenCalledTimes(2);
-    expect(add).toHaveBeenCalledTimes(2);
+  it("refuses a company name another company has, before creating anything", async () => {
+    const { signup, management, add, invite } = setup();
+    // "Taken Co" belongs to another company here; capitals and spaces don't make it a different name.
+    await expect(signup.create({ company: " TAKEN   co ", name: "D", email: "d@gmail.test" })).rejects.toMatchObject({ status: 409, message: expect.stringContaining("already taken") });
+    expect(management.createOrganization).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+    expect(invite).not.toHaveBeenCalled();
+  });
+
+  it("undoes everything when the database's name rule catches two sign-ups at the same moment", async () => {
+    const { signup, management, companies, add } = setup();
+    companies.register.mockRejectedValueOnce(new NameTaken());
+    await expect(signup.create({ company: "Brand New", name: "D", email: "d@gmail.test" })).rejects.toMatchObject({ status: 409 });
+    expect(management.deleteOrganization).toHaveBeenCalledWith("org_1");
+    expect(add).not.toHaveBeenCalled();
   });
 
   it("tries another ending when an address is in use, and gives up after three", async () => {
@@ -122,6 +134,8 @@ describe("a company signing itself up", () => {
     expect(await signup.find("ACME")).toEqual({ organization: "org_1", name: "Acme" });
     expect(management.findOrganization).toHaveBeenCalledWith("acme");
     expect(await signup.find("nobody")).toBeUndefined();
+    // A name shared by several companies can't say which one.
+    expect(await signup.find("Twins")).toEqual({ ambiguous: true });
     expect(await signup.find("!")).toBeUndefined();
     management.findOrganization.mockResolvedValueOnce({ id: "org_2", name: "other", displayName: "Other" });
     expect(await signup.find("other")).toBeUndefined();

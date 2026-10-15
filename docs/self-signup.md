@@ -46,7 +46,7 @@ listing it, that organization is left holding its name; delete it in the Auth0 d
 
 ## Switching it on
 
-Apply `infra/supabase/migrations/012_company_signup.sql` and `013_workspace_kind.sql` first (fresh projects:
+Apply `infra/supabase/migrations/012_company_signup.sql`, `013_workspace_kind.sql` and `015_unique_company_names.sql` first (fresh projects:
 `infra/supabase/schema.sql`).
 
 **Auth0**
@@ -91,9 +91,11 @@ Redeploy both projects.
   that was only invited and never signed in doesn't count, so nobody can use a stranger's address to stop them signing their
   own company up (they get an invitation they can ignore). The answers match but not the time they take, so a patient caller
   could still tell the two apart.
-- Company names are not unique and prove nothing: anyone can sign up a company called "Aspire". The real Aspire still
-  signs up and gets its own address, but invitations from the other one look just as real. Companies that signed up
-  before addresses had a random ending keep their plain address.
+- Company names are unique, ignoring capitals and spaces (migration 015 enforces it in the database; personal workspaces
+  don't count). A second sign-up with a name in use is refused with "That company name is already taken. If it's your
+  team's, ask its admin to invite you." Names still prove nothing: whoever signs up first gets a name, so someone could
+  take "Aspire" before Aspire does. Use `SIGNUP_ACCESS_CODE` while that matters; a way for a company that proves its
+  email domain to reclaim its name is not built yet. Companies keep an address with a random ending behind the scenes.
 - A company's AI model can be Anthropic or OpenAI only. The "OpenAI-compatible" option with an address of its own is
   refused for companies that signed up, because the API would call that address from inside its own network. Your existing
   company keeps it.

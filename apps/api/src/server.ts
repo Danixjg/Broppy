@@ -354,6 +354,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       if (signup && url.pathname === "/v1/companies/find" && request.method === "GET") {
         const email = url.searchParams.get("email");
         const found = email !== null ? await signup.findPersonal(email) : await signup.find(url.searchParams.get("name"));
+        if (found && "ambiguous" in found) return send(response, 409, { error: "Several companies have that name.", code: "ambiguous" });
         return send(response, found ? 200 : 404, found ?? { error: "We couldn't find that company." });
       }
 

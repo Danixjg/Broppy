@@ -2,6 +2,9 @@ import { normalizeEmail } from "./user-directory.js";
 
 interface Config { url: string; secretKey: string; fetch?: typeof fetch }
 
+/** Another company already has this name (the database's unique name rule refused it). */
+export class NameTaken extends Error { constructor() { super("Company name taken"); } }
+
 /** A company (people invited by its admins) or a personal workspace (one person's own, with no team). */
 export type WorkspaceKind = "company" | "personal";
 
@@ -50,6 +53,7 @@ export class Companies {
       body: JSON.stringify({ org_id: company.orgId, name: company.name, created_by_email: normalizeEmail(company.createdBy), status: "active",
         kind: company.kind ?? "company" })
     });
+    if (response.status === 409) throw new NameTaken();
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
   }
 
@@ -72,6 +76,24 @@ export class Companies {
       method: "PATCH", headers: this.headers(), signal: AbortSignal.timeout(5000), body: JSON.stringify({ kind })
     });
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+  }
+
+  /**
+   * Active companies (not personal workspaces) whose name is this one, ignoring case and spacing. At most two are
+   * returned: one is an answer, two means the name alone can't say which.
+   */
+  async withName(name: string): Promise<Array<{ orgId: string; name: string }>> {
+    const wanted = name.trim().replace(/\s+/g, " ");
+    if (wanted.length < 2 || wanted.length > 60) return [];
+    const pattern = wanted.replace(/[\\%_*]/g, "\\$&");
+    const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?select=org_id,name&name=ilike.${encodeURIComponent(pattern)}&status=eq.active&or=(kind.is.null,kind.eq.company)&limit=2`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+    const rows = await response.json() as Array<{ org_id?: unknown; name?: unknown }>;
+    return Array.isArray(rows) ? rows.filter(row => typeof row.org_id === "string" && /^org_[A-Za-z0-9]{1,64}$/.test(row.org_id)
+      && typeof row.name === "string" && row.name.trim().replace(/\s+/g, " ").toLowerCase() === wanted.toLowerCase())
+      .map(row => ({ orgId: row.org_id as string, name: row.name as string })) : [];
   }
 
   async remove(orgId: string): Promise<void> {

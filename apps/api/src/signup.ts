@@ -1,7 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import type { Auth0Management } from "./auth0-management.js";
 import { ManagementError } from "./auth0-management.js";
-import type { Companies } from "./companies.js";
+import { NameTaken, type Companies } from "./companies.js";
 import { normalizeEmail, type UserDirectory } from "./user-directory.js";
 
 export class SignupError extends Error {
@@ -72,6 +72,7 @@ export interface SignupSettings {
 }
 
 const HOUR = 3_600_000;
+const NAME_TAKEN = "That company name is already taken. If it's your team's, ask its admin to invite you; otherwise add a word to make it yours.";
 
 /**
  * A company signing itself up. It gets its own Auth0 organization, a row in the list of companies, and its first admin,
@@ -120,6 +121,8 @@ export class Signup {
       // Someone who already belongs to a company is not made the admin of another by a form. Answer as if it worked.
       if (await this.companies.emailInUse(email)) return { sent: true };
 
+      // One company per name. Checked here to explain it; the database rule catches two sign-ups at the same moment.
+      if (!personal && (await this.companies.withName(company)).length) throw new SignupError(409, NAME_TAKEN);
       const created = personal ? await this.createPersonalOrganization(email, name) : await this.createOrganization(company);
       if (!created) return { sent: true };
       try {
@@ -130,6 +133,7 @@ export class Signup {
         await this.directoryFor(created.id).add({ id: adminId(email), name, email, role: "admin", groups: [] });
       } catch (error) {
         await this.undo(created.id);
+        if (error instanceof NameTaken) throw new SignupError(409, NAME_TAKEN);
         if (error instanceof ManagementError) throw new SignupError(502, "We couldn't send your invitation email. Try again in a minute.");
         throw error;
       }
@@ -189,13 +193,21 @@ export class Signup {
    * The Auth0 organization and display name for a company address typed at sign-in, if it is one of ours. Companies that
    * signed up before addresses had a random ending keep their plain one, which is found the same way.
    */
-  async find(address: unknown): Promise<{ organization: string; name: string } | undefined> {
-    const short = companyAddress(clean(address, 80));
+  /**
+   * The company someone typed at sign-in: its address, or its name when exactly one company has that name. When several
+   * share the name, the answer says so, and the address is needed to tell them apart.
+   */
+  async find(typed: unknown): Promise<{ organization: string; name: string } | { ambiguous: true } | undefined> {
+    const text = clean(typed, 80);
+    const short = companyAddress(text);
     if (short.length < 2) return undefined;
     if (!this.limiter.allow("find", 600, 60_000)) throw new SignupError(429, "Too many tries. Wait a moment and try again.");
     const found = await this.management.findOrganization(short);
-    if (!found || !await this.companies.isKnown(found.id)) return undefined;
-    return { organization: found.id, name: found.displayName };
+    if (found && await this.companies.isKnown(found.id)) return { organization: found.id, name: found.displayName };
+    const named = await this.companies.withName(text);
+    if (named.length > 1) return { ambiguous: true };
+    if (named.length === 1) return { organization: named[0].orgId, name: named[0].name };
+    return undefined;
   }
 }
 
