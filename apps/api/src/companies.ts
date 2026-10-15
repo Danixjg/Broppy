@@ -121,11 +121,12 @@ export class Companies {
   }
 
   /**
-   * The background sync's shared secret, kept in Supabase Vault and readable only with the service key, so it never has
-   * to be copied by hand. Undefined when it hasn't been created.
+   * A secret Broppy keeps in Supabase Vault (the background sync's, or the Slack service secret), read with the service
+   * key through a function only the service role may call, so it never has to be copied by hand. Undefined when it
+   * hasn't been created.
    */
-  async syncCronSecret(): Promise<string | undefined> {
-    const response = await this.transport(`${this.baseUrl}/rest/v1/rpc/broppy_sync_cron_secret`, {
+  async vaultSecret(name: "broppy_sync_cron_secret" | "broppy_slack_service_token"): Promise<string | undefined> {
+    const response = await this.transport(`${this.baseUrl}/rest/v1/rpc/${name}`, {
       method: "POST", headers: this.headers(), body: "{}", signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) return undefined;

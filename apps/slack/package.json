@@ -6,5 +6,8 @@
   "dependencies": {
     "@brain/rust-core": "workspace:*",
     "@vercel/functions": "^3.9.11"
+  },
+  "exports": {
+    "./server": "./src/server.ts"
   }
 }

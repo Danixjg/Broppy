@@ -9,6 +9,7 @@
     "@brain/fga-adapter": "workspace:*",
     "@brain/retrieval": "workspace:*",
     "@brain/rust-core": "workspace:*",
+    "@brain/slack": "workspace:*",
     "@brain/types": "workspace:*",
     "@vercel/functions": "2.2.13",
     "jose": "6.1.3"

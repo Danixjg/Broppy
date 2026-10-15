@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-016 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-017 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -895,3 +895,14 @@ select cron.schedule('broppy-background-sync', '*/10 * * * *', $job$
     body := '{}'::jsonb,
     timeout_milliseconds := 60000);
 $job$);
+
+-- Slack service secret (migration 017), generated in Vault.
+select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'broppy_slack_service_token')
+where not exists (select 1 from vault.secrets where name = 'broppy_slack_service_token');
+
+create or replace function public.broppy_slack_service_token() returns text
+language sql stable security definer set search_path = '' as $$
+  select decrypted_secret from vault.decrypted_secrets where name = 'broppy_slack_service_token'
+$$;
+revoke all on function public.broppy_slack_service_token() from public, anon, authenticated;
+grant execute on function public.broppy_slack_service_token() to service_role;

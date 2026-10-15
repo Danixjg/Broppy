@@ -1,3 +1,4 @@
+import slackHandler from "@brain/slack/server";
 import { SlackInstallationOAuth } from "./slack-installation.js";
 import { slackUserIdsFromEnv } from "./slack-identity.js";
 import { atlassianAccountIds } from "./atlassian-identity.js";
@@ -206,6 +207,11 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   const management = hasAuth0 ? Auth0Management.fromEnv() : undefined;
   const signupMode = hasAuth0 ? Signup.mode() : "off";
   const companies = signupMode !== "off" ? Companies.fromEnv() : undefined;
+  // The Slack service secret is kept in Supabase Vault (migration 017) unless it is set on the API itself.
+  if (companies && process.env.SLACK_APP_ID && !process.env.SLACK_SERVICE_TOKEN) {
+    const token = await companies.vaultSecret("broppy_slack_service_token").catch(() => undefined);
+    if (token) process.env.SLACK_SERVICE_TOKEN = token;
+  }
   if (signupMode !== "off") {
     // Another company's workspace reads its sources through the same Broppy app registrations, so those must be set.
     if (!companies || !management || !oauthConfigs || !process.env.AUTH0_SIGNUP_CONNECTION_ID) {
@@ -328,7 +334,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   let cronSecret: { value?: string; at: number } = { at: 0 };
   const vaultCronSecret = async (): Promise<string | undefined> => {
     if (!companies) return undefined;
-    if (Date.now() - cronSecret.at > 300_000) cronSecret = { value: await companies.syncCronSecret().catch(() => undefined), at: Date.now() };
+    if (Date.now() - cronSecret.at > 300_000) cronSecret = { value: await companies.vaultSecret("broppy_sync_cron_secret").catch(() => undefined), at: Date.now() };
     return cronSecret.value;
   };
 
@@ -938,6 +944,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
 let serverless: Promise<ApiServer> | undefined;
 
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  // Slack's events, slash commands and button clicks are answered by the Slack gateway in the same deployment, so one
+  // Vercel project serves both. The gateway reads its installations from Supabase like the API does.
+  if (process.env.SLACK_APP_ID && new URL(request.url ?? "/", "http://localhost").pathname.startsWith("/slack/")) return slackHandler(request, response);
   serverless ??= createApiServer({ startOrchestrator: false }).catch(error => {
     serverless = undefined;
     throw error;
