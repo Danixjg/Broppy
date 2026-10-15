@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
   // Only a program fills this in; people never see it.
   if (text(form, "website", 100)) return back(request, { sent: entered.email }, kind);
   const visitor = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || request.headers.get("x-real-ip") || "unknown";
-  if (!allow(`signup:${visitor}`, 5, 3_600_000)) return back(request, { ...entered, error: "limit" }, kind);
+  // Generous per network: a whole event venue can share one address.
+  if (!allow(`signup:${visitor}`, 30, 3_600_000)) return back(request, { ...entered, error: "limit" }, kind);
   if (!origin) return back(request, { ...entered, error: "busy" }, kind);
   try {
     const response = await fetch(new URL("/v1/signup", origin), { method: "POST", redirect: "error", cache: "no-store",

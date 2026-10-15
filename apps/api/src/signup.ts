@@ -111,7 +111,7 @@ export class Signup {
     if (!personal && companyAddress(company).length < 2) throw new SignupError(400, "Use letters or numbers in your company's name.");
     if (!name) throw new SignupError(400, "Enter your name.");
     if (!EMAIL.test(email) || email.length > 254) throw new SignupError(400, "Enter a valid work email address.");
-    if (!this.limiter.allow("all", this.settings.perHour ?? 20, HOUR) || !this.limiter.allow(`email:${email}`, 3, HOUR)) {
+    if (!this.limiter.allow("all", this.settings.perHour ?? 200, HOUR) || !this.limiter.allow(`email:${email}`, 3, HOUR)) {
       throw new SignupError(429, "Too many sign-ups just now. Try again in a little while.");
     }
     // The same email asking twice at once makes one company, not two.

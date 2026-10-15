@@ -36,6 +36,7 @@ describe("signed Slack intake", () => {
     const ctx = setup();
     await handleSlack(ctx.deps, interaction({ type: "message_action", callback_id: "track_broppy", user: { id: "UDAVID" }, team: { id: "TONE" }, channel: { id: "CDB" },
       message: { text: "I will increase replicas by Friday", ts: "1791195720.001", user: "UMAYA" } }));
+    await Promise.all(ctx.deferred.splice(0)); // the card is sent after Slack's three-second reply
     const ref = JSON.parse(buttonValue(ctx.calls.ephemeral.at(-1))); const p = await ctx.deps.store.getProposal(ref.id);
     expect(p).toMatchObject({ authorSlackId: "UMAYA", suggestion: { a: "UMAYA", t: "Increase replicas", d: "2026-10-09" } });
     expect(ctx.calls.ephemeral.at(-1).user).toBe("UMAYA");
@@ -79,13 +80,14 @@ describe("durable Jira actions", () => {
     if (reason === "missing audience") ctx.deps.destinations![0].allowedSlackIds = [];
     if (reason === "broad audience") ctx.deps.destinations![0].allowedSlackIds.push("UDAVID");
     if (reason === "unapproved summary") ctx.deps.destinations![0].disclosureFields = ["permalink"];
-    const value = buttonValue(await suggestion(ctx)); await click(ctx, value);
+    // The card offers no "Track in Jira" without an approved audience; a click sent anyway is still refused.
+    const value = buttonValue(await suggestion(ctx), "edit_task"); await click(ctx, value);
     expect(ctx.calls.created).toHaveLength(0); expect(ctx.calls.messages).toHaveLength(0); expect(ctx.calls.legacy).toHaveLength(0);
   });
   it("omits the source pointer unless the destination policy approves that field", async () => {
     const ctx = setup(); ctx.deps.destinations![0].disclosureFields = ["summary"];
-    const eph = await suggestion(ctx); expect(eph.blocks[0].text.text).toContain("Declared Jira recipients: <@UMAYA>");
-    expect(eph.blocks[0].text.text).not.toContain("Approved source pointer"); await click(ctx, buttonValue(eph));
+    const eph = await suggestion(ctx); expect(eph.blocks[0].text.text).toContain("Jira task visible to: <@UMAYA>");
+    expect(eph.blocks[0].text.text).not.toContain("From: "); await click(ctx, buttonValue(eph));
     expect(ctx.calls.created[0].issue.description).not.toContain("Source:"); expect(ctx.calls.created[0].issue.description).toContain("Approved summary: Raise replica storage quota");
   });
   it("serializes simultaneous approvals of the same fingerprint at distinct source timestamps", async () => {

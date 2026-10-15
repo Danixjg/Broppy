@@ -103,6 +103,10 @@ export class SlackGateway {
       return this.revoked(installation);
     }
     const deps = await this.forTeam(teamId);
-    return deps ? handleSlack(deps, request) : { status: 403 };
+    if (deps) return handleSlack(deps, request);
+    // A workspace with no current installation: a person running /broppy gets a plain answer, not Slack's dispatch error.
+    if (request.path.endsWith("/commands")) return { status: 200, body: { response_type: "ephemeral",
+      text: "Broppy isn't connected to this Slack workspace right now. Your company's Broppy admin can add it again from Broppy's Connectors page." } };
+    return { status: 403 };
   }
 }

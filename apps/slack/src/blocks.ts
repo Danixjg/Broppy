@@ -27,12 +27,13 @@ export function suggestionBlocks(s: Suggestion, assigneeName: string, openUrl: s
   const line = ["Looks like a task: *" + escape(s.t) + "*", escape(assigneeName),
     ...(s.d ? [`due ${formatDue(s.d)}`] : []), s.p ? `Jira project ${s.p}` : "no Jira project yet"].join(" · ");
   return [
-    { type: "section", text: text(line + "\nJira receives the reviewed summary, owner, and due date." + (sourcePointer ? "\nApproved source pointer: " + escape(sourcePointer) : "")
-      + "\nDeclared Jira recipients: " + (audience.length ? audience.map(id => `<@${id}>`).join(", ") : "No approved audience. Creation is disabled.")) },
+    { type: "section", text: text(line + "\nJira receives the reviewed summary, owner, and due date." + (sourcePointer ? "\nFrom: " + escape(sourcePointer) : "")
+      + (audience.length ? "\nJira task visible to: " + audience.map(id => `<@${id}>`).join(", ") : "\nCreating Jira tasks from Slack isn't set up for this workspace yet.")) },
     {
       type: "actions", block_id: "task_suggestion",
       elements: [
-        { type: "button", action_id: "track_task", style: "primary", text: { type: "plain_text", text: "Track in Jira" }, value: JSON.stringify(reference) },
+        // No button that can only fail: without a declared audience, creation is refused.
+        ...(audience.length ? [{ type: "button", action_id: "track_task", style: "primary", text: { type: "plain_text", text: "Track in Jira" }, value: JSON.stringify(reference) }] : []),
         { type: "button", action_id: "edit_task", text: { type: "plain_text", text: "Edit" }, value: JSON.stringify(reference) },
         { type: "button", action_id: "open_in_broppy", text: { type: "plain_text", text: "Open in Broppy ↗" }, url: openUrl },
         { type: "button", action_id: "dismiss_task", text: { type: "plain_text", text: "Not a task" }, value: JSON.stringify(reference) }

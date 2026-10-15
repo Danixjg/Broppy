@@ -128,11 +128,11 @@ async function answer(deps: Deps, slackUser: string, question: string, responseU
     if (error instanceof InactiveInstallationError) return;
     await requireCurrent(deps.workspace);
     if (error instanceof NotLinkedError) {
-      await deps.slack.respond(responseUrl, { ...ephemeral("Your Slack account isn't linked to a Broppy user yet. Ask an admin to add your Slack ID to your Broppy profile."), replace_original: true });
+      await deps.slack.respond(responseUrl, { ...ephemeral("Broppy couldn't match your Slack email to a Broppy account. Sign in to Broppy once with the same email you use in Slack, or ask your company's Broppy admin to add you."), replace_original: true });
       return;
     }
     console.error("broppy answer failed", error);
-    await deps.slack.respond(responseUrl, { ...ephemeral("Broppy couldn't answer that just now."), replace_original: true });
+    await deps.slack.respond(responseUrl, { ...ephemeral("Broppy couldn't answer that just now. Please try again in a minute."), replace_original: true });
   }
 }
 
@@ -149,7 +149,12 @@ async function interactions(deps: Deps, payload: any): Promise<SlackResponse> {
     const channel = payload.channel?.id;
     const ts = payload.message?.ts;
     if (!text || typeof channel !== "string" || typeof ts !== "string") return ok();
-    await offer(deps, { text, channel, ts, threadTs: payload.message.thread_ts, authorSlackId: payload.message.user, teamId: payload.team?.id }, user);
+    // Slack waits only three seconds for this reply; the review card follows once it is ready.
+    deps.defer(offer(deps, { text, channel, ts, threadTs: payload.message.thread_ts, authorSlackId: payload.message.user, teamId: payload.team?.id }, user)
+      .catch(async error => {
+        console.error("track with broppy failed", error);
+        if (payload.response_url) await deps.slack.respond(payload.response_url, ephemeral("Broppy couldn't review that message just now. Please try again in a minute.")).catch(() => undefined);
+      }));
     return ok();
   }
   if (payload?.type === "view_submission" && payload.view?.callback_id === "edit_commitment") return editSubmission(deps, payload, user);
@@ -177,15 +182,22 @@ async function interactions(deps: Deps, payload: any): Promise<SlackResponse> {
     await deps.slack.openView(payload.trigger_id, editView(proposal)); return ok();
   }
   if (action.action_id === "link_task" && typeof reference.issueKey !== "string") return ok();
-  try {
-    const line = await confirmProposal(deps, proposal, user, action.action_id === "link_task" ? reference.issueKey : undefined);
-    await deps.slack.respond(payload.response_url, { ...ephemeral(line), replace_original: true });
-    const current = await deps.store.getProposal(proposal.id);
-    if (current?.status === "pending" && /choose Link existing/.test(line)) await showProposal(deps, current);
-  } catch (error) {
-    if (error instanceof NotLinkedError) { await deps.slack.respond(payload.response_url, ephemeral("Your Slack account must map to an active Broppy user.")); return ok(); }
-    throw error;
-  }
+  // Creating the Jira task takes longer than Slack's three seconds: acknowledge now, report through response_url.
+  deps.defer((async () => {
+    try {
+      const line = await confirmProposal(deps, proposal, user, action.action_id === "link_task" ? reference.issueKey : undefined);
+      await deps.slack.respond(payload.response_url, { ...ephemeral(line), replace_original: true });
+      const current = await deps.store.getProposal(proposal.id);
+      if (current?.status === "pending" && /choose Link existing/.test(line)) await showProposal(deps, current);
+    } catch (error) {
+      if (error instanceof NotLinkedError) {
+        await deps.slack.respond(payload.response_url, ephemeral("Broppy couldn't match your Slack email to a Broppy account. Sign in to Broppy once with the same email you use in Slack."));
+        return;
+      }
+      console.error("slack task action failed", error);
+      await deps.slack.respond(payload.response_url, ephemeral("Broppy couldn't finish this just now. Any Jira task it already created is kept; try again to check.")).catch(() => undefined);
+    }
+  })());
   return ok();
 }
 

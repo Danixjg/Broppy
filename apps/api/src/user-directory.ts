@@ -159,7 +159,12 @@ export class UserDirectory {
 
   /** The user whose Slack identity in the directory (their Slack email) is this one. Several matches are ambiguous, so none. */
   async bySlackIdentity(identity: string): Promise<User | undefined> {
-    const matches = await this.page(0, `&platform_identities->>slack=eq.${encodeURIComponent(identity)}`, 2);
-    return matches.length === 1 && matches[0].platformIdentities?.slack === identity ? matches[0] : undefined;
+    // Emails differ only in letter case between Slack and Broppy often enough (Jane@Acme.com, jane@acme.com) that the
+    // match ignores case. ilike's wildcards are escaped, and the rows are checked exactly below.
+    const wanted = identity.trim().toLowerCase();
+    const pattern = wanted.replace(/[\\%_]/g, character => `\\${character}`);
+    const matches = (await this.page(0, `&platform_identities->>slack=ilike.${encodeURIComponent(pattern)}`, 3))
+      .filter(user => user.platformIdentities?.slack?.trim().toLowerCase() === wanted);
+    return matches.length === 1 ? matches[0] : undefined;
   }
 }
