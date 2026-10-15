@@ -1011,6 +1011,10 @@ td button {
   color:#943b35;
   font-weight:600
 }
+.health-grid .surface p.warn {
+  color:#8a5a00;
+  font-weight:600
+}
 .health-grid .surface a {
   font-size:.8rem
 }

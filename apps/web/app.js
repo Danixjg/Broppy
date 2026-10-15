@@ -94,7 +94,8 @@ function role() { return state.authMode === "demo" ? roles[$("user").value] || "
 // load: whether opening Compliance loads the whole audit; a caller about to search it passes false.
 // Source controls edit the practice data and its demo people directly; a company on its live tools changes access at
 // the tools themselves, so the page isn't shown there.
-const practiceControls = () => role() === "admin" && state.workspace.capabilities.mode !== "live";
+// Shown only once the workspace has said it is the demo: a slow or failed load must never show demo people in a real company.
+const practiceControls = () => role() === "admin" && state.workspace.capabilities.mode === "demo";
 function setView(view, { load = true } = {}) {
   if (view === "admin" && !practiceControls()) view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
@@ -120,19 +121,8 @@ function resetIdentity() {
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
   $("adminTab").hidden = !practiceControls();
-  let connectorLink = document.getElementById("connectorSettings");
-  if (!connectorLink) { connectorLink = node("a", "", "Connectors settings"); connectorLink.id = "connectorSettings"; $("adminView").prepend(connectorLink); }
-  connectorLink.href = `./connectors.html?user=${encodeURIComponent($("user").value)}`;
-  connectorLink.hidden = role() !== "admin";
-  let peopleLink = document.getElementById("peopleSettings");
-  if (!peopleLink) { peopleLink = node("a", "", "People and access"); peopleLink.id = "peopleSettings"; peopleLink.style.marginLeft = "1rem"; connectorLink.after(peopleLink); }
-  peopleLink.href = "./people.html";
-  // Adding people is a signed-in admin's job; the public demo has no directory to add to.
-  peopleLink.hidden = role() !== "admin" || state.authMode === "demo";
-  let setupLink = document.getElementById("setupGuide");
-  if (!setupLink) { setupLink = node("a", "", "Guided setup"); setupLink.id = "setupGuide"; setupLink.style.marginLeft = "1rem"; peopleLink.after(setupLink); }
-  setupLink.href = "./setup.html";
-  setupLink.hidden = role() !== "admin" || state.authMode === "demo";
+  // Settings links in the top bar, for admins. The public demo has no directory or tools of its own to set up.
+  $("adminLinks").hidden = role() !== "admin" || state.authMode === "demo";
   $("complianceTab").hidden = role() !== "compliance";
   $("retrySync").hidden = role() !== "admin";
   setView("workspace");
@@ -590,7 +580,14 @@ async function loadWorkspace() {
     renderWorkspace();
     if (practiceControls()) await loadNativePermissions();
     if (generation !== state.identity) return;
-    $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.${result.importNotice ? ` ${result.importNotice}` : ""}`;
+    if (!state.docs.length && state.workspace.capabilities.mode === "live") {
+      // Nothing read yet is not the same as "not allowed": say what to do next.
+      const notice = $("workspaceNotice"); clear(notice);
+      if (role() === "admin") {
+        notice.append("Broppy hasn't read anything yet. ");
+        const link = node("a", "", "Connect a tool or choose what Broppy reads"); link.href = "./setup.html?step=read"; notice.append(link, ".");
+      } else notice.textContent = "Broppy hasn't read anything you can see yet. Your admin connects tools and chooses what Broppy reads.";
+    } else $("workspaceNotice").textContent = `${state.docs.length} accessible sources · Contents and links are limited to this identity.${result.importNotice ? ` ${result.importNotice}` : ""}`;
     if (state.selected) { const doc = state.docs.find(item => item.docId === state.selected); if (doc) (doc.source === "jira" ? openTask : selectDoc)(doc, state.selectedQuotes); else { clear($("selectedDetail")); $("selectedDetail").hidden = true; state.selected = null; state.selectedQuotes = []; } }
     applyLandingPreference();
     applyDeepLink();
@@ -598,8 +595,17 @@ async function loadWorkspace() {
       state.landingApplied = true;
       if ($("landingPreference").value !== "master" || window.innerWidth <= 700) requestAnimationFrame(focusLanding);
     }
+    state.workspaceRetries = 0;
     return true;
-  } catch (error) { if (generation === state.identity) $("workspaceNotice").textContent = `Workspace unavailable: ${error.message}`; return false; }
+  } catch (error) {
+    if (generation !== state.identity) return false;
+    // A slow start or a dropped connection is tried again on its own, and the person can retry at any time.
+    const notice = $("workspaceNotice"); clear(notice);
+    notice.append(`${error.message} `);
+    const retry = node("button", "link-button", "Try again"); retry.type = "button"; retry.onclick = () => loadWorkspace(); notice.append(retry);
+    if ((state.workspaceRetries = (state.workspaceRetries ?? 0) + 1) <= 3) setTimeout(() => { if (generation === state.identity) loadWorkspace(); }, 3000 * state.workspaceRetries);
+    return false;
+  }
 }
 function applyDeepLink() {
   if (deepLinkApplied) return;
@@ -800,15 +806,24 @@ function timeAgo(value) {
   return "";
 }
 // One plain line for where a source stands, from the API's view of this company only.
+// What went wrong, in words an admin can act on; the source's own error text is kept for the tooltip.
+function plainSourceError(error = "") {
+  if (/credential was rejected|reconnect the source|\(401\)|\(403\)/i.test(error)) return "Broppy's access was turned off or expired. Reconnect it.";
+  if (/Reading stopped before it finished/i.test(error)) return "Reading stopped part-way. It carries on at the next sync, or press Sync now.";
+  if (/\(429\)|rate/i.test(error)) return "The tool asked Broppy to slow down. It tries again at the next sync.";
+  if (/timed? ?out|aborted|fetch failed|\(5\d\d\)/i.test(error)) return "The tool didn't answer in time. Broppy tries again at the next sync.";
+  return "The last sync didn't finish. Press Sync now, or reconnect it.";
+}
 function healthLine(item) {
-  if (item.status === "Not connected") return { text: "Not connected", kind: "muted" };
-  if (item.status === "Error") return { text: `Needs attention${item.error ? `: ${item.error}` : ""}`, kind: "bad" };
+  if (item.status === "Not connected") return { text: role() === "admin" ? "Not connected" : "Not connected · your admin can connect it", kind: "muted" };
+  if (item.status === "Error") return { text: `Needs attention: ${plainSourceError(item.error)}`, kind: "bad", detail: item.error };
   if (item.job?.status === "running" || item.status === "Importing") {
     const done = item.job ? item.job.indexed : 0;
     return { text: item.job?.found ? `Reading · ${done} of ${item.job.found} items` : "Reading…", kind: "" };
   }
   if (item.job?.status === "failed") return { text: "The last import failed. Try Sync now, or reconnect it.", kind: "bad" };
-  if ((!item.job || item.scope === "none") && item.items === 0) return { text: "Connected · reading nothing yet", kind: "" };
+  if ((!item.job || item.scope === "none") && item.items === 0) return { text: "Connected · reading nothing yet. Choose what Broppy reads.", kind: "warn" };
+  if (item.items === 0) return { text: "Connected · 0 items found. Check what Broppy reads, and that the connected account can see something.", kind: "warn" };
   return { text: `Ready · ${item.items} item${item.items === 1 ? "" : "s"}${item.job?.failed ? ` · ${item.job.failed} couldn't be read` : ""}`, kind: "good" };
 }
 async function loadHealth() {
@@ -818,7 +833,7 @@ async function loadHealth() {
     clear($("healthCards"));
     for (const item of result.sources || []) {
       const card = node("div", "surface"); appendText(card, "h2", "", sourceName(item.source));
-      const line = healthLine(item); appendText(card, "p", line.kind, line.text);
+      const line = healthLine(item); const lineNode = node("p", line.kind, line.text); if (line.detail) lineNode.title = line.detail; card.append(lineNode);
       if (item.status !== "Not connected") {
         const synced = node("p", "muted", item.lastSync ? `Last synced ${timeAgo(item.lastSync) || fmtDate(item.lastSync)}` : "Not synced yet");
         if (item.lastSync) synced.title = fmtDate(item.lastSync);
@@ -833,8 +848,15 @@ async function loadHealth() {
       $("healthCards").append(card);
     }
     const connected = (result.sources || []).filter(item => item.status !== "Not connected").length;
-    $("healthStatus").textContent = `${connected} of ${(result.sources || []).length} tools connected · ${result.auditEntries || 0} audit events`;
-  } catch (error) { if (generation === state.identity) $("healthStatus").textContent = error.message; }
+    $("healthStatus").textContent = `${connected} of ${(result.sources || []).length} tools connected`;
+    // While something is being read, keep the page current on its own.
+    clearTimeout(state.healthTimer);
+    if ((result.sources || []).some(item => item.job?.status === "running" || item.status === "Importing")) state.healthTimer = setTimeout(() => { if (state.view === "operations" && generation === state.identity) loadHealth(); }, 4000);
+  } catch (error) {
+    if (generation !== state.identity) return;
+    $("healthStatus").textContent = `${error.message} Trying again…`;
+    clearTimeout(state.healthTimer); state.healthTimer = setTimeout(() => { if (state.view === "operations" && generation === state.identity) loadHealth(); }, 5000);
+  }
 }
 function eventSummary(entry) {
   const data = entry.data && typeof entry.data === "object" ? entry.data : {};
@@ -1013,7 +1035,7 @@ $("queryForm").addEventListener("submit", async event => {
   try {
     const result = await ask(question, response); if (generation !== state.identity) return;
     if (role() === "compliance" && looksLikeAuditQuestion(question)) appendAuditHint(response, question);
-    $("queryStatus").textContent = result.kind === "action" ? "Review the ticket, then confirm." : result.kind === "chat" ? "" : result.citations?.length ? "Answer grounded in authorized sources." : "No accessible result."; $("question").value = "";
+    $("queryStatus").textContent = result.kind === "action" ? "Review the ticket, then confirm." : result.kind === "chat" ? "" : result.citations?.length ? "Answer grounded in authorized sources." : !state.docs.length ? "Broppy hasn't read anything yet, so there's nothing to answer from." : "Nothing you can see matches that question. Try other words."; $("question").value = "";
   }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
@@ -1081,7 +1103,11 @@ $("exportAudit").addEventListener("click", exportAudit);
 $("hideRoutine").addEventListener("change", () => renderAudit(state.auditEntries));
 $("refreshHealth").addEventListener("click", loadHealth);
 $("retrySync").addEventListener("click", async () => {
-  const generation = state.identity; $("healthStatus").textContent = "Syncing your connected tools…";
+  const button = $("retrySync"); if (button.disabled) return; button.disabled = true;
+  try { await syncNow(); } finally { button.disabled = false; }
+});
+async function syncNow() {
+  const generation = state.identity; $("healthStatus").textContent = "Syncing your connected tools… this can take a minute.";
   try {
     const result = await post("/v1/admin/sync", {}); if (generation !== state.identity || role() !== "admin") return;
     await Promise.all([loadHealth(), loadWorkspace()]); if (generation !== state.identity) return;
@@ -1092,7 +1118,7 @@ $("retrySync").addEventListener("click", async () => {
       : `Synced ${results.map(item => sourceName(item.source)).join(", ")}.`;
   }
   catch (error) { if (generation === state.identity && role() === "admin") $("healthStatus").textContent = error.message; }
-});
+}
 $("loginButton").addEventListener("click", () => location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname + location.search })}`));
 $("logoutButton").addEventListener("click", () => location.assign(state.authMode === "demo" ? "/demo/exit" : "/auth/logout"));
 initAuth();

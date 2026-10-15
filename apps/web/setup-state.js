@@ -1,7 +1,7 @@
 // What the guided setup page decides from the API's answers, kept apart from the page so it can be tested without a browser.
 
 export const TOOLS = [
-  { source: "slack", name: "Slack", reads: "Conversations in your channels" },
+  { source: "slack", name: "Slack", reads: "Conversations in your channels. Adds the Broppy bot to your Slack, so your team can ask it with /broppy." },
   { source: "jira", name: "Jira", reads: "Tickets, projects and their updates" },
   { source: "confluence", name: "Confluence", reads: "Pages and team documents" },
   { source: "drive", name: "Google Drive", reads: "Documents and files you share" }
@@ -12,7 +12,11 @@ export const toolName = source => TOOLS.find(tool => tool.source === source)?.na
 /** How one tool looks to the admin: not connected, connected but not reading yet, reading (with progress), ready, or needing attention. */
 export function toolState(connection, job) {
   if (!connection || connection.status === "Not connected") return { state: "not_connected", label: "Not connected" };
-  if (connection.status === "Error" || connection.error) return { state: "attention", label: "Needs attention", detail: connection.error };
+  if (connection.status === "Error" || connection.error) {
+    // Only a refused or expired sign-in needs the approval again; anything else is fixed by reading again.
+    const reconnect = /credential was rejected|reconnect the source|\(401\)|\(403\)/i.test(connection.error ?? "");
+    return { state: "attention", label: "Needs attention", detail: connection.error, reconnect };
+  }
   if (job?.status === "running" || connection.status === "Importing") {
     const done = (job?.indexed ?? 0) + (job?.skipped ?? 0);
     return { state: "reading", label: "Reading", percent: job?.found ? Math.min(100, Math.floor(100 * done / job.found)) : 0, found: job?.found ?? 0, done };
@@ -30,7 +34,8 @@ export function toolState(connection, job) {
  */
 export function setupSteps({ connections = [], jobs = [], people = [], model, skipped = [], personal = false } = {}) {
   const states = TOOLS.map(tool => toolState(connections.find(item => item.source === tool.source), jobs.find(job => job.source === tool.source)));
-  const connected = states.filter(item => item.state !== "not_connected" && item.state !== "attention");
+  // A tool whose last reading failed is still connected; only one that has to be approved again is not.
+  const connected = states.filter(item => item.state !== "not_connected" && !(item.state === "attention" && item.reconnect));
   const connect = connected.length > 0;
   const reading = connect && connected.every(item => item.state === "ready");
   const team = people.filter(person => person.status !== "removed").length > 1 || skipped.includes("team");

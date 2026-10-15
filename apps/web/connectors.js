@@ -1,147 +1,236 @@
+import { TOOLS, plainError, returnMessage, toolName, toolState } from "./setup-state.js";
+
 const api = "/api/brain";
-const status = document.getElementById("status");
+const $ = id => document.getElementById(id);
 // In demo mode the workspace links here with the persona it was viewing as; the host ignores it for signed-in users.
 const persona = new URLSearchParams(location.search).get("user");
+
 async function request(path, method = "GET", data) {
-  const response = await fetch(api + path, { method, headers: { "content-type": "application/json", ...(persona ? { "x-demo-user": persona } : {}) },
-    ...(data ? { body: JSON.stringify(data) } : {}) });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || "Request failed");
+  let response;
+  try {
+    response = await fetch(api + path, { method, headers: { "content-type": "application/json", ...(persona ? { "x-demo-user": persona } : {}) }, ...(data ? { body: JSON.stringify(data) } : {}) });
+  } catch (error) { throw new Error(plainError(error.message)); }
+  let result = {};
+  // A busy or starting server can answer with a page instead of JSON; the status below says enough.
+  try { result = await response.json(); } catch { /* not JSON */ }
+  if (response.status === 401 && result.code === "signed_out") { location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname })}`); return new Promise(() => undefined); }
+  if (!response.ok) throw new Error(plainError(result.error || (response.status >= 500 ? "Broppy is busy or starting up. Try again in a moment." : "Request failed")));
   return result;
 }
-function element(tag, text) { const el = document.createElement(tag); el.textContent = text; return el; }
-async function action(source, verb, method = "POST", data) {
-  try { const result = await request(`/v1/admin/connections/${source}${verb ? `/${verb}` : ""}`, method, data); if (result.url) { location.assign(result.url); return; } await load(); }
-  catch (error) { status.textContent = error.message; }
+
+function h(tag, attributes = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    if (name === "class") el.className = value; else if (name.startsWith("on")) el[name] = value; else if (value !== false && value !== undefined) el.setAttribute(name, value === true ? "" : value);
+  }
+  el.append(...children.flat().filter(child => child !== undefined && child !== false));
+  return el;
 }
-function scopeControls(connection) {
-  const form = document.createElement("div");
+function notice(message) {
+  const box = $("status");
+  box.hidden = !message; box.textContent = message?.text ?? ""; box.className = `notice ${message?.kind ?? ""}`;
+}
+function timeAgo(value) {
+  const seconds = Math.round((Date.now() - Date.parse(value)) / 1000);
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 60) return "just now";
+  for (const [size, unit] of [[86400, "day"], [3600, "hour"], [60, "minute"]]) {
+    const count = Math.floor(seconds / size);
+    if (count >= 1) return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  }
+  return "";
+}
+
+// Coming back from a tool's approval page: say how it went, then tidy the address so a reload doesn't repeat it.
+const returned = returnMessage(new URLSearchParams(location.search));
+if (returned) { notice(returned); history.replaceState(null, "", location.pathname + (persona ? `?user=${encodeURIComponent(persona)}` : "")); }
+
+/** Runs a button's action once at a time, and says what went wrong in place of failing silently. */
+async function run(button, work) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try { await work(); } catch (error) { notice({ kind: "bad", text: error.message }); } finally { button.disabled = false; }
+}
+async function connect(source) {
+  const result = await request(`/v1/admin/connections/${source}/authorize`, "POST", {});
+  if (result.url) { location.assign(result.url); return new Promise(() => undefined); }
+  await load();
+}
+
+// ---- tools ----
+const open = new Set(); // tools whose "what Broppy reads" form is open: never redrawn under the admin
+function scopeForm(connection) {
   const scope = connection.scope || {};
-  const mode = scope.mode || (scope.containers?.length || scope.ids?.length ? "selected" : "all");
-  const choices = [["all", "Include everything"], ["selected", "Include only what I select"], ["none", "Include nothing"]];
-  const radios = choices.map(([value, text]) => {
-    const label = document.createElement("label"); const input = document.createElement("input");
-    input.type = "radio"; input.name = `mode-${connection.source}`; input.value = value; input.checked = value === mode;
-    label.append(input, ` ${text}`); form.append(label, document.createElement("br")); return input;
-  });
-  const picker = document.createElement("div"); picker.hidden = mode !== "selected";
-  const boxes = [];
+  const mode = scope.mode && !(scope.mode === "none" && !(connection.count > 0)) ? scope.mode : "all";
+  const labels = { all: "Everything it can see (recommended)", selected: "Only the parts I choose", none: "Nothing for now" };
+  const radios = Object.entries(labels).map(([value, text]) => h("label", { class: "radio" }, h("input", { type: "radio", name: `mode-${connection.source}`, value, ...(value === mode ? { checked: true } : {}) }), ` ${text}`));
+  const picker = h("div", { class: "picker", hidden: mode !== "selected" });
+  let loaded = false;
   const loadPicker = async () => {
+    if (loaded) return; loaded = true;
+    picker.replaceChildren(h("p", { class: "muted" }, "Finding what's there…"));
     try {
       const { containers } = await request(`/v1/admin/connections/${connection.source}/containers`);
-      picker.replaceChildren();
-      for (const item of containers) {
-        const label = document.createElement("label"); const box = document.createElement("input");
-        box.type = "checkbox"; box.value = item.id; box.checked = (scope.containers || []).includes(item.id);
-        label.append(box, ` ${item.name}`); picker.append(label, document.createElement("br")); boxes.push(box);
-      }
-      if (!containers.length) picker.append(element("p", "Nothing to select yet."));
-    } catch (error) { picker.append(element("p", error.message)); }
+      picker.replaceChildren(...(containers.length ? containers.map(item => h("label", { class: "check" },
+        h("input", { type: "checkbox", value: item.id, ...((scope.containers || []).includes(item.id) ? { checked: true } : {}) }), ` ${item.name}`)) : [h("p", { class: "muted" }, "Nothing to choose from yet.")]));
+    } catch (error) { loaded = false; picker.replaceChildren(h("p", { class: "bad" }, error.message)); }
   };
-  const futureLabel = document.createElement("label"); const future = document.createElement("input");
-  future.type = "checkbox"; future.checked = Boolean(scope.futureOnly);
-  futureLabel.append(future, " Only content that is new or changed from now on");
-  const sinceLabel = element("label", "Or history since "); const since = document.createElement("input");
-  since.type = "date"; since.value = scope.futureOnly ? "" : (scope.since || "").slice(0, 10); sinceLabel.append(since);
-  const selected = () => radios.find(radio => radio.checked)?.value;
-  const refresh = () => { picker.hidden = selected() !== "selected"; futureLabel.hidden = sinceLabel.hidden = selected() === "none"; };
-  for (const radio of radios) radio.onchange = () => { refresh(); if (selected() === "selected" && !boxes.length) void loadPicker(); };
-  future.onchange = () => { since.disabled = future.checked; };
-  since.disabled = future.checked;
+  const future = h("input", { type: "checkbox", ...(scope.futureOnly ? { checked: true } : {}) });
+  const since = h("input", { type: "date", value: scope.futureOnly ? "" : (scope.since || "").slice(0, 10) });
+  const history = h("div", { class: "form" }, h("label", { class: "check" }, future, " Only what is new or changed from now on"), h("label", {}, "Or start from ", since));
+  const chosen = () => radios.map(label => label.firstChild).find(input => input.checked)?.value;
+  const save = h("button", { type: "submit", class: "btn primary" }, "Save and start reading");
+  const sync = () => {
+    picker.hidden = chosen() !== "selected"; history.hidden = chosen() === "none"; since.disabled = future.checked;
+    save.textContent = chosen() === "none" ? "Save" : "Save and start reading";
+    if (chosen() === "selected") void loadPicker();
+  };
+  for (const label of radios) label.firstChild.onchange = sync;
+  future.onchange = sync;
   if (mode === "selected") void loadPicker();
-  refresh();
-  const save = element("button", "Save and import");
-  save.onclick = () => action(connection.source, "scope", "PUT", { mode: selected(),
-    ...(selected() === "selected" ? { containers: boxes.filter(box => box.checked).map(box => box.value) } : {}),
-    ...(selected() !== "none" && future.checked ? { futureOnly: true } : selected() !== "none" && since.value ? { since: new Date(since.value).toISOString() } : {}) });
-  form.append(picker, futureLabel, document.createElement("br"), sinceLabel, document.createElement("br"), save);
+  const form = h("form", { class: "form" }, h("fieldset", {}, h("legend", {}, `What should Broppy read from ${toolName(connection.source)}?`), radios), picker, history, save);
+  form.onsubmit = event => {
+    event.preventDefault();
+    void run(save, async () => {
+      const containers = [...picker.querySelectorAll("input:checked")].map(input => input.value);
+      if (chosen() === "selected" && !containers.length) throw new Error(`Choose at least one part of ${toolName(connection.source)}, or pick another option.`);
+      await request(`/v1/admin/connections/${connection.source}/scope`, "PUT", { mode: chosen(),
+        ...(chosen() === "selected" ? { containers } : {}),
+        ...(chosen() !== "none" && future.checked ? { futureOnly: true } : chosen() !== "none" && since.value ? { since: new Date(since.value).toISOString() } : {}) });
+      notice({ kind: "good", text: chosen() === "none" ? `${toolName(connection.source)} reads nothing for now.` : `Saved. Broppy is reading ${toolName(connection.source)}.` });
+      open.delete(connection.source);
+      await load();
+    });
+  };
+  sync();
   return form;
 }
-const callbackMessages = {
-  installed: "Broppy was added to Slack.", denied: "Slack installation was cancelled.",
-  failed: "Broppy could not be added to Slack. Try again.", conflict: "That Slack workspace could not be connected to this organization. Contact your administrator.",
-  unsupported: "This Slack app configuration is not supported. Ask your administrator to disable token rotation and use a workspace installation."
-};
-const callbackOutcome = new URLSearchParams(location.search).get("slack_install");
-if (callbackMessages[callbackOutcome]) status.textContent = callbackMessages[callbackOutcome];
-async function botAction(verb, method, generation) {
-  try {
-    const result = await request(`/v1/admin/slack-installation${verb ? `/${verb}` : ""}`, method,
-      generation ? { generation } : undefined);
-    if (result.url) { location.assign(result.url); return; }
-    await load();
-  } catch (error) { status.textContent = error.message; }
-}
-function botCard(installation) {
-  const label = document.getElementById("slack-bot-status");
-  const actions = document.getElementById("slack-bot-actions"); actions.replaceChildren();
-  if (installation.state === "not_installed" && !installation.configured) {
-    label.textContent = "Add to Slack is not available in this workspace yet."; return;
+function toolCard(tool, connection, job) {
+  const status = toolState(connection, job);
+  const card = h("article", { class: `tool ${status.state}` }, h("h3", {}, tool.name), h("p", { class: "muted" }, tool.reads));
+  const line = status.state === "not_connected" ? "Not connected"
+    : status.state === "reading" ? (status.found ? `Reading… ${status.done} of ${status.found} items` : "Getting started…")
+    : status.state === "attention" ? (status.reconnect ? "Broppy's access was turned off or expired" : "The last reading didn't finish")
+    : status.state === "connected" ? "Connected · reading nothing yet"
+    : `✓ ${status.items} item${status.items === 1 ? "" : "s"} ready to ask about`;
+  const lineNode = h("p", { class: "tool-status" }, line);
+  if (status.detail) lineNode.title = status.detail;
+  card.append(lineNode);
+  if (connection?.lastSync) card.append(h("p", { class: "muted", title: new Date(connection.lastSync).toLocaleString() }, `Last synced ${timeAgo(connection.lastSync)}`));
+  const actions = h("div", { class: "row" });
+  if (status.state === "not_connected" || status.reconnect) {
+    const label = status.reconnect ? "Reconnect" : tool.source === "slack" ? "Add to Slack" : "Connect";
+    const button = h("button", { type: "button", class: "btn primary" }, label);
+    button.onclick = () => run(button, () => connect(tool.source));
+    actions.append(button);
+  } else {
+    if (status.state !== "reading") {
+      const again = h("button", { type: "button", class: status.state === "attention" ? "btn primary" : "btn" }, status.state === "attention" ? "Read again" : "Sync now");
+      again.onclick = () => run(again, async () => { await request(`/v1/admin/connections/${tool.source}/import`, "POST", {}); notice({ kind: "good", text: `Reading ${tool.name} now.` }); await load(); });
+      actions.append(again);
+    }
+    const disconnect = h("button", { type: "button", class: "btn danger" }, "Disconnect");
+    disconnect.onclick = () => {
+      if (!confirm(`Disconnect ${tool.name}? Broppy forgets everything it read from ${tool.name}, and nobody can ask about it until you connect it again.`)) return;
+      void run(disconnect, async () => { await request(`/v1/admin/connections/${tool.source}`, "DELETE"); notice({ kind: "good", text: `${tool.name} is disconnected.` }); await load(); });
+    };
+    actions.append(disconnect);
   }
-  label.textContent = installation.state === "active" ? `Connected to ${installation.teamName}.`
-    : installation.state === "not_installed" ? "No Slack workspace connected."
+  card.append(actions);
+  if (connection && status.state !== "not_connected" && !status.reconnect) {
+    const details = h("details", { ...(open.has(tool.source) ? { open: true } : {}) }, h("summary", {}, "Change what Broppy reads"), scopeForm(connection));
+    details.ontoggle = () => { if (details.open) open.add(tool.source); else open.delete(tool.source); };
+    card.append(details);
+  }
+  return card;
+}
+
+// ---- Slack bot ----
+function botCard(installation) {
+  const label = $("slack-bot-status");
+  const actions = $("slack-bot-actions"); actions.replaceChildren();
+  if (installation.state === "not_installed" && !installation.configured) {
+    label.textContent = "Adding Broppy to Slack isn't switched on for this workspace yet."; return;
+  }
+  label.textContent = installation.state === "active" ? `✓ Added to ${installation.teamName}.`
+    : installation.state === "not_installed" ? "Not added to Slack yet."
     : `${installation.teamName} is ${installation.state === "uninstalled" ? "uninstalled from Slack" : "disconnected from Broppy"}.`;
-  const add = element("button", installation.state === "active" ? "Reinstall in Slack" : "Add to Slack");
-  add.onclick = () => botAction("authorize", "POST"); actions.append(add);
+  const add = h("button", { type: "button", class: installation.state === "active" ? "btn" : "btn primary" }, installation.state === "active" ? "Add to Slack again" : "Add to Slack");
+  add.onclick = () => run(add, async () => { const result = await request("/v1/admin/slack-installation/authorize", "POST", {}); if (result.url) { location.assign(result.url); return new Promise(() => undefined); } });
+  actions.append(add);
   if (installation.state === "active") {
-    const refresh = element("button", "Refresh workspace settings"); refresh.onclick = () => botAction("refresh", "POST", installation.generation);
-    const disconnect = element("button", "Disconnect from Broppy"); disconnect.onclick = () => botAction("", "DELETE", installation.generation);
+    const refresh = h("button", { type: "button", class: "btn" }, "Refresh settings in Slack");
+    refresh.onclick = () => run(refresh, async () => { await request("/v1/admin/slack-installation/refresh", "POST", { generation: installation.generation }); notice({ kind: "good", text: "Slack has Broppy's latest settings." }); await load(); });
+    const disconnect = h("button", { type: "button", class: "btn danger" }, "Disconnect the bot");
+    disconnect.onclick = () => {
+      if (!confirm(`Disconnect Broppy from ${installation.teamName}? The bot stops answering there. To remove it from Slack completely, also uninstall it in Slack's app settings.`)) return;
+      void run(disconnect, async () => { await request("/v1/admin/slack-installation", "DELETE", { generation: installation.generation }); await load(); });
+    };
     actions.append(refresh, disconnect);
   }
 }
-const modelProvider = document.getElementById("model-provider");
-const syncModelForm = () => { document.getElementById("model-url-label").hidden = modelProvider.value !== "openai_compatible"; };
+
+// ---- AI model ----
+const modelProvider = $("model-provider");
+const syncModelForm = () => { $("model-url-label").hidden = modelProvider.value !== "openai_compatible"; };
 modelProvider.onchange = syncModelForm;
-const modelLabels = { organization: "Your organization's model is answering questions.", operator: "No model chosen here. Broppy's own default model is answering.", "built-in": "No model chosen. Broppy's built-in writer answers from the sources, without an AI model." };
+const modelLabels = { organization: "Your company's model writes the answers.", operator: "Broppy's own model writes the answers. You can choose your own below.", "built-in": "No AI model is set. Broppy answers with short quotes from your tools." };
 async function loadModel() {
   try {
     const { model, source } = await request("/v1/admin/model");
-    document.getElementById("model-status").textContent = model ? `${modelLabels[source]} Using ${model.model} (${model.provider.replace("_", "-")}).` : modelLabels[source];
-    if (model && !document.getElementById("model-form").contains(document.activeElement)) {
-      modelProvider.value = model.provider; document.getElementById("model-name").value = model.model; document.getElementById("model-url").value = model.baseUrl || ""; syncModelForm();
+    $("model-status").textContent = model ? `${modelLabels[source]} Using ${model.model}.` : modelLabels[source];
+    if (model && !$("model-form").contains(document.activeElement)) {
+      modelProvider.value = model.provider; $("model-name").value = model.model; $("model-url").value = model.baseUrl || ""; syncModelForm();
     }
-    document.getElementById("model-remove").hidden = !model;
-  } catch (error) { document.getElementById("model-status").textContent = error.message; }
+    $("model-remove").hidden = !model;
+  } catch (error) { $("model-status").textContent = error.message; }
 }
-document.getElementById("model-form").onsubmit = async event => {
+$("model-form").onsubmit = event => {
   event.preventDefault();
-  const key = document.getElementById("model-key");
-  try {
-    document.getElementById("model-status").textContent = "Testing the connection...";
-    await request("/v1/admin/model", "PUT", { provider: modelProvider.value, model: document.getElementById("model-name").value,
-      ...(modelProvider.value === "openai_compatible" || document.getElementById("model-url").value ? { baseUrl: document.getElementById("model-url").value } : {}),
-      ...(key.value ? { apiKey: key.value } : {}) });
-    key.value = ""; await loadModel();
-  } catch (error) { document.getElementById("model-status").textContent = error.message; }
+  const button = $("model-form").querySelector("button[type=submit]");
+  void run(button, async () => {
+    const key = $("model-key");
+    $("model-status").textContent = "Testing the connection…";
+    try {
+      await request("/v1/admin/model", "PUT", { provider: modelProvider.value, model: $("model-name").value,
+        ...(modelProvider.value === "openai_compatible" || $("model-url").value ? { baseUrl: $("model-url").value } : {}),
+        ...(key.value ? { apiKey: key.value } : {}) });
+    } finally { await loadModel(); }
+    key.value = ""; notice({ kind: "good", text: "Saved. Your model answered the test." });
+  });
 };
-document.getElementById("model-remove").onclick = async () => { try { await request("/v1/admin/model", "DELETE"); await loadModel(); } catch (error) { document.getElementById("model-status").textContent = error.message; } };
+$("model-remove").onclick = () => {
+  if (!confirm("Remove your company's AI model? Broppy goes back to its own default.")) return;
+  void run($("model-remove"), async () => { await request("/v1/admin/model", "DELETE"); await loadModel(); });
+};
+
+// ---- loading ----
+let timer, failing = false;
 async function load() {
-  const [result, progress, installation] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs"), request("/v1/admin/slack-installation")]);
-  botCard(installation);
-  const container = document.getElementById("connections");
-  // Avoid replacing an admin's scope edits while polling progress.
-  if (!container.contains(document.activeElement)) {
-    container.replaceChildren();
-    for (const connection of result.connections) {
-      const section = document.createElement("section");
-      const job = progress.jobs.find(job => job.source === connection.source);
-      const percent = job?.found ? Math.floor(100 * (job.indexed + job.skipped) / job.found) : 0;
-      section.append(element("h2", connection.source), element("p", `${connection.status}${job?.status === "running" ? ` ${percent}%` : ""} · ${connection.count} items · Last sync: ${connection.lastSync || "Never"}`));
-      if (connection.error) section.append(element("p", `Needs attention: ${connection.error}`));
-      if (job) section.append(element("p", `Found ${job.found}, indexed ${job.indexed}, skipped ${job.skipped}, failed ${job.failed}${job.error ? `: ${job.error}` : ""}`));
-      section.append(scopeControls(connection));
-      for (const [name, handler] of [["Connect", () => action(connection.source, "authorize")],
-        ["Re-sync", () => action(connection.source, "import")], ["Disconnect", () => action(connection.source, "", "DELETE")]]) {
-        const button = element("button", name); button.onclick = handler; section.append(button);
-      }
-      container.append(section);
-    }
+  clearTimeout(timer);
+  try {
+    const [result, progress, installation] = await Promise.all([request("/v1/admin/connections"), request("/v1/admin/import-jobs"), request("/v1/admin/slack-installation").catch(() => ({ state: "not_installed", configured: false }))]);
+    if (failing) { failing = false; notice(undefined); }
+    botCard(installation);
+    const cards = TOOLS.map(tool => {
+      if (open.has(tool.source)) return document.querySelector(`[data-tool="${tool.source}"]`) ?? undefined;
+      const card = toolCard(tool, result.connections.find(item => item.source === tool.source), progress.jobs.find(job => job.source === tool.source));
+      card.dataset.tool = tool.source; return card;
+    }).filter(Boolean);
+    $("connections").replaceChildren(...cards);
+    $("onboard").hidden = result.liveMode !== false;
+    const missing = new Set((result.unmatched || []).map(item => item.user));
+    $("unmatched").hidden = !missing.size;
+    $("unmatched").textContent = missing.size ? `${missing.size} ${missing.size === 1 ? "person hasn't" : "people haven't"} been matched to their accounts in every tool yet, so they won't see that tool's content in Broppy. They're matched by email when they sign in.` : "";
+    // Keep the page current: quickly while something is being read, slowly otherwise.
+    const reading = progress.jobs.some(job => job.status === "running") || result.connections.some(item => item.status === "Importing");
+    timer = setTimeout(load, reading ? 3000 : 30000);
+  } catch (error) {
+    failing = true; notice({ kind: "bad", text: `${error.message} Trying again…` });
+    timer = setTimeout(load, 5000);
   }
-  document.getElementById("onboard").hidden = result.liveMode;
-  const unmatched = document.getElementById("unmatched"); unmatched.replaceChildren();
-  for (const person of result.unmatched) unmatched.append(element("li", `${person.user}: ${person.source}`));
-  if (!result.unmatched.length) unmatched.append(element("li", "All directory users have source identities."));
 }
-document.getElementById("onboard").onclick = async () => { try { await request("/v1/admin/onboard", "POST"); await load(); } catch (error) { status.textContent = error.message; } };
-try { await loadModel(); await load(); setInterval(() => load().catch(error => { status.textContent = error.message; }), 3000); }
-catch (error) { status.textContent = error.message; }
+$("onboard").onclick = () => run($("onboard"), async () => { await request("/v1/admin/onboard", "POST"); await load(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void load(); });
+void loadModel();
+void load();

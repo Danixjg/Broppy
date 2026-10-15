@@ -29,7 +29,7 @@ export function Shell() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true"><BookOpenText size={21} strokeWidth={1.8} /></span>
-          <span>Internal Brain<small>Payments workspace</small></span>
+          <span>Broppy<small id="brandContext">Knowledge workspace</small></span>
         </div>
         <span className="header-divider" aria-hidden="true" />
         <label className="project-switch">Project
@@ -56,6 +56,12 @@ export function Shell() {
       </header>
       <nav className="view-nav" aria-label="Workspace views">
         <ExpandableTabs tabs={tabs} />
+        {/* Admins' settings, always one click away from the workspace. */}
+        <span id="adminLinks" className="admin-links" hidden>
+          <a id="setupGuide" href="./setup.html">Setup</a>
+          <a id="connectorSettings" href="./connectors.html">Connectors</a>
+          <a id="peopleSettings" href="./people.html">People</a>
+        </span>
         <span className="nav-context"><Command size={13} aria-hidden="true" /> KNOWLEDGE WORKSPACE</span>
         <span id="globalStatus" role="status" className="nav-status" />
       </nav>

@@ -97,3 +97,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .tools, .choices { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .progress > span { transition: none; } }
+/* Shared by the Connectors and People settings pages. */
+.bar-links { display: flex; align-items: center; gap: 1.1rem; }
+.bar-links a { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.bar-links a:hover { color: var(--ink); }
+.lead { margin-top: .6rem; color: var(--muted); line-height: 1.55; }
+.section { margin-top: 2rem; display: grid; gap: .8rem; }
+.section > h2 { font-size: 1.2rem; }
+.hint { font-size: .9rem; color: var(--muted); line-height: 1.5; }
+.hint summary { cursor: pointer; font-weight: 650; color: var(--ink); }
+.checklist { display: grid; gap: .35rem; margin-top: .5rem; padding-left: 1.2rem; list-style: disc; }
+.tool .row { margin-top: .4rem; }
+.tool .btn { margin-top: 0; }
+.tool details { margin-top: .3rem; }
+.tool details summary { cursor: pointer; font-weight: 650; }
+.btn.danger { color: var(--bad); }
+code { font-size: .9em; padding: .05rem .3rem; border-radius: .3rem; background: var(--surface-alt); }
