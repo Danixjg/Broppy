@@ -2,6 +2,9 @@ import { normalizeEmail } from "./user-directory.js";
 
 interface Config { url: string; secretKey: string; fetch?: typeof fetch }
 
+/** Another company already has this name (the database's unique name rule refused it). */
+export class NameTaken extends Error { constructor() { super("Company name taken"); } }
+
 /** A company (people invited by its admins) or a personal workspace (one person's own, with no team). */
 export type WorkspaceKind = "company" | "personal";
 
@@ -50,6 +53,7 @@ export class Companies {
       body: JSON.stringify({ org_id: company.orgId, name: company.name, created_by_email: normalizeEmail(company.createdBy), status: "active",
         kind: company.kind ?? "company" })
     });
+    if (response.status === 409) throw new NameTaken();
     if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
   }
 

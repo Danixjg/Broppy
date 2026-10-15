@@ -1,4 +1,4 @@
--- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-014 in one runnable file.
+-- Broppy baseline schema for a FRESH Supabase project: the end state of migrations 001-015 in one runnable file.
 -- Existing databases keep applying infra/supabase/migrations in order; do not run this on top of them.
 -- Requires the pgvector and Supabase Vault extensions (both available in Supabase projects) and Supabase Auth (auth.users).
 -- org_id defaults to 'demo-company-a' so the demo keeps working; set AUTH0_ORG_ID and insert your organization before live use.
@@ -866,3 +866,8 @@ begin
 end $$;
 revoke all on function public.save_brain_state_at(text, jsonb, bigint) from public, anon, authenticated;
 grant execute on function public.save_brain_state_at(text, jsonb, bigint) to service_role;
+
+-- Unique company names (migration 015).
+create unique index if not exists organizations_company_name_unique
+  on public.organizations (lower(regexp_replace(btrim(name), '\s+', ' ', 'g')))
+  where kind is distinct from 'personal';

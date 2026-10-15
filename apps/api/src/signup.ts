@@ -1,7 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import type { Auth0Management } from "./auth0-management.js";
 import { ManagementError } from "./auth0-management.js";
-import type { Companies } from "./companies.js";
+import { NameTaken, type Companies } from "./companies.js";
 import { normalizeEmail, type UserDirectory } from "./user-directory.js";
 
 export class SignupError extends Error {
@@ -72,6 +72,7 @@ export interface SignupSettings {
 }
 
 const HOUR = 3_600_000;
+const NAME_TAKEN = "That company name is already taken. If it's your team's, ask its admin to invite you; otherwise add a word to make it yours.";
 
 /**
  * A company signing itself up. It gets its own Auth0 organization, a row in the list of companies, and its first admin,
@@ -120,6 +121,8 @@ export class Signup {
       // Someone who already belongs to a company is not made the admin of another by a form. Answer as if it worked.
       if (await this.companies.emailInUse(email)) return { sent: true };
 
+      // One company per name. Checked here to explain it; the database rule catches two sign-ups at the same moment.
+      if (!personal && (await this.companies.withName(company)).length) throw new SignupError(409, NAME_TAKEN);
       const created = personal ? await this.createPersonalOrganization(email, name) : await this.createOrganization(company);
       if (!created) return { sent: true };
       try {
@@ -130,6 +133,7 @@ export class Signup {
         await this.directoryFor(created.id).add({ id: adminId(email), name, email, role: "admin", groups: [] });
       } catch (error) {
         await this.undo(created.id);
+        if (error instanceof NameTaken) throw new SignupError(409, NAME_TAKEN);
         if (error instanceof ManagementError) throw new SignupError(502, "We couldn't send your invitation email. Try again in a minute.");
         throw error;
       }

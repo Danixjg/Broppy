@@ -336,18 +336,16 @@ describe("several companies in one API", () => {
     expect((await call("POST", "/v1/admin/sync", dana, {})).body.results).toEqual([]);
   });
 
-  it("lets a second company take the same name, at its own address, without touching the first", async () => {
-    const second = await call("POST", "/v1/signup", undefined, { company: "Acme & Sons", name: "Eve", email: "eve@elsewhere.test" });
-    expect(second.status).toBe(202);
-    const both = auth0Orgs.filter(item => item.display_name === "Acme & Sons");
-    expect(both).toHaveLength(2);
-    expect(both[0].name).not.toBe(both[1].name);
-    // Now the name is shared, so it alone can't say which company; the address still can.
-    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).status).toBe(409);
-    expect((await call("GET", `/v1/companies/find?name=${both[1].name}`)).body).toMatchObject({ organization: both[1].id });
-    const eve = tables.organizations.find(row => row.created_by_email === "eve@elsewhere.test")!;
-    expect(eve.org_id).not.toBe("org_new1");
-    expect(tables.workspace_users.filter(row => row.org_id === "org_new1").map(row => row.email)).not.toContain("eve@elsewhere.test");
+  it("refuses a second company with the same name, and leaves the first untouched", async () => {
+    const before = auth0Orgs.length;
+    const second = await call("POST", "/v1/signup", undefined, { company: "acme  &  SONS", name: "Eve", email: "eve@elsewhere.test" });
+    expect(second.status).toBe(409);
+    expect(second.body.error).toContain("already taken");
+    expect(auth0Orgs).toHaveLength(before);
+    expect(tables.organizations.some(row => row.created_by_email === "eve@elsewhere.test")).toBe(false);
+    expect(tables.workspace_users.some(row => row.email === "eve@elsewhere.test")).toBe(false);
+    // The name still finds the one company.
+    expect((await call("GET", "/v1/companies/find?name=Acme%20%26%20Sons")).body).toMatchObject({ organization: "org_new1" });
   });
 
   it("does not let a stranger use someone's email to stop them signing their own company up", async () => {
