@@ -68,5 +68,5 @@ Vercel runs several copies of the API at once, each keeping a company's workspac
 copy has saved since, and a save from an older copy is refused (the person is asked to reload) instead of overwriting newer
 state. Without it, the copies can show different states and the last save wins. Imports that carry on after a reply are
 kept running with Vercel's `waitUntil`, up to the function's maximum duration; a larger import continues on the next
-**Import** or question. There is no background sync timer on Vercel, so new items at a source are read when the admin
-imports again or when a question checks the source live. Review the [current deployment limits](live-sources-and-sign-in.md).
+**Import** or question. Vercel keeps no timer between requests, so the background sync is scheduled from Supabase every
+10 minutes; see [Background sync](background-sync.md). Review the [current deployment limits](live-sources-and-sign-in.md).

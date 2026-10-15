@@ -6,6 +6,7 @@ import { SourceOAuth } from "./source-oauth.js";
 import { Persistence, StaleState } from "./persistence.js";
 import { waitUntil } from "@vercel/functions";
 import { searchAudit } from "./audit-search.js";
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -343,6 +344,35 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "OPTIONS") return await reply(response, 204, null);
+      // The scheduled background sync (Supabase pg_cron calls this every few minutes; see docs/background-sync.md). It needs
+      // the shared SYNC_CRON_SECRET, syncs the companies with connected sources, least recently synced first, and stops
+      // before the function's time runs out; the next run carries on from the companies it didn't reach.
+      if (url.pathname === "/v1/cron/sync" && (request.method === "POST" || request.method === "GET")) {
+        const secret = process.env.SYNC_CRON_SECRET ?? process.env.CRON_SECRET;
+        const given = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? "";
+        const ok = Boolean(secret) && given.length === secret!.length && timingSafeEqual(Buffer.from(given), Buffer.from(secret!));
+        if (!ok) return send(response, secret ? 401 : 404, { error: secret ? "Unauthorized" : "Not found" });
+        const started = Date.now();
+        const budget = Number(process.env.SYNC_CRON_BUDGET_MS ?? 40_000);
+        const orgs = companies ? await companies.withConnectedSources() : [];
+        if (!companies && home.connectors) orgs.push(home.orgId);
+        const synced: Array<{ orgId: string; results: Array<{ source: Source; ok: boolean; error?: string }> }> = [];
+        const left: string[] = [];
+        for (const orgId of orgs) {
+          if (Date.now() - started > budget) { left.push(orgId); continue; }
+          try {
+            const tenant = await tenants.get(orgId);
+            if (!tenant) continue;
+            await tenant.brain.refreshIfStale();
+            synced.push({ orgId, results: await tenant.brain.syncConnected() });
+          } catch (error) {
+            synced.push({ orgId, results: [{ source: "slack" as Source, ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "Sync failed" }] });
+          }
+        }
+        console.info(JSON.stringify({ event: "background_sync", companies: synced.length, left: left.length, failed: synced.filter(item => item.results.some(result => !result.ok)).length, ms: Date.now() - started }));
+        return send(response, 200, { synced: synced.map(item => ({ orgId: item.orgId, results: item.results })), left: left.length });
+      }
+
       // Open to anyone, so it says only that the API is up. Each company's own sync state is at /v1/sync-health.
       if (request.method === "GET" && url.pathname === "/health") return await reply(response, 200, { ok: true });
 

@@ -96,6 +96,30 @@ export class Companies {
       .map(row => ({ orgId: row.org_id as string, name: row.name as string })) : [];
   }
 
+  /**
+   * The companies with at least one source connected, least recently synced first, for the scheduled background sync.
+   * The home company is included when it has connections too.
+   */
+  async withConnectedSources(): Promise<string[]> {
+    const response = await this.transport(`${this.baseUrl}/rest/v1/source_connections?select=org_id,status`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`Supabase source connections failed (${response.status})`);
+    const rows = await response.json() as Array<{ org_id?: unknown; status?: unknown }>;
+    const orgs = new Set(Array.isArray(rows) ? rows.filter(row => typeof row.org_id === "string" && typeof row.status === "string" && row.status !== "Not connected")
+      .map(row => row.org_id as string) : []);
+    const synced = await this.transport(`${this.baseUrl}/rest/v1/connector_state?select=org_id,last_successful_sync_at`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    const last = new Map<string, number>();
+    if (synced.ok) for (const row of await synced.json() as Array<{ org_id?: unknown; last_successful_sync_at?: unknown }>) {
+      if (typeof row.org_id !== "string") continue;
+      const at = typeof row.last_successful_sync_at === "string" ? Date.parse(row.last_successful_sync_at) : 0;
+      last.set(row.org_id, Math.max(last.get(row.org_id) ?? 0, Number.isFinite(at) ? at : 0));
+    }
+    return [...orgs].sort((a, b) => (last.get(a) ?? 0) - (last.get(b) ?? 0));
+  }
+
   async remove(orgId: string): Promise<void> {
     if (orgId === this.homeOrgId) throw new Error("The home company cannot be removed");
     const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?org_id=eq.${encodeURIComponent(orgId)}`, {
