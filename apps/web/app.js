@@ -90,6 +90,10 @@ async function call(path, options = {}) {
   return payload;
 }
 const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
+// A live company whose tools Broppy hasn't read anything from yet: every panel says so, rather than "nothing accessible".
+// The API's fixed reply when no source a person can open answers the question (NO_RESULT in @brain/retrieval).
+const NO_RESULT_TEXT = "No accessible information was found for this query.";
+const nothingRead = () => !state.docs.length && state.workspace.capabilities.mode === "live";
 function role() { return state.authMode === "demo" ? roles[$("user").value] || "member" : state.me?.role || "member"; }
 // load: whether opening Compliance loads the whole audit; a caller about to search it passes false.
 // Source controls edit the practice data and its demo people directly; a company on its live tools changes access at
@@ -274,7 +278,7 @@ async function markDone(doc, button) {
 function renderSuggestions() {
   const box = $("suggestion"); clear(box);
   const items = state.workspace.commitments.filter(item => inProject(item.threadDocId) && docById(item.threadDocId));
-  if (!items.length) { appendText(box, "p", "empty", "No commitment is awaiting review in your accessible, imported threads."); return; }
+  if (!items.length) { appendText(box, "p", "empty", nothingRead() ? "Commitments from your conversations appear here once Broppy has read them." : "No commitments are waiting for review."); return; }
   for (const item of items) {
     const card = node("div", "agreement"); card.dataset.proposalId = item.id; card.tabIndex = -1;
     appendText(card, "strong", "", `Commitment in ${docById(item.threadDocId).title}`);
@@ -367,8 +371,8 @@ function renderActivity() {
   clear($("slackList")); clear($("jiraList"));
   appendLimited($("slackList"), slack, "thread", doc => activityButton(doc, "slack"));
   appendLimited($("jiraList"), jira, "task", doc => activityButton(doc, "jira"));
-  if (!slack.length) appendText($("slackList"), "p", "empty", "No accessible Slack threads match.");
-  if (!jira.length) appendText($("jiraList"), "p", "empty", "No accessible Jira tasks match.");
+  if (!slack.length) appendText($("slackList"), "p", "empty", nothingRead() ? "Slack threads appear here once Broppy has read them." : "No Slack threads here yet.");
+  if (!jira.length) appendText($("jiraList"), "p", "empty", nothingRead() ? "Jira tasks appear here once Broppy has read them." : "No Jira tasks here yet.");
   $("activityCount").textContent = `${slack.length + jira.length}`;
   renderSuggestions();
 }
@@ -393,9 +397,9 @@ function renderMaster() {
   clear($("masterContent")); clear($("conclusions")); clear($("masterBadge"));
   $("projectCrumb").textContent = project ? project.name : "All sources";
   if (!master) {
-    $("docHeading").textContent = "All accessible sources";
-    appendText($("masterContent"), "p", "empty", state.workspace.projects.length ? "Choose a project to see its master page." :
-      "No project's master page is shared with you. Your accessible sources are listed below.");
+    $("docHeading").textContent = "All sources";
+    appendText($("masterContent"), "p", "empty", nothingRead() ? "Once Broppy has read your tools, each project's main page shows here." :
+      state.workspace.projects.length ? "Choose a project to see its main page." : "None of your projects has a main page you can open yet. Everything you can open is listed below.");
     appendText($("conclusions"), "p", "empty", "Conclusions appear on a project's master page.");
     return;
   }
@@ -460,7 +464,7 @@ function renderDrive() {
     button.addEventListener("click", () => selectDoc(doc));
     return button;
   });
-  if (!docs.length) appendText($("driveList"), "p", "empty", "No accessible Drive documents match.");
+  if (!docs.length) appendText($("driveList"), "p", "empty", nothingRead() ? "Linked Google Drive files appear here once Broppy has read them." : "No linked Drive files here yet.");
   const shown = new Set(docs.map(doc => doc.docId));
   for (const pair of state.workspace.duplicates.filter(item => (shown.has(item.keep) || shown.has(item.other)) && docById(item.keep) && docById(item.other))) {
     const area = node("div", "duplicate-pair"); $("duplicate").hidden = false;
@@ -479,7 +483,7 @@ function renderSources() {
     button.addEventListener("click", () => selectDoc(doc));
     return button;
   });
-  if (!docs.length) appendText($("allSources"), "p", "empty", "No accessible sources match your search.");
+  if (!docs.length) appendText($("allSources"), "p", "empty", nothingRead() ? "Nothing read yet." : "Nothing matches your search.");
   const selectedAdminDoc = $("adminDoc").value;
   clear($("adminDoc"));
   for (const doc of state.docs) { const option = node("option", "", `${doc.title} · ${doc.docId}`); option.value = doc.docId; $("adminDoc").append(option); }
@@ -673,7 +677,11 @@ function renderAnswer(target, result, question) {
   clear(target); target.hidden = false;
   if (question) appendText(target, "p", "", question);
   const sources = numberSources(result.citations);
-  const lines = answerLines(safeText(result.text) || "No answer returned.", sources, result.check);
+  // With nothing read yet, the honest answer is why there is none, not that nothing was "accessible".
+  const text = nothingRead() && !sources.length ? "Broppy hasn't read any of your tools yet, so it has nothing to answer from. Connect a tool, or choose what Broppy reads, in Setup."
+    : safeText(result.text) === NO_RESULT_TEXT ? "Broppy couldn't find anything you can open that answers this. Try other words, or ask your admin whether that tool is connected."
+    : safeText(result.text) || "No answer returned.";
+  const lines = answerLines(text, sources, result.check);
   const body = node("div", "answer-lines");
   for (const line of lines) {
     const row = node("p", "answer-line", line.text);
@@ -1043,6 +1051,7 @@ $("queryForm").addEventListener("submit", async event => {
 // A catch-up chosen by the API from this person's role and groups, kept to the chosen project.
 $("catchUp").addEventListener("click", async () => {
   const target = $("catchUpResult"); const generation = state.identity;
+  if (nothingRead()) { clear(target); target.hidden = false; appendText(target, "p", "empty", "There's nothing to catch up on yet: Broppy hasn't read any of your tools."); return; }
   const stop = showPending(target, "Preparing your catch-up…");
   try {
     const result = await post("/v1/catch-up", state.project ? { project: state.project } : {});
