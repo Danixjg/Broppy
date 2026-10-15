@@ -59,7 +59,8 @@ describe("admin Slack installation", () => {
     expect(await ctx.callback(state)).toBe("failed"); expect(ctx.transport).not.toHaveBeenCalled();
     const other = setup(); other.transport.mockImplementation(async input => String(input).endsWith("users.info") ? Response.json({ ok: true, user: { id: "UMAYA", profile: { email: "other@example.test" } } })
       : String(input).endsWith("auth.test") ? Response.json({ ok: true, team_id: "TONE", user_id: "UBOT", bot_id: "BBOT" }) : Response.json({ ok: true, app_id: "AAPP", token_type: "bot", access_token: "xoxb-test", bot_user_id: "UBOT", team: { id: "TONE" }, scope: SLACK_BOT_SCOPES.join(","), authed_user: { id: "UMAYA" }, is_enterprise_install: false }));
-    expect(await other.callback(await other.begin())).toBe("email_mismatch");
+    // A different Slack email is allowed: the install was started by this signed-in admin.
+    expect(await other.callback(await other.begin())).toBe("installed");
   });
   it.each([undefined, "", "   "])("requires configured Slack identity %j before consent and again at callback", async identity => {
     const ctx = setup(); const state = await ctx.begin();

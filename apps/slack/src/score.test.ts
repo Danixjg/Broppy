@@ -60,4 +60,10 @@ describe("fingerprint", () => {
     expect(similarity(tokens("Raise replica storage quota"), tokens("Raise the replica storage quota now"))).toBeGreaterThan(0.75);
     expect(similarity(tokens("Raise replica storage quota"), tokens("Rotate payment API keys"))).toBeLessThan(0.2);
   });
+  it("treats asking a named teammate to do something as a task for them, not a question", () => {
+    const r = scoreMessage("<@UDAVID> Can you work on the video for publishing?", people, posted, 0.6, "UMAYA");
+    expect(r).toMatchObject({ suggest: true, title: "Work on the video for publishing", assignee: { slackId: "UDAVID" } });
+    expect(scoreMessage("can you send it?", people, posted).suggest).toBe(false);
+    expect(scoreMessage("<@UDAVID> you are working on the app design right", people, posted).suggest).toBe(false);
+  });
 });

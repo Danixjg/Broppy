@@ -89,7 +89,7 @@ export function returnMessage(params) {
   if (slack === "denied") return { kind: "bad", text: `Slack: ${REASONS.denied}` };
   if (slack === "email_mismatch") return { kind: "bad", text: `Slack: ${REASONS.email_mismatch}` };
   if (slack === "unsupported") return { kind: "bad", text: "Slack: this Slack app has token rotation turned on, which Broppy can't use. Turn it off under OAuth & Permissions in the app's settings, then try again." };
-  if (slack === "conflict") return { kind: "bad", text: "That Slack workspace is already connected to another company. Contact whoever runs Broppy for your company." };
+  if (slack === "conflict") return { kind: "bad", text: "That Slack workspace is already connected to another Broppy company or workspace (perhaps your personal one). Open that one's Connectors page, choose Disconnect the bot, then add it here again." };
   if (slack) return { kind: "bad", text: "Slack didn't accept the connection. Try again in a minute; if it keeps happening, tell whoever runs Broppy for your company." };
   return undefined;
 }

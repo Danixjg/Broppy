@@ -230,3 +230,24 @@ describe("asking Broppy", () => {
     await Promise.all(ctx.deferred); expect(ctx.calls.asks).toEqual([{ user: "david@x.test", q: "Is DB-15 resolved?" }]);
   });
 });
+
+describe("a workspace with no people list in its settings", () => {
+  it("recognises who is asked from the message itself, by their Slack name", async () => {
+    const ctx = setup(); ctx.deps.people = [];
+    ctx.deps.slack.userName = async id => ({ UMAYA: "Maya", UDAVID: "David" } as Record<string, string>)[id];
+    const eph = await suggestion(ctx, "<@UDAVID> can you work on the video for publishing?");
+    expect(eph).toMatchObject({ user: "UDAVID" });
+    expect(eph.blocks[0].text.text).toContain("Work on the video for publishing");
+    expect(eph.blocks[0].text.text).toContain("David");
+  });
+  it("introduces itself when it is added to a channel, and only then", async () => {
+    const ctx = setup(); ctx.deps.slack.botUserId = async () => "UBOT";
+    const joined = (user: string) => signed(JSON.stringify({ type: "event_callback", team_id: "TONE", event: { type: "member_joined_channel", user, channel: "CDB" } }), "/slack/events");
+    await handleSlack(ctx.deps, joined("UDAVID")); await Promise.all(ctx.deferred.splice(0));
+    expect(ctx.calls.messages).toHaveLength(0);
+    await handleSlack(ctx.deps, joined("UBOT")); await Promise.all(ctx.deferred.splice(0));
+    expect(ctx.calls.messages).toHaveLength(1);
+    expect(ctx.calls.messages[0]).toMatchObject({ channel: "CDB" });
+    expect(ctx.calls.messages[0].text).toContain("/broppy");
+  });
+});

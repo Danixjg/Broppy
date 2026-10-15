@@ -18,6 +18,8 @@ export interface SlackApi {
   history(channel: string, ts: string): Promise<string | undefined>;
   /** The email Slack holds for a user (scope users:read.email). */
   userEmail(userId: string): Promise<string | undefined>;
+  /** The name Slack shows for a person, for suggestions in a workspace whose people aren't listed in Broppy. */
+  userName?(userId: string): Promise<string | undefined>;
   permalink?(channel: string, ts: string): Promise<string>;
   openView?(triggerId: string, view: Record<string, unknown>): Promise<void>;
   members?(channel: string): Promise<string[]>;
@@ -60,6 +62,12 @@ export class SlackWebApi implements SlackApi {
   async userEmail(userId: string) {
     const payload = await this.call("users.info", { user: userId }, true);
     return typeof payload.user?.profile?.email === "string" ? payload.user.profile.email : undefined;
+  }
+  async userName(userId: string) {
+    const payload = await this.call("users.info", { user: userId }, true);
+    const profile = payload.user?.profile ?? {};
+    const name = [profile.display_name, profile.real_name, payload.user?.name].find(value => typeof value === "string" && value.trim());
+    return typeof name === "string" ? name.trim() : undefined;
   }
   async history(channel: string, ts: string) {
     const payload = await this.call("conversations.history", { channel, latest: ts, inclusive: true, limit: 1 }, true);
