@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AuditLog, FileAuditStore, type AuditProof, type AuditStore } from "./index.js";
+import type { AuditEntry } from "@brain/types";
+import { AuditLog, FileAuditStore, type AuditProof, type AuditStore, type SignedMerkleBatch } from "./index.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -120,5 +121,41 @@ describe("AuditLog", () => {
     const log = new AuditLog({ store });
     expect(() => log.append("read", "alice", {})).toThrow("disk full");
     expect(log.entries).toEqual([]);
+  });
+});
+
+describe("several copies writing one company's log", () => {
+  // Like append_audit_record: an entry must follow the stored chain exactly, or it is refused.
+  function sharedStore() {
+    const entries: AuditEntry[] = [];
+    const batches: SignedMerkleBatch[] = [];
+    return {
+      entries,
+      persist: async (kind: "entry" | "batch", value: AuditEntry | SignedMerkleBatch) => {
+        if (kind === "batch") { batches.push(value as SignedMerkleBatch); return; }
+        const entry = value as AuditEntry;
+        if (entry.sequence !== entries.length + 1 || entry.previousHash !== (entries.at(-1)?.hash ?? "0".repeat(64))) throw new Error("Conflicting audit entry");
+        entries.push(entry);
+      },
+      reload: async () => ({ entries: structuredClone(entries), batches: structuredClone(batches) })
+    };
+  }
+
+  it("catches up when another copy appended first, instead of failing every later write", async () => {
+    const store = sharedStore();
+    const first = new AuditLog({ persist: store.persist, reload: store.reload });
+    const second = new AuditLog({ persist: store.persist, reload: store.reload });
+    first.append("question_asked", "maya", { n: 1 }); await first.flush();
+    second.append("question_asked", "ravi", { n: 2 }); await second.flush();
+    second.append("question_asked", "ravi", { n: 3 }); await second.flush();
+    first.append("question_asked", "maya", { n: 4 }); await first.flush();
+    expect(store.entries.map(entry => entry.data.n)).toEqual([1, 2, 3, 4]);
+    expect(new AuditLog({ initial: { entries: store.entries, batches: [] } }).verifyChain()).toBe(true);
+  });
+
+  it("still fails when the store keeps refusing after catching up", async () => {
+    const log = new AuditLog({ persist: async () => { throw new Error("down"); }, reload: async () => ({ entries: [], batches: [] }) });
+    log.append("x", "maya", {});
+    await expect(log.flush()).rejects.toThrow("down");
   });
 });

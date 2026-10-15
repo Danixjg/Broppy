@@ -82,6 +82,8 @@ export interface AuditLogOptions {
   verificationKey?: KeyObject | string | Buffer;
   initial?: { entries: AuditEntry[]; batches: SignedMerkleBatch[] };
   persist?: (kind: "entry" | "batch", value: AuditEntry | SignedMerkleBatch) => Promise<void>;
+  /** The stored log as it is now, for when another writer appended first and this log has to catch up. */
+  reload?: () => Promise<{ entries: AuditEntry[]; batches: SignedMerkleBatch[] }>;
   orgId?: string;
 }
 
@@ -108,9 +110,19 @@ export class AuditLog {
   async flush(): Promise<void> {
     if (this.flushing) { await this.flushing; return this.flush(); }
     this.flushing = (async () => {
+      let caughtUp = false;
       while (this.pending.length) {
         const record = this.pending[0];
-        await this.options.persist?.(record.kind, record.value);
+        try {
+          await this.options.persist?.(record.kind, record.value);
+        } catch (error) {
+          // Several copies of the API write one company's log. When another got there first, this copy's next entry
+          // clashes with what is stored; catch up with the stored log once and try again, rather than failing for good.
+          if (!this.options.reload || caughtUp) throw error;
+          caughtUp = true;
+          this.rebase(await this.options.reload());
+          continue;
+        }
         this.pending.shift();
       }
     })();
@@ -150,11 +162,15 @@ export class AuditLog {
   }
 
   append(type: string, actor: string, data: Record<string, unknown>): AuditEntry {
+    return this.record(type, actor, data, new Date().toISOString());
+  }
+
+  private record(type: string, actor: string, data: Record<string, unknown>, timestamp: string): AuditEntry {
     const previousHash = this.storedEntries.at(-1)?.hash ?? GENESIS;
     const entry: AuditEntry = {
       hashVersion: 2,
       sequence: this.storedEntries.length + 1,
-      timestamp: new Date().toISOString(),
+      timestamp,
       type,
       actor,
       data: structuredClone({ ...data, ...(this.options.orgId ? { orgId: this.options.orgId } : {}) }),
@@ -166,6 +182,18 @@ export class AuditLog {
     this.storedEntries.push(entry);
     if (this.options.persist) this.pending.push({ kind: "entry", value: structuredClone(entry) });
     return structuredClone(entry);
+  }
+
+  /**
+   * Take the stored log as it is now and add, after it, the entries this copy has not saved yet, renumbered and
+   * rehashed onto the stored chain. Unsaved seals are dropped: the next seal covers those entries again.
+   */
+  rebase(latest: { entries: AuditEntry[]; batches: SignedMerkleBatch[] }): void {
+    const unsaved = this.pending.filter(record => record.kind === "entry").map(record => record.value as AuditEntry);
+    this.storedEntries.splice(0, this.storedEntries.length, ...structuredClone(latest.entries));
+    this.storedBatches.splice(0, this.storedBatches.length, ...structuredClone(latest.batches));
+    this.pending = [];
+    for (const entry of unsaved) this.record(entry.type, entry.actor, entry.data, entry.timestamp);
   }
 
   verifyChain(): boolean {

@@ -44,7 +44,7 @@ export interface LiveJira {
 
 export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
-  readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }>();
+  readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; updatedAt?: string; finishedAt?: string }>();
   readonly orgId: string;
   private persistence?: Persistence;
   private persistQueue: Promise<void> = Promise.resolve();
@@ -154,6 +154,17 @@ export class Brain {
     return next;
   }
 
+  /**
+   * Makes one change and saves it. Another copy of the API may have saved this company in the meantime: its state is
+   * then taken (persist does that) and the change is made again on top of it, so a person's action is not lost to a
+   * save that happened to clash. `apply` must make the change and save it.
+   */
+  async change<T>(apply: () => Promise<T>): Promise<T> {
+    await this.refreshIfStale().catch(() => false);
+    try { return await apply(); }
+    catch (error) { if (!(error instanceof StaleState)) throw error; return apply(); }
+  }
+
   private assertOrg(user: User): void {
     if ((user.orgId ?? "demo-company-a") !== this.orgId || user.active === false) throw new Error("Forbidden");
   }
@@ -168,6 +179,7 @@ export class Brain {
    */
   syncHealth(): Array<{ source: Source; status: string; scope?: string; connectedAt?: string; error?: string; items: number; lastSync?: string;
     job?: { status: string; found: number; indexed: number; failed: number; finishedAt?: string }; pending?: number }> {
+    this.settleStaleJobs();
     return sources.map(source => {
       const connection = this.connections.get(source);
       const job = this.jobs.get(source);
@@ -208,6 +220,8 @@ export class Brain {
   async sync(source: Source): Promise<void> {
     const previous = this.syncQueues.get(source) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(() => this.syncSource(source)).catch(async error => {
+      // Another copy saved this company while this one was syncing; its newer state was taken. Nothing failed at the source.
+      if (error instanceof StaleState) throw error;
       const connection = this.connections.get(source);
       // With no credential at all the source simply isn't connected; marking it Error would have it retried forever.
       if (connection && connection.status !== "Not connected" && error instanceof SourceNotConnected) {
@@ -262,6 +276,9 @@ export class Brain {
     this.runs.set(source, { ...run, status: "running" });
     const resumedJob = this.jobs.get(source);
     if (resumedJob?.status === "failed") { resumedJob.status = "running"; resumedJob.error = undefined; }
+    // Progress is saved every few documents, not after each: every save writes the whole workspace. A reading cut off
+    // between saves repeats at most those few documents next time.
+    let unsaved = 0, savedAt = Date.now();
     try {
       while (run.pendingIds.length) {
         const id: string = run.pendingIds[0];
@@ -312,7 +329,11 @@ export class Brain {
         if (doc && job?.status === "running") job.indexed++;
         run = { ...run, checkpoint: id, pendingIds: remaining, orgId: this.orgId };
         this.runs.set(source, run);
-        await this.persist();
+        if (++unsaved >= 25 || Date.now() - savedAt > 5_000) {
+          if (job?.status === "running") job.updatedAt = new Date().toISOString();
+          await this.persist();
+          unsaved = 0; savedAt = Date.now();
+        }
       }
       await this.retryMissingEmbeddings(source);
       this.states.set(source, {
@@ -331,6 +352,7 @@ export class Brain {
       if (connection) { connection.status = "Live"; connection.error = undefined; }
       await this.persist();
     } catch (error: unknown) {
+      if (error instanceof StaleState) throw error;
       this.runs.set(source, { ...run, status: "failed" });
       const job = this.jobs.get(source);
       if (job) { job.status = "failed"; job.failed++; job.error = error instanceof Error ? error.message : "Import failed"; }
@@ -376,7 +398,8 @@ export class Brain {
   async setScope(actor: User, source: Source, scope: ImportScope): Promise<void> {
     this.assertOrg(actor);
     if (actor.role !== "admin") throw new Error("Forbidden");
-    if (this.syncQueues.has(source)) throw new Error("Sync running; retry scope change");
+    // A sync of this source in progress finishes first, rather than the admin being told to try again.
+    await this.syncQueues.get(source)?.catch(() => undefined);
     // "Only what is new" starts at the moment it was chosen, and keeps that moment when the scope is saved again.
     const previous = this.connections.get(source)!.scope;
     if (scope.futureOnly && !scope.since) scope = { ...scope, since: previous.futureOnly && previous.since ? previous.since : new Date().toISOString() };
@@ -398,13 +421,13 @@ export class Brain {
   }
 
   /**
-   * A reading this copy isn't doing, started over ten minutes ago, stopped when the copy doing it was shut down (a
+   * A reading this copy isn't doing, with no progress saved for three minutes, stopped when the copy doing it was shut down (a
    * serverless function has a time limit). Left as "running" it would lock the setup page and block a new reading, so it
    * is marked as stopped; the next sync carries on from where it got to.
    */
   settleStaleJobs(now = Date.now()): void {
     for (const job of this.jobs.values()) {
-      if (job.status !== "running" || this.syncQueues.has(job.source) || now - Date.parse(job.startedAt) < 600_000) continue;
+      if (job.status !== "running" || this.syncQueues.has(job.source) || now - Date.parse(job.updatedAt ?? job.startedAt) < 180_000) continue;
       job.status = "failed"; job.error = "Reading stopped before it finished; it will carry on at the next sync";
       const connection = this.connections.get(job.source);
       if (connection?.status === "Importing") { connection.status = "Error"; connection.error = job.error; }

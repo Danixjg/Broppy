@@ -178,7 +178,7 @@ function auditSigningKey(requiredBy: string): Buffer {
 async function configuredAudit(persistence?: Persistence): Promise<AuditLog> {
   if (persistence) {
     return new AuditLog({ orgId: persistence.orgId, signingKey: auditSigningKey("for durable audit"), initial: await persistence.loadAudit(),
-      persist: (kind, value) => persistence.appendAudit(kind, value) });
+      persist: (kind, value) => persistence.appendAudit(kind, value), reload: () => persistence.loadAudit() });
   }
   const path = process.env.AUDIT_LOG_PATH;
   if (!path) return new AuditLog();
@@ -283,7 +283,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
     await brain.restore();
     if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
-      store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); brain.markConnected(admin, "slack"); await brain.persist(); },
+      store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); await brain.change(async () => { brain.markConnected(admin, "slack"); await brain.persist(); }); },
       discard: async () => { await oauth!.remove("slack"); } };
     // On a serverless host the function may stop once a reply is sent; imports keep it running until they finish.
     if (process.env.VERCEL) brain.onBackground = work => waitUntil(work);
@@ -294,7 +294,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     // The directory is also the in-memory list of people the brain knows; reload it after the admin changes who is on it.
     const reloadUsers = async () => { users!.splice(0, users!.length, ...await tenantDirectory!.list()); };
     const orchestrator = new SyncOrchestrator(brain, connectors ? 300_000 : 30_000);
-    if (options.startOrchestrator === false) {
+    // With live sources the saved workspace is loaded above and the scheduled background sync keeps it current, so a
+    // person's first request never waits on reading every source (or on finishing a reading a stopped copy left).
+    if (options.startOrchestrator === false && !connectors) {
       // A source that isn't connected yet, or is briefly down, is recorded on its own connection. It must not stop the
       // whole API from starting: the admin connects sources from the running API, so refusing to start would lock them out.
       await brain.syncAll().catch(error => {
@@ -409,8 +411,13 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         const owner = returned.company ? await tenants.get(returned.company).catch(() => undefined) : home;
         const slackInstallation = owner?.slackInstallation ?? home.slackInstallation;
         if (!slackInstallation) return await reply(response, 404, { error: "Slack onboarding is not configured" });
+        if (returned.company && !owner?.slackInstallation) console.warn(JSON.stringify({ event: "slack_install_refused", org: returned.company, reason: "company has no Slack setup" }));
+        await owner?.brain.refreshIfStale().catch(() => false);
         const outcome = returned.company && !owner?.slackInstallation ? "failed" : await slackInstallation.callback({ state: returned.state, code: url.searchParams.get("code") ?? "", error: url.searchParams.get("error") ?? "" })
-          .catch(() => "failed");
+          .catch(error => {
+            console.error(JSON.stringify({ event: "slack_install_failed", org: returned.company ?? "home", error: error instanceof Error ? error.message.slice(0, 300) : String(error) }));
+            return "failed" as const;
+          });
         const destination = new URL(returned.page === "setup" ? returnLocation(webOrigin, "setup", {}) : slackInstallation.returnUrl);
         destination.searchParams.set("slack_install", outcome);
         response.writeHead(302, { location: destination.href, "cache-control": "no-store", "referrer-policy": "no-referrer" });
@@ -430,8 +437,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           await owner.brain.refreshIfStale();
           const { user: approved, sources: connected } = await owner.oauth.completeAll(source, returned.state, url.searchParams.get("code") ?? "", sub => owner.directory!.bySub(sub));
           // One Atlassian approval can connect both Jira and Confluence.
-          for (const item of connected) { await owner.applySite(item); owner.brain.markConnected(approved, item); }
-          await owner.brain.persist();
+          for (const item of connected) await owner.applySite(item);
+          await owner.brain.change(async () => { for (const item of connected) owner.brain.markConnected(approved, item); await owner.brain.persist(); });
           location = returnLocation(webOrigin, returned.page, { connected: connected.join(",") });
         } catch (error) {
           location = returnLocation(webOrigin, returned.page, { connect_failed: source, reason: connectFailure(error, url.searchParams.get("error") ?? "") });
@@ -708,8 +715,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           if (input.ids !== undefined && (!Array.isArray(input.ids) || !input.ids.every(id => typeof id === "string" && id.length > 0))) throw new Error("Invalid scope");
           if (input.since !== undefined && (typeof input.since !== "string" || !Number.isFinite(Date.parse(input.since)))) throw new Error("Invalid scope");
           const mode = input.mode as ImportScope["mode"];
-          await brain.setScope(user, source, { mode, containers: input.containers as string[] | undefined, ids: input.ids as string[] | undefined,
-            since: input.since as string | undefined, futureOnly: input.futureOnly as boolean | undefined });
+          await brain.change(() => brain.setScope(user, source, { mode, containers: input.containers as string[] | undefined, ids: input.ids as string[] | undefined,
+            since: input.since as string | undefined, futureOnly: input.futureOnly as boolean | undefined }));
           // Saving what to include starts importing it; choosing none only removes.
           if (mode !== "none") await brain.startImport(user, source);
           return await reply(response, 200, { ok: true });
@@ -925,6 +932,18 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         message === "Unknown group membership" || message === "Unknown channel membership") {
         return await reply(response, 404, { error: "Not found" });
       }
+      // Messages already written for the person reading them are passed on as they are.
+      if (PLAIN_MESSAGES.has(message) || /^Live .* must be (changed|edited) /.test(message)) return await reply(response, 409, { error: message });
+      if (message === "Connect source first") return await reply(response, 409, { error: "Connect this tool first, from Setup or Connectors." });
+      const jira = /^Jira request failed \((\d{3})\)$/.exec(message);
+      if (jira) return await reply(response, 502, { error: `Jira refused that (${jira[1]}). Check the project key and that your Jira account can work in it.` });
+      // Every other failure is logged, so it can be found. A fault on our side (a bug, a timeout, a database or provider
+      // that failed) is said to be ours; anything else is input this API could not use.
+      console.error(JSON.stringify({ event: "request_failed", method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname, error: message.slice(0, 300) }));
+      const ours = error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError || error instanceof SyntaxError
+        || (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name))
+        || /fetch failed|timed? ?out|aborted|failed \(\d{3}\)|unavailable|Persistence|Supabase|Conflicting audit|ECONN|ENOTFOUND/i.test(message);
+      if (ours) return await reply(response, 500, { error: "Something went wrong on Broppy's side. Try again in a moment.", code: "internal" });
       return await reply(response, 400, { error: "Invalid request" });
     }
   });
@@ -939,6 +958,14 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   };
   return { brain, orchestrator, server, shutdown };
 }
+
+/** Errors whose wording is already meant for the person who asked, passed on unchanged. */
+const PLAIN_MESSAGES = new Set([
+  "We couldn't confirm whether Jira created the task. Check Jira before trying again.",
+  "Your Jira account can't create issues in that project", "Jira didn't let you mark this task done", "Only Jira tasks can be marked done",
+  "Native permission edits may only narrow access",
+  "Your Broppy profile needs a Slack email before you can add Broppy to Slack. Ask your administrator to update it."
+]);
 
 // Serverless hosts such as Vercel import this module and call its default export once per request. The server is
 // built on first use and reused while the instance stays warm; there is no background sync loop between requests.
