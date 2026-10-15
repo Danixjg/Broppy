@@ -7,9 +7,10 @@ import { DEFAULT_THRESHOLD } from "../../slack/src/score.js";
 import { companyServiceToken } from "./service-actor.js";
 
 import { SLACK_BOT_SCOPES } from "../../slack/src/app-manifest.js";
-export type CallbackOutcome = "installed" | "denied" | "failed" | "unsupported" | "conflict";
+export type CallbackOutcome = "installed" | "denied" | "failed" | "unsupported" | "conflict" | "email_mismatch";
 export class SlackSetupError extends Error {}
 class SlackGrantError extends Error {}
+class SlackInstallerMismatch extends SlackGrantError {}
 export interface SlackOAuthConfig { appId: string; clientId: string; clientSecret: string; orgId: string; apiOrigin: string; webOrigin: string }
 function secureOrigin(value: string): string {
   const url = new URL(value);
@@ -98,7 +99,8 @@ export class SlackInstallationOAuth {
       || !record(value.authed_user) || !nonempty(value.authed_user.id) || typeof value.scope !== "string") throw new SlackGrantError("Invalid Slack bot grant");
     if (value.is_enterprise_install !== false || value.expires_in !== undefined || value.refresh_token !== undefined) throw new SlackSetupError("Workspace installs require Slack token rotation to be disabled");
     const scopes = value.scope.split(",").map(scope => scope.trim()).filter(Boolean);
-    if (scopes.length !== SLACK_BOT_SCOPES.length || !SLACK_BOT_SCOPES.every(scope => scopes.includes(scope))) throw new SlackGrantError("Slack granted unexpected bot permissions");
+    // The app may ask for more than Broppy needs (scopes added in Slack's settings); what Broppy needs must all be there.
+    if (!SLACK_BOT_SCOPES.every(scope => scopes.includes(scope))) throw new SlackGrantError(`Slack did not grant ${SLACK_BOT_SCOPES.filter(scope => !scopes.includes(scope)).join(", ")}`);
     const proof = await this.slack("auth.test", value.access_token);
     if (proof.team_id !== value.team.id || proof.user_id !== value.bot_user_id || !nonempty(proof.bot_id)
       || (proof.app_id !== undefined && proof.app_id !== this.config.appId) || proof.is_enterprise_install === true) throw new SlackGrantError("Slack bot identity did not match");
@@ -106,7 +108,7 @@ export class SlackInstallationOAuth {
     if (!record(installer.user) || installer.user.id !== value.authed_user.id || installer.user.deleted === true || installer.user.is_bot === true
       || !record(installer.user.profile) || !nonempty(installer.user.profile.email)) throw new SlackGrantError("Slack installer identity unavailable");
     const email = installer.user.profile.email.trim().toLowerCase();
-    if (!nonempty(admin.platformIdentities?.slack) || email !== admin.email.trim().toLowerCase() || email !== admin.platformIdentities.slack.trim().toLowerCase()) throw new SlackGrantError("Slack installer does not match the Broppy admin");
+    if (!nonempty(admin.platformIdentities?.slack) || email !== admin.email.trim().toLowerCase() || email !== admin.platformIdentities.slack.trim().toLowerCase()) throw new SlackInstallerMismatch("Slack installer does not match the Broppy admin");
     const bot = { accessToken: value.access_token, appId: this.config.appId, teamId: value.team.id, teamName: typeof value.team.name === "string" ? value.team.name : value.team.id, botUserId: value.bot_user_id, scopes };
     if (!this.link?.scopes.length) return { bot };
     const authed = value.authed_user;
@@ -117,13 +119,14 @@ export class SlackInstallationOAuth {
     return { bot, user: { access_token: authed.access_token, scope: typeof authed.scope === "string" ? authed.scope : undefined } };
   }
   async callback(input: { state: string; code: string; error: string }): Promise<CallbackOutcome> {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(input.state)) return "failed";
+    const refuse = (reason: string): CallbackOutcome => { console.warn(JSON.stringify({ event: "slack_install_refused", org: this.config.orgId, reason })); return "failed"; };
+    if (!/^[A-Za-z0-9_-]{43}$/.test(input.state)) return refuse("malformed state");
     const attempt = await this.registry.consume(this.config.orgId, this.config.appId, this.hash(input.state));
-    if (!attempt) return "failed";
+    if (!attempt) return refuse("unknown, used or expired install attempt");
     if (input.error) return "denied";
-    if (!input.code) return "failed";
+    if (!input.code) return refuse("Slack returned no code");
     const actor = await this.directory(attempt.personSub);
-    if (!actor || actor.id !== attempt.person || actor.auth0Sub !== attempt.personSub || actor.orgId !== attempt.orgId || actor.active !== true || actor.role !== "admin" || !nonempty(actor.platformIdentities?.slack)) return "failed";
+    if (!actor || actor.id !== attempt.person || actor.auth0Sub !== attempt.personSub || actor.orgId !== attempt.orgId || actor.active !== true || actor.role !== "admin" || !nonempty(actor.platformIdentities?.slack)) return refuse("installing admin is no longer an active admin with a Slack identity");
     try {
       const grant = await this.grant(input.code, actor);
       if (grant.user) await this.link!.store(actor, grant.user);
@@ -131,7 +134,10 @@ export class SlackInstallationOAuth {
       if (grant.user) await this.link!.discard();
       return "conflict";
     } catch (error) {
+      // Which check refused it, never a token, so a failed install can be diagnosed from the logs.
+      if (error instanceof SlackSetupError || error instanceof SlackGrantError) console.warn(JSON.stringify({ event: "slack_install_refused", org: this.config.orgId, reason: error.message }));
       if (error instanceof SlackSetupError) return "unsupported";
+      if (error instanceof SlackInstallerMismatch) return "email_mismatch";
       if (error instanceof SlackGrantError) return "failed";
       throw error;
     }
