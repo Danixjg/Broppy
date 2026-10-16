@@ -314,7 +314,7 @@ describe("chat agent turns", () => {
   it("prepares a ticket for confirmation without creating one, and never picks the project", async () => {
     const { request, brain } = await start();
     const asked = await request("/v1/query", "ravi", { method: "POST", body: JSON.stringify({ question: "create a Jira ticket to raise the ledger quota" }) });
-    expect(asked.body).toMatchObject({ kind: "action", proposal: { type: "jira_issue", summary: "raise the ledger quota" } });
+    expect(asked.body).toMatchObject({ kind: "action", proposal: { type: "jira_issue", summary: "Raise the ledger quota" } });
     expect(asked.body.proposal.project).toBeUndefined();
     expect(brain.audit.entries.some(entry => entry.type === "agent_action_proposed")).toBe(true);
     expect(brain.audit.entries.some(entry => entry.type === "agent_action_executed")).toBe(false);
