@@ -600,6 +600,16 @@ export class Brain {
       catch { audit("search_fallback", {}); }
     }
     lap("search");
+    // "What are my to-dos?" names a Jira status, not words a ticket contains, so the answer is the tickets in that status,
+    // newest first, without other matches or their links. They still go through the same permission and live checks.
+    const statuses = askedStatuses(trimmed);
+    const listed = statuses ? [...this.index.documents.values()]
+      .filter(doc => doc.source === "jira" && !doc.deletedAt && doc.chunks.length &&
+        statuses.has(String(doc.metadata.status ?? "").trim().toLowerCase()))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .map(doc => ({ docId: doc.docId, chunkId: doc.chunks[0].chunkId, score: 1, coverage: 1 })) : [];
+    const listsStatus = listed.length > 0;
+    if (listsStatus) candidates = listed;
     if (plan.window) {
       candidates = candidates.filter(item => {
         const doc = this.index.documents.get(item.docId);
@@ -630,7 +640,7 @@ export class Brain {
       const doc = this.index.documents.get(docId);
       return doc ? `${doc.title}\n${doc.content}` : "";
     });
-    const linked = this.linkedCandidates(candidates, new Set(hits.map(item => item.docId)), plan, audit, within);
+    const linked = listsStatus ? [] : this.linkedCandidates(candidates, new Set(hits.map(item => item.docId)), plan, audit, within);
     const linkedAllowed = linked.length ? await authorize([...new Set(linked.map(item => item.docId))]) : new Set<string>();
     const authorizedCandidates: Array<SearchCandidate & { linkedFrom?: string }> = [
       ...hits,
@@ -1584,6 +1594,25 @@ function inWindow(doc: SourceDocument, plan: QueryPlan): boolean {
 
 // A Jira issue's status lives in its fields, not its text, so the answer context states it next to the issue key:
 // "DB-12 (in progress) tracks …", or "DB-15 (blocked): …" when the text doesn't start with the key.
+/**
+ * The Jira statuses a question asks for by name, lowercased, or undefined when it names none. "Done" counts only next to
+ * a word for tasks, since "what was done about X" is not a request for a list.
+ */
+export function askedStatuses(question: string): Set<string> | undefined {
+  const text = question.toLowerCase();
+  const wanted = new Set<string>();
+  if (/\b(to[\s-]?dos?|todos?|not started|backlog|open (tasks?|tickets?|issues?|items?))\b/.test(text)) {
+    for (const status of ["to do", "todo", "open", "backlog", "selected for development", "reopened"]) wanted.add(status);
+  }
+  if (/\bin[\s-]progress\b|\b(working on|ongoing)\b/.test(text)) for (const status of ["in progress", "in development"]) wanted.add(status);
+  if (/\b(in|under) review\b|\bbeing reviewed\b/.test(text)) for (const status of ["in review", "code review", "review"]) wanted.add(status);
+  if (/\bblocked\b/.test(text) && /\b(tasks?|tickets?|issues?|items?|what)\b/.test(text)) wanted.add("blocked");
+  if (/\b(done|completed|finished|closed|resolved)\b/.test(text) && /\b(tasks?|tickets?|issues?|items?)\b/.test(text)) {
+    for (const status of ["done", "closed", "resolved", "completed"]) wanted.add(status);
+  }
+  return wanted.size ? wanted : undefined;
+}
+
 function withJiraStatus(doc: SourceDocument, text: string): string {
   const status = doc.source === "jira" ? doc.metadata.status : undefined;
   if (!status) return text;

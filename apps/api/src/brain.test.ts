@@ -3,7 +3,7 @@ import { AuditLog } from "@brain/audit";
 import type { RemoteFgaAdapter } from "@brain/fga-adapter";
 import type { SemanticEmbeddingClient, SupabaseIndex } from "@brain/retrieval";
 import type { IndexedDocument } from "@brain/types";
-import { Brain, coveringHits, namedIssueHits } from "./brain.js";
+import { askedStatuses, Brain, coveringHits, namedIssueHits } from "./brain.js";
 import { ModelUnavailable } from "./llm.js";
 import { actorTrace } from "./server.js";
 import { groundedOutput, NO_RESULT } from "@brain/retrieval";
@@ -26,6 +26,23 @@ describe("Internal Brain security and sync", () => {
     const answer = await brain.query(brain.user("ravi")!, "What does PAY-101 need before cutover?");
     expect(answer.text).toContain("Complete SEC-44 failover verification before production traffic moves.");
     expect(answer.citations.map(citation => citation.docId)).not.toContain("drive:cutover-duplicate");
+  });
+
+  it("lists the Jira tickets in the status a question asks for, only among those the person may open", async () => {
+    const brain = new Brain();
+    await brain.syncAll();
+    const open = [...brain.index.documents.values()].filter(doc => doc.source === "jira" && doc.metadata.status === "open").map(doc => doc.docId);
+    expect(open.length).toBeGreaterThan(0);
+    for (const person of ["ravi", "alex"]) {
+      const user = brain.user(person)!;
+      const visible = new Set((await brain.visibleDocuments(user)).map(doc => doc.docId));
+      const cited = (await brain.query(user, "What are my To Dos")).citations.map(citation => citation.docId);
+      expect(cited.filter(id => id.startsWith("jira:")).sort()).toEqual(open.filter(id => visible.has(id)).sort());
+    }
+    expect(askedStatuses("what's in progress?")).toEqual(new Set(["in progress", "in development"]));
+    expect(askedStatuses("What was done about the outage?")).toBeUndefined();
+    expect(askedStatuses("Which tickets are done?")?.has("done")).toBe(true);
+    expect(askedStatuses("What does PAY-101 need before cutover?")).toBeUndefined();
   });
 
   it("still answers from the other sources when one source's access check throws", async () => {
