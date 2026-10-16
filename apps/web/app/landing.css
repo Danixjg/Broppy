@@ -171,3 +171,8 @@ ul, ol { padding: 0; list-style: none; }
 .form-more .form { margin-top: .8rem; }
 .form-sub { margin-top: 1.6rem; font-size: 1.05rem; letter-spacing: -.01em; }
 .form-sub + .form, .form-sub + .form-error { margin-top: .8rem; }
+.legal { width: min(100%, 44rem); line-height: 1.65; }
+.legal h2 { margin-top: 1.6rem; font-size: 1.15rem; }
+.legal p, .legal ul { margin-top: .7rem; }
+.legal ul { padding-left: 1.2rem; display: grid; gap: .4rem; }
+.legal a { color: var(--accent, inherit); }
