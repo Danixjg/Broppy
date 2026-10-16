@@ -368,13 +368,14 @@ export class Brain {
     }
   }
 
-  /** A provider sign-in finished. A new connection imports nothing until the admin chooses. Reconnecting a source that is
-   * already set up, for instance after its credential was rejected, keeps the scope the admin chose. */
-  markConnected(actor: User, source: Source): void {
+  /** A provider sign-in finished. A new connection imports nothing until the admin chooses, unless the sign-in itself was
+   * that choice (`initial`). Reconnecting a source that is already set up, for instance after its credential was
+   * rejected, keeps the scope the admin chose. */
+  markConnected(actor: User, source: Source, initial: ImportScope = { mode: "none" }): void {
     this.assertOrg(actor);
     const existing = this.connections.get(source);
     const keep = existing && existing.status !== "Not connected";
-    this.connections.set(source, { source, status: "Connected", scope: keep ? existing.scope : { mode: "none" },
+    this.connections.set(source, { source, status: "Connected", scope: keep ? existing.scope : initial,
       connectedBy: actor.id, connectedAt: new Date().toISOString() });
     this.audit.append("connection_created", actor.id, { source, reconnected: Boolean(keep) });
   }
