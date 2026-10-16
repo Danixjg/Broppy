@@ -36,6 +36,13 @@ async function outgoing(request: NextRequest, context: Context): Promise<{ path:
   return { path: `/${path.join("/")}${request.nextUrl.search}`, body };
 }
 
+// A demo API on a protected Vercel preview needs the project's automation bypass secret.
+function demoHeaders(persona: string): Record<string, string> {
+  const headers: Record<string, string> = { "x-demo-user": persona, "content-type": "application/json" };
+  if (process.env.DEMO_API_BYPASS) headers["x-vercel-protection-bypass"] = process.env.DEMO_API_BYPASS;
+  return headers;
+}
+
 // Demo visitors reach only the mock-only demo API, with the persona they picked and no credentials.
 async function forwardDemo(request: NextRequest, context: Context) {
   if (crossOrigin(request)) return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -45,7 +52,7 @@ async function forwardDemo(request: NextRequest, context: Context) {
   if (outbound instanceof Response) return outbound;
   try {
     const response = await fetch(new URL(outbound.path, demoApiUrl()!), { method: request.method, redirect: "error",
-      cache: "no-store", headers: { "x-demo-user": persona, "content-type": "application/json" }, body: outbound.body,
+      cache: "no-store", headers: demoHeaders(persona), body: outbound.body,
       signal: AbortSignal.timeout(60_000) });
     if (response.status === 401) {
       await response.body?.cancel();
