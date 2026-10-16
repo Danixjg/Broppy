@@ -6,6 +6,8 @@ import { demoApiUrl, sameHostRedirect, wantsDemo } from "./lib/demo";
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const demo = wantsDemo(request);
+  // The privacy policy and support page are for anyone, signed in or not, on every deployment.
+  if (path === "/privacy" || path === "/support") return NextResponse.next();
   if (!authConfigured) {
     // Without SSO settings, a deployment can still serve the start page and the public demo.
     if (demoApiUrl() && (path === "/" || path === "/demo" || path === "/demo/exit" || demo)) return NextResponse.next();
