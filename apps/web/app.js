@@ -1044,7 +1044,7 @@ $("queryForm").addEventListener("submit", async event => {
   try {
     const result = await ask(question, response); if (generation !== state.identity) return;
     if (role() === "compliance" && looksLikeAuditQuestion(question)) appendAuditHint(response, question);
-    $("queryStatus").textContent = result.kind === "action" ? "Review the ticket, then confirm." : result.kind === "chat" ? "" : result.citations?.length ? "Answer grounded in authorized sources." : !state.docs.length ? "Broppy hasn't read anything yet, so there's nothing to answer from." : "Nothing you can see matches that question. Try other words."; $("question").value = "";
+    $("queryStatus").textContent = result.kind === "action" ? "Review the ticket, then confirm." : result.kind === "chat" ? "" : result.citations?.length ? "Answer grounded in authorized sources." : !state.docs.length ? "Broppy hasn't read anything yet, so there's nothing to answer from." : ""; $("question").value = "";
   }
   catch (error) { if (generation === state.identity) { response.textContent = error.message; $("queryStatus").textContent = "Query failed."; } }
   finally { $("askButton").disabled = false; history.scrollTop = history.scrollHeight; }
