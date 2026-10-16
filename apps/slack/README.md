@@ -33,12 +33,12 @@ The required bot scopes and event subscriptions come from [app-manifest.ts](src/
 | `SLACK_COMPLETION_POLICY_JSON` | Completion recipients, such as `[{"channel":"C123","project":"DB","allowedSlackIds":["U123","U456"]}]`. Empty by default. |
 | `SLACK_WORKER_TOKEN` | Optional bearer secret of at least 32 characters for the maintenance HTTP hooks. Without it those hooks refuse every request. |
 | `API_ORIGIN`, `WEB_ORIGIN` | Trusted HTTPS customer API and web origins. The API publishes these; Slack payloads and browser parameters never choose them. |
-| `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `AUTH0_ORG_ID` | Durable organization-scoped server store. Apply migrations through `010_slack_installations.sql` before activating the gateway. Fresh projects use `infra/supabase/schema.sql`. Separate registry and customer task-store projects each need the schema. |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `AUTH0_ORG_ID` | Durable organization-scoped server store. The Slack installation tables must exist before activating the gateway. Separate registry and customer task-store projects each need the schema. |
 | `TASK_SCORE_THRESHOLD` | Passive suggestion threshold, default `0.6`. |
 
 People, channel/project maps, disclosure policies, service credentials, task-store credentials, and origins are configured on each customer API. The API publishes one Vault-backed runtime snapshot on install. An admin uses **Refresh workspace settings** after changing deployment settings. The shared gateway reads that snapshot for every request and never inherits a global organization or token.
 
-See [customer installation setup](../../docs/slack-onboarding.md) for activation and lifecycle.
+Admins add the bot from **Connectors → Slack bot → Add to Slack**; one Slack workspace belongs to one Broppy company at a time.
 
 The API must expose authenticated service routes `POST /v1/service/actor` and `POST /v1/service/jira/access` in addition to its existing issue and query routes. The access route reads Jira as the active person and returns only the authorized key, URL, category, provider version, and an optional operation marker.
 
