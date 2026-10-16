@@ -8,7 +8,7 @@ import { commitmentFingerprint, MemoryTaskStore, proposalId, type Proposal, type
 import { fingerprint as taskFingerprint, tokens as taskTokens } from "../../slack/src/fingerprint.js";
 import { AuditLog } from "@brain/audit";
 import { loadMockCorpus, MockConnector, type Container, type GeneratedItems, type ImportScope } from "@brain/connectors";
-import { SourceNotConnected } from "@brain/connectors/live";
+import { LiveConnector, SourceNotConnected } from "@brain/connectors/live";
 import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
   type SupabaseIndex } from "@brain/retrieval";
@@ -111,6 +111,10 @@ export class Brain {
     for (const run of snapshot.runs) this.runs.set(run.source, run);
     for (const connection of snapshot.connections ?? []) this.connections.set(connection.source, connection);
     for (const job of snapshot.jobs ?? []) this.jobs.set(job.source, job);
+    if (this.liveMode) {
+      const stored = [...this.index.documents.values()].filter(doc => !doc.deletedAt).map(doc => doc.docId);
+      for (const connector of Object.values(this.connectors)) if (connector instanceof LiveConnector) connector.remember(stored);
+    }
     if (!this.liveMode && snapshot.connectorDocuments) {
       for (const source of sources) {
         this.connectors[source] = new MockConnector(source, snapshot.connectorDocuments.filter((doc: SourceDocument) => doc.source === source));
