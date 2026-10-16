@@ -73,3 +73,16 @@ Supabase audit writes are ordered, idempotent and reject conflicting sequences. 
 Install `infra/fga/model.fga` and set `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE`. The OpenFGA SDK obtains and refreshes client-credentials tokens. Tuple subjects and objects include the organization namespace. Native Slack/Jira/Confluence/Drive permission shapes remain enforced in the connector layer, alongside tiers and fresh delegated source checks. A source-specific remote FGA schema remains a follow-up consideration; the current remote schema is the generic document intersection described in the audit.
 
 Sign-in state (`oauth_flows`, migration `008_oauth_flows.sql`) lives in Supabase rather than in API memory, so the provider's redirect can reach any API instance (Vercel runs several). Each provider's differences from the common flow are one entry in `apps/api/src/oauth-providers.ts`; connectors receive an `AuthorizationProvider` (`@brain/types`) and never see tokens.
+
+## Atlassian personal data
+
+Broppy stores no Atlassian account personal data, so it does not use Atlassian's Personal Data Reporting API. When the Atlassian app's distribution asks "Does your app store personal data?", the answer is **No**. Specifically:
+
+- Jira reads only `summary`, `description`, `updated`, `status`, `project` and `issuelinks`. Assignee, reporter and other account fields are never requested.
+- @mentions lose their account ID and display name when Broppy turns a Jira description or a Confluence page into text. A test in `packages/connectors/src/live.test.ts` keeps this true.
+- Confluence keeps the page title, body text, status, space and labels, and drops the author and version author.
+- Permission checks look up a person's Atlassian account ID from their Broppy email. That ID is held in memory for 10 minutes and never written to storage.
+- Emails in Broppy's directory belong to Broppy's own accounts and are entered by the company's admin, not read from Atlassian.
+- `jiraAccountId` in the optional `SLACK_PEOPLE` setting is entered by the operator, not read from Atlassian. Leave it out if you answer No.
+
+If Broppy ever stores an Atlassian account field, it must report those account IDs to `https://api.atlassian.com/app/report-accounts/` at least every 7 days. It must also erase or refresh that data when Atlassian answers `closed` or `updated`.

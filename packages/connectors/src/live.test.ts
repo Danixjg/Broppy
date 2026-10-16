@@ -66,6 +66,29 @@ it("checks items another instance read once they are remembered from storage, an
   await expect(fresh.checkAccess(user, "jira:PAY-999")).rejects.toThrow("Unknown source item");
 });
 
+it("keeps no Atlassian account data from Jira or Confluence: mentions lose their account ID and name", async () => {
+  // Broppy answers "doesn't store personal data" to Atlassian, so it never reports accounts. This keeps that true.
+  const accountId = "5be24ad8b1653240376955d2";
+  const transport = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/rest/api/3/issue/")) return Response.json({ fields: {
+      summary: "Ship the cutover", updated: "2026-09-26T11:00:00.000Z", status: { name: "To Do" }, project: { key: "PAY" },
+      assignee: { accountId, displayName: "Priya Nair", emailAddress: "priya@example.test" },
+      description: { type: "doc", content: [{ type: "paragraph", content: [
+        { type: "mention", attrs: { id: accountId, text: "@Priya Nair" } }, { type: "text", text: " please confirm the runbook." }] }] } } });
+    return Response.json({ title: "Runbook", status: "current", spaceId: "1", version: { createdAt: "2026-09-26T11:00:00.000Z", authorId: accountId },
+      body: { storage: { value: `<p><ac:link><ri:user ri:account-id="${accountId}" /></ac:link> owns this.</p>` } } });
+  });
+  for (const [source, id] of [["jira", "PAY-1"], ["confluence", "42"]] as const) {
+    const connector = new LiveConnector(source, { ids: [id], baseUrl: "https://atlassian.example.test/", serviceAuthorization: "Bearer service",
+      userAuthorizations: { ravi: "Bearer user" } }, [user], transport as typeof fetch);
+    const doc = await connector.fetchDocument(`${source}:${id}`);
+    const stored = JSON.stringify(doc);
+    expect(doc?.content).toMatch(source === "jira" ? /please confirm the runbook/ : /owns this/);
+    for (const personal of [accountId, "Priya", "priya@example.test"]) expect(stored).not.toContain(personal);
+  }
+});
+
 it("discovers all Slack pages and imports every history page and thread reply", async () => {
   const transport = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
