@@ -85,6 +85,13 @@ it("sends a demo visitor's persona only to the demo API, with no session or toke
   expect(options?.headers).toEqual({ "x-demo-user": "maya", "content-type": "application/json" });
   expect(sdk.getAccessToken).not.toHaveBeenCalled();
 });
+it("adds the Vercel protection bypass to demo requests when one is configured", async () => {
+  sdk.getSession.mockResolvedValue(null);
+  vi.stubEnv("DEMO_API_URL", "http://127.0.0.1:3002"); vi.stubEnv("DEMO_API_BYPASS", "bypass-test");
+  const fetcher = vi.fn<typeof fetch>(async () => Response.json({ documents: [] })); vi.stubGlobal("fetch", fetcher);
+  await GET(demoRequest({ persona: "maya" }), demoParams);
+  expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({ "x-vercel-protection-bypass": "bypass-test" });
+});
 it("refuses demo requests without a valid persona, the demo cookie or a demo API", async () => {
   sdk.getSession.mockResolvedValue(null);
   const fetcher = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetcher);

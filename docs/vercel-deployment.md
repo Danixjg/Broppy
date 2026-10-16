@@ -51,7 +51,7 @@ Keep the trailing slash on `AUTH0_ISSUER`. Provision the Supabase schema and act
 
 `AUDIT_SIGNING_KEY` holds the Ed25519 PEM private key itself (Vercel has no place for a key file). Add it as a **Sensitive** variable; line breaks may be pasted as real newlines or written as `\n`. Generate one with `openssl genpkey -algorithm ed25519`. `AUDIT_SIGNING_KEY_FILE` (a path to a PEM in the running function) still works and is used only when `AUDIT_SIGNING_KEY` is unset. Do not commit private keys.
 
-Configure connector credentials separately through [Slack onboarding](slack-onboarding.md) and [live sources](live-sources-and-sign-in.md). Keep `PUBLIC_DEMO` disabled for this signed-in API. A public demo requires its own API and the web host's separate `DEMO_API_URL`.
+Configure connector credentials separately through [Slack onboarding](slack-onboarding.md) and [live sources](live-sources-and-sign-in.md). Keep `PUBLIC_DEMO` disabled for this signed-in API. A public demo requires its own API and the web host's separate `DEMO_API_URL`. If that demo API runs on a Vercel preview behind Vercel Authentication, also set the web host's `DEMO_API_BYPASS` to the API project's automation bypass secret; the web host sends it as `x-vercel-protection-bypass` on demo requests only.
 
 ## Verify the deployment
 
