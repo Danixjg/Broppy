@@ -1460,7 +1460,10 @@ export class Brain {
   private async liveAuthorizedDocument(user: User, docId: string): Promise<SourceDocument | undefined> {
     try {
       return await this.checkedLiveDocument(user, docId);
-    } catch {
+    } catch (error) {
+      // The cause is the source's error code (e.g. "Slack user lookup failed (missing_scope)"), never a token or content.
+      const cause = error instanceof Error ? (error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message) : "unknown";
+      console.warn(JSON.stringify({ event: "source_check_failed", orgId: this.orgId, source: docId.split(":")[0], cause: cause.slice(0, 200) }));
       this.audit.append("source_check_failed", user.id, { ...this.auditDocument(docId) });
       return undefined;
     }
