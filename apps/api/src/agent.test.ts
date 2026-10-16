@@ -40,7 +40,9 @@ describe("plainIssue", () => {
     expect(typedProject("create a ticket for the db migration")).toBeUndefined();
   });
   it("takes the title from the person's own words", () => {
-    expect(plainIssue("Please create a Jira ticket for the quota increase.")).toMatchObject({ summary: "the quota increase" });
+    expect(plainIssue("Please create a Jira ticket for the quota increase.")).toMatchObject({ summary: "The quota increase" });
+    expect(plainIssue("Create a ticket in project DB to update the migration checklist.")).toMatchObject({ summary: "Update the migration checklist", project: "DB" });
+    expect(plainIssue("Open a ticket in the PAY project: retry failed refunds")).toMatchObject({ summary: "Retry failed refunds", project: "PAY" });
     expect(plainIssue("create a ticket for cleanup").id).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
@@ -90,7 +92,7 @@ describe("understandTurn", () => {
   });
   it("falls back to the fixed patterns without a model, on junk, or on an error", async () => {
     expect(await understandTurn(undefined, [], "hi")).toMatchObject({ kind: "chat" });
-    expect(await understandTurn(model("sure thing"), [], "create a ticket for cleanup")).toMatchObject({ kind: "action", proposal: { summary: "cleanup" } });
+    expect(await understandTurn(model("sure thing"), [], "create a ticket for cleanup")).toMatchObject({ kind: "action", proposal: { summary: "Cleanup" } });
     expect(await understandTurn(model(new Error("down")), [], "what is DB-12?")).toEqual({ kind: "question", question: "what is DB-12?" });
     expect(await understandTurn(model('{"kind":"chat","reply":""}'), [], "what is DB-12?")).toEqual({ kind: "question", question: "what is DB-12?" });
   });

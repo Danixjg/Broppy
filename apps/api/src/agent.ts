@@ -60,8 +60,12 @@ export function typedProject(message: string): string | undefined {
 
 const LEAD = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:(?:create|open|file|make|raise|log|add|write up)\s+(?:me\s+)?(?:a|an|the|another)?\s*(?:new\s+)?(?:jira\s+)?(?:ticket|issue|task|story|bug)\s*(?:for|to|about|called|titled|named|on|:|-)?\s*|turn (?:that|this|it) into (?:a|an)\s*(?:jira\s+)?(?:ticket|issue|task)\s*)/i;
 
+// Where the ticket goes is the project field's job, so "in project DB to …" leaves the title.
+const PLACE = /^(?:in|for|under)\s+(?:the\s+)?(?:project\s+[A-Z][A-Z0-9]{0,9}|[A-Z][A-Z0-9]{1,9}\s+(?:project|board))\s*(?:to|for|about|:|-)?\s*/;
+
 function plainProposal(message: string): { summary: string; description: string } {
-  const summary = message.trim().replace(LEAD, "").replace(/[\s.]+$/, "").slice(0, 120);
+  const words = message.trim().replace(LEAD, "").replace(PLACE, "").replace(/[\s.]+$/, "");
+  const summary = (words.charAt(0).toUpperCase() + words.slice(1)).slice(0, 120);
   return { summary, description: message.trim().slice(0, 5000) };
 }
 
