@@ -72,7 +72,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-weight: 700; font-size: .69rem;
 }
 .live-dot { width: .38rem; height: .38rem; border-radius: 50%; background: #2c9d62; }
-.auth-identity { color: #314558; }
+.auth-identity { color: #f4f8fb; }
 .auth-identity button { color: #243e50; border: 1px solid #d8e2e7; background: #fff; }
 .view-nav {
   min-height: 55px; gap: 1rem; align-items: center;
