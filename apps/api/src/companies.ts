@@ -69,6 +69,18 @@ export class Companies {
     return kind === "company" || kind === "personal" ? kind : undefined;
   }
 
+  /** The company's display name, for showing people which company they are signed in to. */
+  async name(orgId: string): Promise<string | undefined> {
+    if (!/^org_[A-Za-z0-9]{1,64}$/.test(orgId)) return undefined;
+    const response = await this.transport(`${this.baseUrl}/rest/v1/organizations?select=name&org_id=eq.${encodeURIComponent(orgId)}`, {
+      headers: this.headers(), signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`Supabase organizations failed (${response.status})`);
+    const rows = await response.json() as Array<{ name?: unknown }>;
+    const name = Array.isArray(rows) ? rows[0]?.name : undefined;
+    return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  }
+
   /** Records the kind of a workspace listed before kinds were, once it has been worked out. Never changes a recorded one. */
   async recordKind(orgId: string, kind: WorkspaceKind): Promise<void> {
     if (orgId === this.homeOrgId) return;

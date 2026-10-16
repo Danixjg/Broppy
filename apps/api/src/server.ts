@@ -507,7 +507,10 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       }
 
       if (request.method === "GET" && url.pathname === "/v1/me") {
-        return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups });
+        // Someone can belong to several companies, so say which one this session is in.
+        const company = tenant.isHome ? undefined : tenant.personal ? "Personal workspace"
+          : await companies?.name(tenant.orgId).catch(() => undefined);
+        return await reply(response, 200, { id: user.id, name: user.name, role: user.role, groups: user.groups, ...(company ? { company } : {}) });
       }
 
       if (service && (url.pathname === "/v1/service/jira/issue" || url.pathname === "/v1/service/jira/comment")) {
