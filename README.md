@@ -1,285 +1,379 @@
-> **Start here.** [Architecture](docs/architecture.md) shows how the challenge brief's requirements are met, and the [worked examples](docs/worked-examples.md) run its five scenarios. Sign-in uses the Auth0 Next.js SDK: see [Auth0 setup, checklist and troubleshooting](apps/web/AUTH0.md). The website offers SSO, plus a public demo with fictional people and data when `DEMO_API_URL` is set. `pnpm dev` runs the demo API, which accepts `x-demo-user` persona headers for curl and the website's demo; `pnpm dev:sso` runs the SSO API from the root `.env.local`. The hosted setup, a Vercel site and one Tencent Cloud server, is in [infra/tencent/README.md](infra/tencent/README.md). Every project decision is in [decisions.md](decisions.md).
+<a id="readme-top"></a>
 
-# Internal Brain
+<!-- PROJECT SHIELDS -->
+[![Contributors][contributors-shield]][contributors-url]
+[![Forks][forks-shield]][forks-url]
+[![Stargazers][stars-shield]][stars-url]
+[![Issues][issues-shield]][issues-url]
 
-A permission-aware knowledge workspace over Slack, Jira, Confluence, and Drive data. Local fixtures are the default; opt-in live connectors read configured items from all four providers. A Rust domain core runs behind the Node API. TypeScript supplies service adapters and the Next.js web host. Vite builds the existing workspace UI served by that host. The web header and navigation use React with shadcn components; the workspace views still use the existing JavaScript controller. The default search is an in memory sparse term vector, keyword, and freshness index. Optional embeddings from Cloudflare Workers AI (`bge-m3`) add semantic vectors, and optional Supabase uses pgvector and Postgres full text search. A remote FGA adapter can also be selected with environment variables; the default path uses in process grants.
+<!-- PROJECT HEADER -->
+<br />
+<div align="center">
+  <h1>Broppy</h1>
+  <p>
+    One workspace for your team's knowledge. Answers and actions where you work.
+    <br />
+    Connect Slack, Jira, Confluence and Google Drive while respecting each person's access.
+    <br />
+    <br />
+    <a href="https://broppy-one.vercel.app"><strong>Open Broppy »</strong></a>
+    <br />
+    <br />
+    <a href="docs/architecture.md">Explore the Docs</a>
+    &middot;
+    <a href="https://github.com/Danixjg/Broppy/issues/new">Report Bug</a>
+    &middot;
+    <a href="https://github.com/Danixjg/Broppy/issues/new">Request Feature</a>
+  </p>
+</div>
 
-## Run
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li>
+      <a href="#about-the-project">About The Project</a>
+      <ul>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#built-with">Built With</a></li>
+      </ul>
+    </li>
+    <li>
+      <a href="#getting-started">Getting Started</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#installation">Installation</a></li>
+        <li><a href="#personal-account">Personal Account</a></li>
+        <li><a href="#organisation-account">Organisation Account</a></li>
+        <li><a href="#joining-an-existing-organisation">Joining an Existing Organisation</a></li>
+        <li><a href="#connect-your-tools">Connect Your Tools</a></li>
+        <li><a href="#local-development">Local Development</a></li>
+      </ul>
+    </li>
+    <li><a href="#usage">Usage</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#acknowledgments">Acknowledgments</a></li>
+  </ol>
+</details>
 
-Use Node with `pnpm` 9.15.0 and [Rust installed through rustup](https://rust-lang.org/tools/install/). The repository pins its Rust toolchain. See [Rust build and verification](docs/rust-migration.md).
+<!-- ABOUT THE PROJECT -->
+## About The Project
+
+[![Broppy project workspace][product-screenshot]](https://broppy-one.vercel.app)
+
+*Example project workspace using the repository's fictional demo data.*
+
+Team knowledge is scattered across conversations, tickets, documents and files. Finding an answer often means searching several tools and reconstructing the context yourself.
+
+**Broppy brings that context together.** Ask a question across Slack, Jira, Confluence and Google Drive, inspect the sources behind the answer, and work with the related project content. In Slack, Broppy can turn a commitment into a proposed Jira ticket for you to review and approve.
+
+Broppy was built for the **Tencent Cloud Hackathon 2026**, addressing **The Internal Brain — Building a Context-Aware Enterprise Knowledge System with RBAC, Security Logging & Audit Trail**. Its foundation is permission-aware retrieval: the content used in an answer must respect the original platform's access controls.
+
+### Features
+
+| Feature | What you can do |
+| --- | --- |
+| **Four connected sources** | Connect Slack, Jira, Confluence and Google Drive, then choose which content Broppy reads. |
+| **Questions across your tools** | Ask in natural language and receive an answer grounded in connected content, with citations linking back to its sources. |
+| **Project workspace** | Bring a project's Confluence pages, Jira tickets, Slack conversations and Drive files together in Broppy. |
+| **Confluence editing** | Read and edit Confluence content from Broppy, or open the original page in Confluence. |
+| **Slack bot** | Ask questions privately with `/broppy` or the **Ask Broppy** message shortcut. |
+| **Slack-to-Jira actions** | Detect commitments in conversations, review a proposed ticket, edit its draft and approve its creation in Jira. |
+| **Catch-up** | Get a catch-up view based on your role, groups and project access. |
+| **Latest versions and duplicates** | Inspect why a document is considered the latest and preview likely duplicates. A merge preview does not itself merge content. |
+| **Permission-aware answers** | Filter source content before it reaches the answer writer, and recheck source access when answering, including changes to a person's permissions. |
+| **Audit and compliance** | Search recorded activity, inspect questions, answers and access decisions, export CSV and verify tamper-evident audit proofs. |
+| **People and access** | Invite colleagues, assign Broppy roles, match their source accounts and remove workspace access. |
+| **AI model choice** | Use the default assistant or connect your workspace's own supported AI provider account. |
+
+For the retrieval and audit design, see [Architecture](docs/architecture.md), [Trust Boundaries](docs/trust-boundary.md) and the five [Worked Examples](docs/worked-examples.md). The worked examples use fictional data to demonstrate the hackathon scenarios.
+
+### Built With
+
+| Technology | Role |
+| --- | --- |
+| [Next.js](https://nextjs.org/), [React](https://react.dev/) and [Tailwind CSS](https://tailwindcss.com/) | Web application and interface. |
+| [TypeScript](https://www.typescriptlang.org/) and [Node.js](https://nodejs.org/) | API, service adapters and Slack integration. |
+| [Rust](https://www.rust-lang.org/) | Domain core, exposed to the Node application through a native module. |
+| [Supabase](https://supabase.com/) | PostgreSQL persistence, pgvector search and Vault-backed credentials. |
+| [Auth0](https://auth0.com/) | Sign-in, organisations and invitations. |
+| [Vercel](https://vercel.com/) | Web and serverless deployment. |
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- GETTING STARTED -->
+## Getting Started
+
+Broppy is live at **[broppy-one.vercel.app](https://broppy-one.vercel.app)**. Both personal and organisation signups are open.
+
+### Prerequisites
+
+To use the hosted application, you need:
+
+- An email address you can receive invitations at. Use the email associated with your connected tools where possible.
+- Access to at least one supported source: Slack, Jira, Confluence or Google Drive. You can add more sources later.
+- Permission to approve each connection. Adding Broppy to Slack requires permission to install workspace apps or approval from your Slack administrator.
+
+Your organisation's admin connects its tools and invites colleagues. Each colleague signs in with their own Broppy account; their answers remain limited by their source permissions.
+
+### Installation
+
+Open [Broppy](https://broppy-one.vercel.app) in your browser and choose the account that fits your use:
+
+| Account | Choose this when | Signup button |
+| --- | --- | --- |
+| **Personal** | You want a workspace for yourself. You are its only member and admin. | **Sign up** |
+| **Organisation** | You are setting up a shared workspace and will invite your team. You become its first admin. | **Enterprise sign up** |
+| **Invited member** | Your organisation already uses Broppy. | Accept your admin's email invitation, then **Sign in**. |
+
+No local installation is needed for the hosted application.
+
+### Personal Account
+
+1. Open [Broppy](https://broppy-one.vercel.app) and select **Sign up**.
+2. Enter your name and email, then select **Create my workspace**.
+3. Open the invitation sent to your email. Follow the link to choose a password and complete sign-in, including email verification if requested.
+4. Follow the guided setup to **Connect your tools** and **Choose what Broppy reads**, as described below.
+5. At **Pick your AI**, keep the default assistant or connect your own supported AI account. This step is optional.
+6. Select **Open my workspace** and ask your first question.
+
+A personal workspace has no team invitation step. For a shared team workspace, use **Enterprise sign up**.
+
+### Organisation Account
+
+1. Open [Broppy](https://broppy-one.vercel.app) and select **Enterprise sign up**.
+2. Enter your company name, your name and your work email, then select **Create my company**.
+3. Accept the invitation sent to your work email and complete sign-in. You become the organisation's first admin.
+4. In guided setup, **Connect your tools** and **Choose what Broppy reads**.
+5. Under **Add your team**, paste colleagues' work emails, one per line or separated by commas. Choose their role and select **Send invitations**. You can skip this step and invite people later from **People and access**.
+6. Under **Pick your AI**, keep the default assistant or connect the organisation's own supported AI account.
+7. Open the workspace. Your colleagues join by accepting their own invitations.
+
+| Broppy role | Purpose |
+| --- | --- |
+| **Member** | Ask questions and use the workspace within their source access. |
+| **Admin** | Manage connections, content scope and the people who can use Broppy. |
+| **Compliance** | Review recorded activity through the audit tools. |
+
+Broppy roles do not grant access to restricted source content. Manage those permissions in Slack, Jira, Confluence or Google Drive.
+
+### Joining an Existing Organisation
+
+1. Ask your Broppy admin to add your work email under **People and access**.
+2. Open the invitation and sign in with that email. Complete email verification if prompted.
+3. Open the workspace and ask a question. Your admin has already connected the organisation's tools.
+4. On later visits, select **Sign in** and use your email and password. If you belong to multiple organisations, choose the relevant one when prompted.
+
+If an invitation has expired, ask your admin to resend it. If you already have an account, sign in rather than creating another workspace.
+
+### Connect Your Tools
+
+These steps apply to personal workspace owners and organisation admins. Return to **Guided setup** or **Connectors** to change them later.
+
+1. Under **Connect your tools**, select **Add to Slack** or **Connect** beside the tool you want.
+2. Sign in on the provider's own approval page, review the requested access and approve the connection. Broppy returns you to setup.
+3. Repeat for your other tools. An Atlassian approval can connect both Jira and Confluence when both products' permissions are granted.
+4. Under **Choose what Broppy reads**, save a scope for each connected source:
+
+   | Source | Content to select |
+   | --- | --- |
+   | Slack | Channels. |
+   | Jira | Projects. |
+   | Confluence | Spaces. |
+   | Google Drive | Shared drives; My Drive selection uses file IDs. |
+
+   Choose **Include everything**, **Include only what I select** or **Include nothing**. The choice is limited to what the connected account can access. On **Connectors**, you can also limit history by date or include only content new or changed from now on.
+
+5. Wait for the initial import. Check connection status and progress in **Connectors**, and inspect **Sync health** if a source needs attention.
+6. For Slack, invite the bot to the channels where you want to use it:
+
+   ```text
+   /invite @Broppy
+   ```
+
+Connecting a tool and choosing its scope determines what enters the workspace. Each person's source permissions still determine what they can see in answers.
+
+**Match your source accounts.** Broppy uses directory email addresses to identify people in connected tools. If a colleague uses another email for a source, the admin can update it under **People and access → Source accounts**, use **Check** to inspect the mapping and **Refresh access** to read source permissions again. Slack bot users must also be matched to their Broppy identities.
+
+**Choose an AI model (optional).** In **Pick your AI** or **Connectors → AI model**, choose a supported provider, enter its model name and API key, and select **Connect and test** or **Save and test**. The key is stored encrypted and is not shown again. Newly signed-up workspaces support Anthropic and OpenAI; custom OpenAI-compatible endpoints are restricted. See [Bring Your Own Model](docs/bring-your-own-model.md).
+
+**If setup needs attention:** check spam for invitation emails, use the email your admin invited, reconnect expired tool authorisations and check that the chosen scope includes the content you need. If a tool account cannot be matched, ask your admin to check **Source accounts**. Setup resumes when you return.
+
+### Local Development
+
+For developers running the repository, use Node.js 22, **pnpm 9.15.0** and [Rust through rustup](https://rust-lang.org/tools/install/). The repository pins its Rust toolchain.
 
 ```sh
+git clone https://github.com/Danixjg/Broppy.git
+cd Broppy
 pnpm install
 pnpm rust:build
-pnpm typecheck
-pnpm test
 ```
 
-**Website (SSO).** Copy `.env.example` to `.env.local` at the repository root and fill it in; see [Auth0 setup](apps/web/AUTH0.md). Then, in two terminals:
+**Run with fictional demo data.** Start the API in one terminal:
 
 ```sh
-pnpm dev:sso               # API at http://127.0.0.1:3000 in Auth0 mode, reads .env.local
-pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
+pnpm dev
 ```
 
-Open `http://127.0.0.1:3001`. The web host forwards API requests server-side with the signed-in user's Auth0 token. If sign-in fails, run `pnpm doctor:sso` while both servers are running. It checks your settings, the Auth0 tenant, the Supabase directory and the running services, and prints the fix for each problem. It changes nothing and prints no secrets.
-
-**Website demo (no sign-in).** Run the demo API and point the web host at it:
+Start the web application in a second terminal. The following environment-variable syntax is for Bash:
 
 ```sh
-pnpm dev                                                      # demo API at http://127.0.0.1:3000
-DEMO_API_URL=http://127.0.0.1:3000 pnpm --dir apps/web dev    # web host at http://127.0.0.1:3001
+DEMO_API_URL=http://127.0.0.1:3000 pnpm --dir apps/web dev
 ```
 
-Open `http://127.0.0.1:3001` and choose **Try the demo**. The workspace shows a demo banner. **Viewing as** in the header switches between the six fictional people, and **Leave demo** ends the demo. To offer SSO and the demo together, start the demo API on another port (`PORT=3002 pnpm dev`) next to `pnpm dev:sso`, and set `DEMO_API_URL=http://127.0.0.1:3002` in `.env.local`. A signed-in session always takes priority over demo mode.
+Open **http://127.0.0.1:3001**, choose **Try the demo** and switch between fictional users with **Viewing as**. Demo changes reset when the in-memory API restarts.
 
-**API only (demo headers).** `pnpm dev` starts the API at `http://127.0.0.1:3000` with demo header authentication enabled and loads no env file. Use it with curl as shown below, or as the website's demo API. `pnpm exec tsx data/seed.ts` prints fixture counts; it does not seed a database. `GET /health` reports local sync cursors, pending runs, and audit counts.
-
-For a direct query without the web app:
+**Run with sign-in and real sources.** Copy `.env.example` to `.env.local` at the repository root, then configure Auth0, Supabase and source OAuth using the guides below. Run the API and web application in separate terminals:
 
 ```sh
-curl -s http://127.0.0.1:3000/v1/query \
-  -H 'content-type: application/json' -H 'x-demo-user: ravi' \
-  -d '{"question":"What does PAY-101 need before cutover?"}'
+# Terminal 1
+pnpm dev:sso
 ```
 
-## Demo users and scenarios
+```sh
+# Terminal 2
+pnpm --dir apps/web dev
+```
 
-| User | Role | Useful scenario |
-| --- | --- | --- |
-| Ravi (`ravi`) | Head of payments (member), payments/security/fraud groups | Ask about PAY-101, SEC-44, and the cutover plan; Maya can remove Ravi from a Slack channel to show a live access change on the next query. |
-| Maya (`maya`) | Admin | Edit mock source content, narrow a tier, revoke brain grants, remove a group or native Slack channel member, run sync, and preview access. |
-| Alex (`alex`) | Intern | Try a security or restricted incident query; the fixed no-result reply conceals inaccessible results. Catch up on what a new hire should read first: the intern overview and guides. |
-| David (`david`) | Member, payments/security; the engineer in the brief's scenarios | Ask about the database migration and its Slack blockers; David isn't in the private #db-oncall channel, so it never reaches those answers. Compare with Ravi's view. Turn the #db-migration agreement into a Jira task, then mark it done. |
-| Nur (`nur`) | Compliance | Inspect and search audit events, seal a batch, inspect and verify a proof, view traces, and export CSV. |
-| Wei Ming (`wei`) | Contractor | Open only what is shared by name: the #vendor-integration thread and, in the generated company, the partner API integration project. Payment and security material stays denied. |
+Open **http://127.0.0.1:3001**. Use `pnpm doctor:sso` to diagnose sign-in configuration. The `pnpm dev` command runs the demo API; `pnpm dev:sso` loads `.env.local` for the authenticated API.
 
-The challenge brief's scenarios run on the mock data as written:
-
-| # | Who and what | What happens |
-| --- | --- | --- |
-| 1 | David: "What's the status of the database migration project and were there any blockers raised in Slack last week?" | Slack comes first, limited to the last week; Jira issues count at any date and show their status ("DB-15 (blocked)"). The answer cites #db-migration, DB-12, DB-15 and the plan page. The private #db-oncall blocker appears only for its members, such as Ravi. |
-| 2 | Maya appends a step to the payment-service incident runbook; David asks "What's the latest runbook for the payment-service incident?" | The next answer quotes every step, including the new one, and cites version 4 with its edit time. The superseded 2025 copy is never cited. An edit made at the source is picked up the same way, before any sync. |
-| 3 | Wei or Alex: "Show me the security incident report from the Q3 breach" | The fixed no-result reply, identical to a question about something that doesn't exist. |
-| 4 | Maya removes David from #db-migration, or restricts the runbook page | David's next answer drops that channel or page, and the trace David sees doesn't name it. |
-| 5 | Nur: "Show me everything user 'ravi' accessed related to the 'payment-gateway' Confluence space in the last 30 days" | The audit search reads the user, space and dates, and returns those questions with their answers and access decisions. |
-
-**[Worked examples](docs/worked-examples.md)** walk through all five with the real answers, citations, access decisions, audit entries and screenshots. `pnpm scenarios` regenerates that page, and `pnpm test` fails when it no longer matches what the code does. `pnpm scenarios:model` runs the same steps with the configured language model and writes [`docs/worked-examples-model.md`](docs/worked-examples-model.md); its calls count against the usage meter. The run committed there is Groq's `openai/gpt-oss-120b` with Cloudflare's embeddings, captured on 3 Oct, before tighter search and the generated company: the same four sources in scenario 1, every runbook step, and the fixed reply for Wei and Alex.
-
-A question that names a platform (Slack, Jira, Confluence, Drive) gets that platform first. A time it names ("last week", "past 3 days", "yesterday") limits that platform, or every platform when none is named. Other platforms with a clearly relevant match take turns, so one answer can cite all four. A question that names a project you can open (the title of its master page) keeps to that project's items, and the answer says so. Words that name no topic, such as status, project or update, count less and make no match on their own when the question has more specific words. A match must also cover at least half as many of the question's distinctive words as the best one. The most relevant source is quoted in full, and the next three add their best sentence. Mock dates move forward with the clock, so "last week" keeps finding the demo data.
-
-In the default demo, changes made through admin routes or workspace actions alter only the running mock process and reset on restart. Content edits increment a source version and sync immediately. A permission edit changes grants without rebuilding chunks. Sync also compares source IDs and tombstones deleted fixtures. Search finds candidate IDs before permission checks; the API checks selected documents against the source before building answer context and again after generation, before returning it. A revoked item causes a fixed no-result response on that query. In live mode, change source permissions and content at the provider.
-
-With an embedding provider (Cloudflare Workers AI's `bge-m3`, D56), sync embeds changed document chunks and a query embeds its question. A refused or failed embedding never stops sync: that document keeps keyword search, the provider rests for five minutes, and a later sync embeds it. Questions asked meanwhile use keywords. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY` as well, sync writes documents and changed chunks to Supabase and queries its `hybrid_search` RPC. The RPC returns candidate document and chunk IDs and scores; local and optional remote authorization plus live mock source checks still run before content enters an answer. Query embedding or Supabase search failures fall back to the local index. Supabase **sync write** failures fail that sync run for retry; initial sync runs in the background. Supabase configuration enables durable index/grant snapshots, cursors, checkpoints, connections and import jobs.
-
-## Data
-
-`data/mock/` holds the 26 hand-written items that the scenarios, the tests and the worked examples use. `data/generated/` holds a larger company: 500 items across Confluence, Jira, Slack and Drive, made by a seeded generator (`data/generate.ts`, seed `20261016`) and checked by the app's own rules, through its access check, link reader, search words and workspace functions.
-
-- **Six projects and five company areas:** a build pipeline upgrade, a mobile app release, a customer data warehouse, KYC review automation, corporate card rewards and a partner API integration, plus engineering, legal, people, company and intern spaces. They come with private channels, restricted pages, and a contractor who sees only the items shared by name.
-- **Realistic mess:** superseded copies, near-copies, blocked issues, and agreements in Slack, some tracked by an issue and some not.
-- **What it never says:** the hand-written story's words, so it doesn't change the scenarios' answers; months, dates or quarters, which the demo's date shift can't move; and, in what the intern and the contractor can open, anything about items hidden from them, not even a name.
-
-`pnpm dataset` writes the three files again and prints the counts and how many items each person can open. A file whose content hasn't changed is left alone, even if Git for Windows checked it out with different line endings, so Git doesn't list it as changed. `pnpm test` fails when the files no longer match the generator. `pnpm dataset --scale brief` builds and checks the brief's scale in memory: about 20,000 items in 30 projects, with 600 colleagues. The demo API (`pnpm dev` and the public demo) serves both sets, and every scenario test runs on both. The SSO API keeps the hand-written items, because its people come from the directory, which doesn't have the generated company's groups. `MOCK_DATA=curated` gives the demo API the hand-written items alone.
-
-### Speed and memory
-
-`pnpm bench` builds the brief's scale in memory beside the hand-written items, indexes it with the same code as the demo API, and has each of the six people ask the same 20 questions: the brief's scenarios, the generated projects by name, and the catch-ups. `pnpm bench --scale demo` does the same with the demo's 526 items. Three runs in the development container (4 logical processors of a 2.8 GHz Xeon, 16 GB of memory, Node 22), whose times varied by about a third from run to run:
-
-| | Brief's scale | Demo |
-| --- | --- | --- |
-| Items | 19,729, in 32 projects | 526, in 8 projects |
-| Generate, then index | 2.1–2.7 s, then 8.3–11.1 s | 0.1 s, then 0.1–0.2 s |
-| Memory after indexing | heap +585 MB; 852–861 MB in all | heap +8 MB; about 150 MB in all |
-| A question: median, then 95th percentile | 83–108 ms, then 470–640 ms | 5–6 ms, then 12–14 ms |
-| Documents the access check decides on, per question | 981–1,355 | 45–51 |
-| Of those, refused before the writer | 56–68% for Maya, David and Ravi; 94% for Nur; over 99% for Wei Ming and Alex | 31–49%; 74%; 91% and 95% |
-| Audit entries per question | 1,980–2,729 | 102–120 |
-
-Every candidate is audited, so a question costs more the more search finds: the slowest, "What rate limit applies to the partner API?", matched about 12,400 documents, wrote about 24,800 audit entries and took about a second, 60% of it spent writing those entries. The APIs serve 26 or 526 items; the brief's scale runs only in `pnpm bench`.
-
-## Choosing what a company includes
-
-Connecting a source imports **nothing** until an admin chooses. On the Connectors page, each source offers:
-
-- **Include everything**, **Include only what I select** (a checklist of Slack channels, Jira projects, Confluence spaces or shared drives, loaded from the connected account) or **Include nothing**.
-- **Only content that is new or changed from now on**, which fixes a starting moment when it is saved and keeps it on later saves, or **history since** a chosen date.
-
-Saving starts the import. Narrowing, or choosing nothing, removes what is no longer included, with its grants and index entries. Each change is audited as `scope_changed`. "From now on" goes by the source's modified time, so an older item edited later is included. Selecting from My Drive uses file IDs; the checklist lists shared drives. The scope is part of the existing saved state and needs no migration.
-
-## Workspace
-
-What each person sees beside the chat is built only from what they may open: their projects, links, files and
-suggestions.
-
-- **Answers and their sources:** each line ends in numbered chips, and the Sources list under the answer uses the same
-  numbers.
-  - A chip or a source opens the document in the workspace, with the quoted lines highlighted.
-  - The demo's documents live at placeholder addresses, so they say "Demo document" instead of linking out. Real
-    sources keep their "Open in Slack ↗" (or Jira, Confluence, Drive) link.
-  - A line in the writer's own words is tagged "reworded", and its source highlights the sentence behind it. A note
-    under the answer says how many lines the checker left out, and why.
-- **While an answer is on its way:** a spinner and a seconds counter show. The spinner holds still when the system
-  asks for reduced motion.
-- **Compliance:**
-  - An audit question typed into the chat, such as "Show me everything user 'ravi' accessed in the last 30 days",
-    offers **Search the audit log**, which runs it in the audit console.
-  - The console says what each event did in plain words ("Denied slack:db-oncall (no permission)"), with the full
-    entry under **Raw data**.
-  - Routine sync checks, which found nothing changed, are hidden behind a toggle. The search, the proofs and the CSV
-    export still use every entry.
-- **Projects:** choose one in the header, or All sources. Its Confluence master page, threads, tasks and files follow.
-  A project is listed only to people who can open its master page.
-- **Long lists:** the Slack, Jira, Drive and source lists show eight items, then a button such as "Show 72 more tasks"
-  that shows the rest and moves the focus to the first of them. A list starts again from eight when the search, the
-  project or the person changes.
-- **Links:** a document lists the linked items the person may also open. Answers bring in a ticket's linked thread,
-  page and files, and say what linked them ("linked from DB-12").
-- **From conversation to task:** an agreement such as "Agreed: …" in a thread becomes a suggested Jira task.
-  - In the demo, David creates DB-16 from the #db-migration agreement, then marks it done from the task.
-  - With live sources, the card links to Jira instead, because the app only reads them.
-- **Latest and duplicates:** "Why latest?" lists the reason for every point, and a likely duplicate gets a merge
-  preview that changes nothing.
-- **Catch-up:** chosen by role and groups.
-  - Alex, an intern, gets an onboarding overview, and Wei Ming, a contractor, what has been shared with them.
-  - Team members get a project's status, blockers and decisions, from that project only.
-  - Nur gets the last 7 days of the audit trail.
-
-![David's Database migration page, with an agreement waiting to become a task](docs/images/workspace-project.png)
-
-![The Payment migration files: why the cutover plan is the latest, a merge preview, and an answer citing linked items](docs/images/workspace-duplicates.png)
-
-## Language model (optional, free only)
-
-Without a model, the built-in writer answers: it quotes the most relevant source in full and the best sentence of the next three. A model can write more naturally, and may reword lightly. Every answer, from either, goes through the answer checker: each line must say only what a source it cites says (below).
-
-The project pays for no model use (`decisions.md`, D27, D28 and D55):
-
-- **Provider:** Groq, on both APIs (D54, D55): `LLM_PROVIDER=groq`, `LLM_MODEL=openai/gpt-oss-120b` and
-  `LLM_MAX_TOKENS=4000`. Groq's free plan has no card on file, so it can never bill. On 2 Oct, 8 of 9 measured answers
-  were grounded at about 870 tokens each. Groq has retired `llama-3.3-70b-versatile`; its console lists the current
-  models.
-  - **Tencent's models aren't used** (D55). TokenHub stopped the free trial's inference services while the account
-    balance was insufficient, and calls failed with code `401006`. The client keeps its `tokenhub` and `hunyuan`
-    presets as tested options. They only start with a usage file and token budgets below the free tokens, and Tencent
-    bills only if post-paid billing is turned on.
-- **Its instructions** ([`llm.ts`](apps/api/src/llm.ts)) tell the model to:
-  - copy sentences where it can, or shorten one or join two from one passage, keeping every name, number, date, issue
-    key and status word and adding nothing, one sentence per line, each with its citation;
-  - answer every part of the question, using every passage that helps and leaving out unrelated ones;
-  - keep status labels such as "DB-15 (blocked):" and every step of a procedure;
-  - put the direct answer first, in at most eight sentences.
-
-- **The answer checker** ([`grounding.ts`](packages/retrieval/src/grounding.ts), D62–D64) reads every line of the
-  reply against the passages the writer was given:
-  - **Copied:** a line found word for word in a passage it cites is kept, in the source's own text. Lookalike
-    characters, such as a non-breaking hyphen, curly quotes or special spaces, don't count as differences. A copied
-    part of a sentence must still mean what the whole does, so "Include this channel" from "Do not include this
-    channel" is left out.
-  - **Reworded:** a line is kept only when each of its clauses is backed by one sentence of a passage it cites. The
-    numbers must match and sit next to the same words, and so must the names, keys, dates and quantities. Status,
-    order, comparison, negation and hedging must agree, and no other word that carries meaning may be added.
-  - **Left out:** anything else. The asker sees how many lines and why; the text goes to the audit (D63).
-  - **Measured on the demo passages:**
-    - 54 rule lines, all right;
-    - 58 generated one-fact changes, all left out;
-    - a held-out set of 32 lines written before tuning: one hallucination kept, three faithful lines left out (D62).
-  - **Known gaps:** who did what within one sentence, cause and effect reversed, a requirement read as done, and two
-    steps in the opposite order.
-  - **`pnpm llm:check`** asks the usage questions through the configured model and prints the verdict on every line,
-    for a person to judge.
-- **Usage meter:** `LLM_USAGE_FILE` keeps the token and answer counts across restarts. At `LLM_TOKEN_BUDGET` or `LLM_DAILY_ANSWERS`, the built-in writer answers instead. If the model is rate limited, failing or takes over 60 seconds, or the checker keeps no line of its reply, it does the same, and the audit records an `llm_fallback` event with the reason. If the usage file can't be read or written, no model is called.
-  - Calls still running count against the limits, so questions asked at the same moment can't all get past them.
-  - A call that gives no usable answer still counts what the provider may bill. A refused request counts nothing.
-- **One Groq account:** its free plan limits requests and tokens per minute and per day, and every key in the account
-  shares those limits: both APIs, and any laptop. Each API's `LLM_DAILY_ANSWERS` caps its share.
-- **Semantic search** (optional): Cloudflare Workers AI's `bge-m3` (D56), with `EMBEDDING_PROVIDER=cloudflare`,
-  `EMBEDDING_API_KEY` and `CLOUDFLARE_ACCOUNT_ID`. In the Cloudflare dashboard, open **Workers AI**, choose **Use REST
-  API**, create a Workers AI API token, and copy the account ID shown there.
-  - **Free:** the Workers Free plan includes 10,000 neurons a day, about 9 million tokens for this model, and refuses
-    calls past that instead of billing. Keep the account on that plan; on Workers Paid, use past the allocation is
-    billed.
-  - **What it sees:** the text of every chunk, restricted documents included, and each question. Cloudflare says it
-    doesn't use customer content to train models.
-  - **Limits:** at `EMBEDDING_TOKEN_BUDGET`, if set, semantic search pauses and keyword search carries on.
-- **`pnpm llm:usage`** asks ten typical questions through the configured model and prints the tokens each call used,
-  and why any call gave no usable answer. For Groq, whose free plan can't bill, it reports the tokens and points to
-  Groq's daily limits. For the unused Tencent presets, it projects 350 answers against their free tokens instead. Its
-  calls count against the meter.
-- **`pnpm llm:calibrate`** embeds the mock documents and labelled questions, then suggests a value for `SEMANTIC_MIN`
-  from the scores. On 3 Oct it set 0.51 against Cloudflare's `bge-m3`; the earlier 0.35 let in 176 of 234 unrelated
-  pairs. Run it again when the documents change, because the right value depends on them.
-
-Both scripts read `.env.local`. The hosted APIs take their model settings as described in [infra/tencent/README.md](infra/tencent/README.md).
-
-## API routes
-
-All `/v1` routes require either a valid bearer token configured as below or, in demo mode (`pnpm dev` locally, or `PUBLIC_DEMO=true`), `x-demo-user`. The website uses the official Auth0 Next.js SDK with server-managed sessions. Set the Regular Web Application credentials in `.env.local`; Supabase holds the server-only user directory. Browser API requests go through `/api/brain/*`, which attaches the SDK access token server-side. Demo visitors' requests carry only the chosen persona and go only to `DEMO_API_URL`. `GET /health` does not require identity. See [Auth0 sign-in and live sources](docs/live-sources-and-sign-in.md) for setup.
-
-| Route | Purpose |
+| Setup guide | Covers |
 | --- | --- |
-| `POST /v1/query` with `{ "question": "..." }` | Cited answer and `traceId`, or fixed no-result reply. |
-| `GET /v1/me` | Validated fixture identity and role for the signed-in web UI. |
-| `GET /v1/workspace` | Currently visible mock documents after indexed and live checks. |
-| `GET /v1/trace?traceId=...` | Query actor's own trace or a compliance user's trace. |
-| `POST /v1/admin/content` with `{ "docId": "...", "content": "..." }` | Admin mock source edit and sync. |
-| `POST /v1/admin/permissions` with `{ "docId": "...", "permissions": { ... } }` | Admin narrowing of mock source permissions and sync. |
-| `GET /v1/admin/permissions?docId=...` | Admin loads an accessible document's full source permissions for the web JSON editor. |
-| `POST /v1/admin/tier` with `{ "docId": "...", "tier": "restricted" }` | Admin tier narrowing. |
-| `POST /v1/admin/group` with `{ "userId": "ravi", "group": "fraud-ops" }` | Admin removal of a fixture user from a group. |
-| `POST /v1/admin/channel-member` with `{ "userId": "ravi", "docId": "slack:fraud-private" }` | Admin removal of a mock Slack native member and sync. |
-| `POST /v1/admin/sync` | Admin manual sync. |
-| `GET /v1/admin/preview?user=alex` | Admin visible-document preview with access reasons. |
-| `GET /v1/audit` | Compliance events, batches, and chain status. |
-| `GET /v1/audit/search` | Compliance query and filters: `q`, `user`, `source`, `space`, `from`, `to`. |
-| `GET /v1/admin/connections`, `GET /v1/admin/import-jobs` | Admin connector status and progress. |
-| `POST /v1/admin/onboard` | Background full mock Company A import. |
-| `POST /v1/admin/connections/:source/authorize`, `GET .../callback` | Start OAuth and complete its single-use callback. |
-| `PUT /v1/admin/connections/:source/scope`, `POST .../import`, `DELETE /v1/admin/connections/:source` | Scope, reimport, disconnect and purge. |
-| `POST /v1/audit/seal` | Compliance Merkle seal of unsealed events. |
-| `GET /v1/audit/proof?sequence=1` | Compliance proof for a sealed event. |
-| `POST /v1/audit/verify` with `{ "sequence": 1 }` | Compliance chain, batch, and proof verification. |
+| [Auth0 setup and troubleshooting](apps/web/AUTH0.md) | Local sign-in, sessions and required environment variables. |
+| [Live sources and persistence](docs/live-sources-and-sign-in.md) | Source OAuth, account matching, permissions and durable storage. |
+| [Self-signup](docs/self-signup.md) | Enabling personal and organisation signup on your own deployment. |
+| [Admin-managed access](docs/admin-managed-access.md) | Invitations, directory access and first-admin provisioning. |
+| [Slack onboarding](docs/slack-onboarding.md) and [Slack app](apps/slack/README.md) | App installation, Jira destinations and task approval configuration. |
+| [Background sync](docs/background-sync.md) | Configuring scheduled source imports. |
+| [Vercel deployment](docs/vercel-deployment.md) | Deployment configuration. |
+| [Rust core](docs/rust-migration.md) | Native build and verification. |
 
-## Environment
+For a fresh Supabase project, use [schema.sql](infra/supabase/schema.sql); existing projects need the applicable [migrations](infra/supabase/migrations). Keep `.env.local` and provider secrets out of commits.
 
-| Variable | Use |
-| --- | --- |
-| `ALLOW_DEMO_AUTH=true` | Allows `x-demo-user` outside `NODE_ENV=production`; the root `pnpm dev` script sets it. |
-| `PUBLIC_DEMO=true` | Runs the public demo API: it accepts `x-demo-user` even with `NODE_ENV=production` and serves only mock data. Startup fails if any Auth0, Supabase, live-source, source-OAuth or remote FGA setting is present. See [hosting](infra/tencent/README.md). |
-| `MOCK_DATA` | The demo API's mock data: `demo` (the default), the hand-written items and the generated company, or `curated`, the 26 hand-written items alone. The SSO API always uses `curated`; any other value fails startup. |
-| `DEMO_API_URL` (web host) | The demo API's origin. When set, the start page offers **Try the demo**, and demo visitors' workspace requests go there with only the chosen persona. |
-| `AUTH0_ISSUER`, `AUTH0_AUDIENCE`, `AUTH0_ORG_ID` | Auth0 SSO with cached JWKS, active directory lookup and organization validation. Requires Supabase directory/persistence and an audit signing key. See [setup](docs/live-sources-and-sign-in.md). |
-| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | Optional language model for local development or an operator default: `groq` (D55), `anthropic`, `openai` or `openai_compatible` (the last also needs `LLM_BASE_URL`). A model an admin chooses in Connectors → AI model takes precedence over these (see [Bring your own model](docs/bring-your-own-model.md)); without them, the built-in writer answers. The `tokenhub` and `hunyuan` presets, and the older `HUNYUAN_API_KEY` and `HUNYUAN_MODEL`, still work but aren't used. A key or model alone causes startup configuration failure. `LLM_BASE_URL` sends the same API to another HTTPS address, or to plain HTTP on this machine for a local stub. `LLM_MAX_TOKENS` caps each answer (default 1500; reasoning models such as gpt-oss need about 4000). See [Language model](#language-model-optional-free-only). |
-| `LLM_USAGE_FILE`, `LLM_TOKEN_BUDGET`, `LLM_DAILY_ANSWERS` | The usage meter: counts kept across restarts, a total token budget and model answers per UTC day. At either limit, the built-in writer answers. Optional for Groq; the unused Tencent presets need the file and the budget to start. |
-| `EMBEDDING_PROVIDER`, `EMBEDDING_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `EMBEDDING_TOKEN_BUDGET` | Optional semantic search: `cloudflare`, Workers AI's `bge-m3` (D56), with an API token and the 32-character account ID. It embeds changed chunks and questions as 1024-dimensional vectors. The budget is optional on Cloudflare's free plan; the unused `hunyuan` preset (or the older `HUNYUAN_EMBEDDING_API_KEY`) needs it and `LLM_USAGE_FILE`. With no Supabase variables, semantic ranking runs in the local index. At the budget, semantic search pauses and keyword search carries on. |
-| `SLACK_SERVICE_TOKEN` | Optional. Lets the Slack app ask questions as the directory user mapped to a Slack user's email (`platform_identities.slack`), on `POST /v1/query` only. Needs Auth0 and the directory. At least 32 characters. |
-| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Server-only directory, audit and state persistence. With embeddings, also enables pgvector search. Apply migrations through 010 for Slack customer onboarding. Fresh projects use `infra/supabase/schema.sql`. |
-| `LIVE_SOURCES_JSON` | Selects real HTTP readers for configured Slack channels, Jira issues, Confluence pages, and Google Drive files. All four source entries, provider credentials, and Auth0 sign-in are required. See [setup and limits](docs/live-sources-and-sign-in.md). |
-| `AUDIT_LOG_PATH`, `AUDIT_SIGNING_KEY_FILE` | Together select a flushed JSONL audit file and load a PEM private signing key for Merkle batches. With neither, audit data and roots are in memory. Setting a log path without a key fails startup. |
-| `WEB_ORIGIN` | API `Access-Control-Allow-Origin` value; defaults to `http://127.0.0.1:3001`. CORS allows the demo and Authorization headers. Set server-side web `BRAIN_API_URL` separately. |
-| `FGA_API_URL`, `FGA_STORE_ID`, `FGA_MODEL_ID`, `FGA_CLIENT_ID`, `FGA_CLIENT_SECRET`, `FGA_API_TOKEN_ISSUER`, `FGA_API_AUDIENCE` | OpenFGA SDK client credentials; install the model before enabling. |
-| `SOURCE_OAUTH_JSON`, `API_ORIGIN` | OAuth app configuration and API callback origin. Tokens use Supabase Vault. |
-| `HOST`, `PORT` | API bind address and port; default loopback port 3000. |
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Deployment status and remaining audit items
+<!-- USAGE EXAMPLES -->
+## Usage
 
-Without Supabase, the demo keeps everything in memory and resets on restart. The hosted setup is described in [infra/tencent/README.md](infra/tencent/README.md): the Vercel site offers the public demo and optional SSO, backed by two APIs on one Tencent Cloud Lighthouse server. Live identity, provider OAuth, Supabase Vault, pgvector and OpenFGA require externally provisioned services. No live credentials were used in verification. Run one API writer per organization; see [setup and current limits](docs/live-sources-and-sign-in.md).
+### Ask Across Your Tools
 
-The compliance audit contains question and answer text and source identifiers, so keep audit access and signing keys restricted. The remaining limits, such as the write-once anchor for Merkle roots that isn't running yet, webhooks and source-specific remote FGA types, are listed under [Architecture: Limits](docs/architecture.md#limits). CodeBuddy/WorkBuddy evidence must be captured by someone using those products; none is fabricated.
+Open the workspace, select a project or **All sources**, then ask a question such as:
 
-## Documentation
+> What's the status of the database migration, and what blockers were raised in Slack last week?
 
-- [Architecture](docs/architecture.md): how the brief's requirements are met, and the pipeline with the five points that matter most.
-- [Rust domain core](docs/rust-migration.md): native build, migrated modules, state ownership, and verification.
-- [Trust boundaries](docs/trust-boundary.md): hosting, sign-in, and what crosses each boundary.
-- [Worked examples](docs/worked-examples.md): the brief's five scenarios, run end to end on the demo data.
-- [Decisions](decisions.md): every choice, the options considered and the trade-offs.
-- Setup: [Auth0 sign-in](apps/web/AUTH0.md), [live sources and persistence](docs/live-sources-and-sign-in.md), [web and API on Vercel](docs/vercel-deployment.md), and [hosting on Tencent Cloud](infra/tencent/README.md).
-- Diagrams: the sources are in [docs/diagrams](docs/diagrams), with rendered images in [docs/images](docs/images). `pnpm test` checks that each diagram in the docs matches its source and that every link in the docs resolves.
+Broppy retrieves relevant content you may access and returns an answer with numbered citations. Select a citation to inspect its source and highlighted passage. Use the source's **Open in Slack**, **Open in Jira**, **Open in Confluence** or **Open in Drive** link to visit the original.
 
-History, kept as a record:
+Answers depend on the content and permissions in your connected tools. The question above is also demonstrated with fictional data in the [Worked Examples](docs/worked-examples.md).
 
-- [Five-stage plan](docs/internal-brain-five-stage-plan.md) (26 Sep 2026): the original design.
-- [Repository audit](docs/broppy-audit-batch0.1.md) (30 Sep 2026) and its [implementation notes](docs/audit-batch0.1-implementation.md).
+### Work With Project Content
 
-Customer admins add the Slack bot from the separate **Slack bot** card on Connectors. Operators provision the existing Auth0 organization, API, directory, and shared Slack app first. See [Slack customer onboarding](docs/slack-onboarding.md).
+Select a project to view its related Confluence documentation, Jira tasks, Slack threads and Drive files. Open Confluence content to read or edit it within Broppy, or follow the link to the original page. Use the catch-up view for context relevant to your role and access, and **Why latest?** to inspect document freshness. Duplicate previews let you compare likely overlaps before deciding what to do.
+
+### Ask Broppy in Slack
+
+In a channel where Broppy has been added, enter:
+
+```text
+/broppy What changed in the migration project this week?
+```
+
+You can also choose **Ask Broppy** from a message's shortcuts. Answers are returned privately and use the asking person's Broppy identity and source access.
+
+### Turn a Slack Commitment Into a Jira Ticket
+
+1. Have a conversation containing an actionable commitment. For example:
+
+   > I'll update the migration runbook by Friday.
+
+2. Broppy can detect the commitment and privately propose a Jira task. You can also use the **Track with Broppy** message shortcut.
+3. Review the proposed summary, owner, date, project and the fields that will be sent. Edit the draft, dismiss it or approve ticket creation. Where a suitable existing issue is suggested, explicitly choose to link it instead.
+4. After approval, Broppy creates the Jira ticket and records the action. A thread notification is sent when the configured audience checks allow it.
+
+**You approve before Jira creation.** Using this workflow requires a connected Jira account and a configured destination for the Slack channel and Jira project. Workspace operators configure the destination and disclosure policy; see [Slack app setup](apps/slack/README.md). The approval flow is a live Broppy feature.
+
+### Review Activity and Access
+
+Compliance users can search the audit console by person, source and date, inspect recorded questions, answers and authorisation decisions, export CSV and verify sealed audit proofs. Admins manage membership through **People and access**; removing a person disables their Broppy access. Changes to access in the source tools are checked again when Broppy answers.
+
+For example, a compliance user can ask:
+
+> Show me everything user 'ravi' accessed related to the 'payment-gateway' Confluence space in the last 30 days.
+
+Choose **Search the audit log** to run the audit inquiry. Replace the example user and space with those in your workspace.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ROADMAP -->
+## Roadmap
+
+- [ ] **Multi-agent workflow:** describe a task in the project chat and have agents help carry it out.
+- [ ] **AI summaries.**
+- [ ] **Automated event triggers:** respond to emergency calls.
+
+These are planned additions. See [open issues](https://github.com/Danixjg/Broppy/issues) to discuss improvements and report problems.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTRIBUTING -->
+## Contributing
+
+Report bugs and suggest improvements through [GitHub Issues](https://github.com/Danixjg/Broppy/issues). To propose a code change:
+
+1. Fork the repository.
+2. Create a branch: `git checkout -b feature/your-feature`.
+3. Make the change and run the relevant checks:
+
+   ```sh
+   pnpm typecheck
+   pnpm test
+   ```
+
+4. Commit and push to your fork.
+5. Open a pull request explaining the change and how you verified it.
+
+For changes to permissions, retrieval or external actions, include the allowed and denied cases in your verification. [Architecture](docs/architecture.md) explains the access boundaries; [decisions.md](decisions.md) records implementation decisions.
+
+[View contributors](https://github.com/Danixjg/Broppy/graphs/contributors).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- LICENSE -->
+## License
+
+No project licence has been specified in this repository.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTACT -->
+## Contact
+
+For questions, bug reports or feature requests, open an issue in [Danixjg/Broppy](https://github.com/Danixjg/Broppy/issues).
+
+Project: [github.com/Danixjg/Broppy](https://github.com/Danixjg/Broppy)  
+Website: [broppy-one.vercel.app](https://broppy-one.vercel.app)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ACKNOWLEDGMENTS -->
+## Acknowledgments
+
+- **Tencent Cloud Hackathon 2026** — the Internal Brain challenge that Broppy was built to address.
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template) — the structure used for this README.
+- [Shields.io](https://shields.io/) — repository badges.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- MARKDOWN LINKS & IMAGES -->
+[contributors-shield]: https://img.shields.io/github/contributors/Danixjg/Broppy.svg?style=for-the-badge
+[contributors-url]: https://github.com/Danixjg/Broppy/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/Danixjg/Broppy.svg?style=for-the-badge
+[forks-url]: https://github.com/Danixjg/Broppy/forks
+[stars-shield]: https://img.shields.io/github/stars/Danixjg/Broppy.svg?style=for-the-badge
+[stars-url]: https://github.com/Danixjg/Broppy/stargazers
+[issues-shield]: https://img.shields.io/github/issues/Danixjg/Broppy.svg?style=for-the-badge
+[issues-url]: https://github.com/Danixjg/Broppy/issues
+[product-screenshot]: docs/images/workspace-project.png
