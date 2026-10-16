@@ -287,7 +287,7 @@ describe("A held-out set of lines", () => {
     ["B32", "Old runbook: restart the payment service and wait for alerts to clear. [drive:runbook-2025:0]", "keep"]
   ];
   // Measured once the rules were set (4 Oct), and not tuned to. Of 15 lines to remove it keeps one, and of 17 to keep it
-  // removes three (decisions.md, D62):
+  // removes three:
   // - B5: "final wave" for the plan's "wave three" is right, but "final" isn't in that sentence;
   // - B15: two steps in the opposite order, both words present (a known gap);
   // - B16: "every morning" for "each morning";

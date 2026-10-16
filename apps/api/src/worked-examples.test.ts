@@ -4,8 +4,8 @@ import { SEMANTIC_MIN } from "@brain/retrieval";
 import { modelsFromEnv } from "./llm-budget.js";
 import { runWorkedExamples } from "./worked-examples.js";
 
-// `pnpm scenarios` rewrites docs/worked-examples.md from the built-in writer's run, and `pnpm test` fails when the file
-// no longer matches it. `pnpm scenarios:model` captures the configured model's run in docs/worked-examples-model.md.
+// `pnpm scenarios` rewrites __snapshots__/worked-examples.md from the built-in writer's run, and `pnpm test` fails when
+// the file no longer matches it. `pnpm scenarios:model` captures the configured model's run next to it.
 const modelRun = process.env.WORKED_EXAMPLES === "model";
 const PROVIDERS: Record<string, string> = { tokenhub: "TokenHub", hunyuan: "Hunyuan", groq: "Groq" };
 const EMBEDDERS: Record<string, string> = {
@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("worked examples", () => {
-  it.skipIf(modelRun)("match docs/worked-examples.md", async () => {
+  it.skipIf(modelRun)("match the recorded worked examples", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const markdown = await runWorkedExamples({
       at: iso => vi.setSystemTime(new Date(iso)),
@@ -25,7 +25,7 @@ describe("worked examples", () => {
         "three. `pnpm scenarios:model` runs the same steps with the chosen language model and writes " +
         "`worked-examples-model.md`."
     });
-    await expect(markdown).toMatchFileSnapshot("../../../docs/worked-examples.md");
+    await expect(markdown).toMatchFileSnapshot("./__snapshots__/worked-examples.md");
   });
 
   it.runIf(modelRun)("capture the configured model's run", async () => {
@@ -45,6 +45,6 @@ describe("worked examples", () => {
       search: embedding ? `keywords, synonyms and freshness, plus semantic similarity from ` +
         `${EMBEDDERS[embedder] ?? embedder} embeddings, at \`SEMANTIC_MIN\` ${SEMANTIC_MIN}.` : undefined
     });
-    writeFileSync(new URL("../../../docs/worked-examples-model.md", import.meta.url), markdown);
+    writeFileSync(new URL("./__snapshots__/worked-examples-model.md", import.meta.url), markdown);
   }, 15 * 60_000);
 });

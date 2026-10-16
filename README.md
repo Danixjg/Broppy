@@ -19,7 +19,7 @@
     <a href="https://broppy-one.vercel.app"><strong>Open Broppy »</strong></a>
     <br />
     <br />
-    <a href="docs/architecture.md">Explore the Docs</a>
+    <a href="https://broppy-one.vercel.app/demo">Try the Demo</a>
     &middot;
     <a href="https://github.com/Danixjg/Broppy/issues/new">Report Bug</a>
     &middot;
@@ -89,7 +89,7 @@ Broppy was built for the **Tencent Cloud Hackathon 2026**, addressing **The Inte
 | **People and access** | Invite colleagues, assign Broppy roles, match their source accounts and remove workspace access. |
 | **AI model choice** | Use the default assistant or connect your workspace's own supported AI provider account. |
 
-For the retrieval and audit design, see [Architecture](docs/architecture.md), [Trust Boundaries](docs/trust-boundary.md) and the five [Worked Examples](docs/worked-examples.md). The worked examples use fictional data to demonstrate the hackathon scenarios.
+The five [Worked Examples](apps/api/src/__snapshots__/worked-examples.md) walk through the hackathon scenarios with fictional data; `pnpm test` keeps them in step with the code.
 
 ### Built With
 
@@ -198,7 +198,7 @@ Connecting a tool and choosing its scope determines what enters the workspace. E
 
 **Match your source accounts.** Broppy uses directory email addresses to identify people in connected tools. If a colleague uses another email for a source, the admin can update it under **People and access → Source accounts**, use **Check** to inspect the mapping and **Refresh access** to read source permissions again. Slack bot users must also be matched to their Broppy identities.
 
-**Choose an AI model (optional).** In **Pick your AI** or **Connectors → AI model**, choose a supported provider, enter its model name and API key, and select **Connect and test** or **Save and test**. The key is stored encrypted and is not shown again. Newly signed-up workspaces support Anthropic and OpenAI; custom OpenAI-compatible endpoints are restricted. See [Bring Your Own Model](docs/bring-your-own-model.md).
+**Choose an AI model (optional).** In **Pick your AI** or **Connectors → AI model**, choose a supported provider, enter its model name and API key, and select **Connect and test** or **Save and test**. The key is stored encrypted and is not shown again. Newly signed-up workspaces support Anthropic and OpenAI; custom OpenAI-compatible endpoints are restricted.
 
 **If setup needs attention:** check spam for invitation emails, use the email your admin invited, reconnect expired tool authorisations and check that the chosen scope includes the content you need. If a tool account cannot be matched, ask your admin to check **Source accounts**. Setup resumes when you return.
 
@@ -244,15 +244,9 @@ Open **http://127.0.0.1:3001**. Use `pnpm doctor:sso` to diagnose sign-in config
 | Setup guide | Covers |
 | --- | --- |
 | [Auth0 setup and troubleshooting](apps/web/AUTH0.md) | Local sign-in, sessions and required environment variables. |
-| [Live sources and persistence](docs/live-sources-and-sign-in.md) | Source OAuth, account matching, permissions and durable storage. |
-| [Self-signup](docs/self-signup.md) | Enabling personal and organisation signup on your own deployment. |
-| [Admin-managed access](docs/admin-managed-access.md) | Invitations, directory access and first-admin provisioning. |
-| [Slack onboarding](docs/slack-onboarding.md) and [Slack app](apps/slack/README.md) | App installation, Jira destinations and task approval configuration. |
-| [Background sync](docs/background-sync.md) | Configuring scheduled source imports. |
-| [Vercel deployment](docs/vercel-deployment.md) | Deployment configuration. |
-| [Rust core](docs/rust-migration.md) | Native build and verification. |
+| [Slack app](apps/slack/README.md) | App installation, Jira destinations and task approval configuration. |
 
-For a fresh Supabase project, use [schema.sql](infra/supabase/schema.sql); existing projects need the applicable [migrations](infra/supabase/migrations). Keep `.env.local` and provider secrets out of commits.
+Keep `.env.local` and provider secrets out of commits.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -267,7 +261,7 @@ Open the workspace, select a project or **All sources**, then ask a question suc
 
 Broppy retrieves relevant content you may access and returns an answer with numbered citations. Select a citation to inspect its source and highlighted passage. Use the source's **Open in Slack**, **Open in Jira**, **Open in Confluence** or **Open in Drive** link to visit the original.
 
-Answers depend on the content and permissions in your connected tools. The question above is also demonstrated with fictional data in the [Worked Examples](docs/worked-examples.md).
+Answers depend on the content and permissions in your connected tools. The question above is also demonstrated with fictional data in the [Worked Examples](apps/api/src/__snapshots__/worked-examples.md).
 
 ### Work With Project Content
 
@@ -335,7 +329,7 @@ Report bugs and suggest improvements through [GitHub Issues](https://github.com/
 4. Commit and push to your fork.
 5. Open a pull request explaining the change and how you verified it.
 
-For changes to permissions, retrieval or external actions, include the allowed and denied cases in your verification. [Architecture](docs/architecture.md) explains the access boundaries; [decisions.md](decisions.md) records implementation decisions.
+For changes to permissions, retrieval or external actions, include the allowed and denied cases in your verification.
 
 [View contributors](https://github.com/Danixjg/Broppy/graphs/contributors).
 
@@ -376,4 +370,4 @@ Website: [broppy-one.vercel.app](https://broppy-one.vercel.app)
 [stars-url]: https://github.com/Danixjg/Broppy/stargazers
 [issues-shield]: https://img.shields.io/github/issues/Danixjg/Broppy.svg?style=for-the-badge
 [issues-url]: https://github.com/Danixjg/Broppy/issues
-[product-screenshot]: docs/images/workspace-project.png
+[product-screenshot]: .github/assets/workspace-project.png

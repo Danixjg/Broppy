@@ -361,7 +361,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "OPTIONS") return await reply(response, 204, null);
-      // The scheduled background sync (Supabase pg_cron calls this every few minutes; see docs/background-sync.md). It needs
+      // The scheduled background sync (Supabase pg_cron calls this every ten minutes). It needs
       // the shared SYNC_CRON_SECRET, syncs the companies with connected sources, least recently synced first, and stops
       // before the function's time runs out; the next run carries on from the companies it didn't reach.
       if (url.pathname === "/v1/cron/sync" && (request.method === "POST" || request.method === "GET")) {

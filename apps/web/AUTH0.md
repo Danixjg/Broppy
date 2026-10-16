@@ -10,11 +10,10 @@ the Next.js host under `/workspace/`. The request path is:
    `sub` in the Supabase `workspace_users` table. Only active directory members of that organization get in.
 
 For local development, both processes read the same private file, **`.env.local` at the repository root**. Deployed,
-each process should get its own environment (see `decisions.md`, D5).
+each process should get its own environment.
 
 The start page can also offer a public demo with fictional people and data. It appears when `DEMO_API_URL` is set, and
-it uses a separate demo API; see the README's **Website demo** and the hosting guide,
-[`infra/tencent/README.md`](../../infra/tencent/README.md). A signed-in session always takes priority over demo
+it uses a separate demo API; see the README's **Website demo**. A signed-in session always takes priority over demo
 mode.
 
 > Always open **`http://127.0.0.1:3001`**, never `localhost:3001`. Cookies belong to the host in `APP_BASE_URL`;
@@ -67,13 +66,12 @@ our code runs.
       organization's **Connections** tab.
 - [ ] Each person who signs in is a **member** of Company A. The seed script in section 3 adds the six demo users.
 - [ ] For admin-managed access (the admin adds their people's emails in Broppy), also set the Application Login URI,
-      the Organizations tab and the machine-to-machine application described in
-      [`docs/admin-managed-access.md`](../../docs/admin-managed-access.md).
+      the Organizations tab and a machine-to-machine application with the Auth0 Management API scopes for
+      organization members and invitations.
 
 ## 3. Supabase checklist
 
-- [ ] Migrations `infra/supabase/migrations/001` to `005` are applied in order. `004` needs the pgvector extension,
-      and `005` needs Vault.
+- [ ] The Supabase project has Broppy's schema, with the pgvector extension and Vault enabled.
 - [ ] The six demo identities are provisioned in Auth0, in the organization and in `workspace_users`. The seed
       script needs these variables, on top of the API variables in `.env.local`:
   - A Management API machine-to-machine application with permission to read and create users and add organization
@@ -209,8 +207,6 @@ Run `pnpm --dir apps/web build`, then `pnpm --dir apps/web start`. Set `APP_BASE
 (callback, logout and web origin) to the deployed HTTPS origin. Give the API and the web host separate environments,
 and set `BRAIN_API_URL` to the API's origin.
 
-The hosted site, `https://broppy-one.vercel.app`, is set up step by step in
-[`infra/tencent/README.md`](../../infra/tencent/README.md): the Vercel settings, the Auth0 URLs, and the demo and SSO
-APIs on one Tencent Cloud server.
+The hosted site is `https://broppy-one.vercel.app`; its API runs as a separate Vercel project.
 
 Reference: https://github.com/auth0/nextjs-auth0

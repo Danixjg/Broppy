@@ -7,7 +7,7 @@ import { actorTrace } from "./server.js";
 
 // The challenge brief's five scenarios, run on the demo data and written up as Markdown. Every claim in the text is
 // computed from the run, so a change in behaviour changes the document. worked-examples.test.ts keeps
-// docs/worked-examples.md equal to this output.
+// apps/api/src/__snapshots__/worked-examples.md equal to this output.
 
 export interface WorkedExampleOptions {
   /** Writes the answers; the built-in writer when unset. */

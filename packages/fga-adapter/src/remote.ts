@@ -43,7 +43,7 @@ function desiredTuples(doc: DocumentGrant): Tuple[] {
   ];
 }
 
-/** HTTP adapter for the document model in infra/fga/model.fga. */
+/** HTTP adapter for the OpenFGA document model (user, group and document types with a viewer relation). */
 export class RemoteFgaAdapter {
   private readonly sdk?: OpenFgaApi;
   private readonly orgId?: string;
