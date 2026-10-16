@@ -283,7 +283,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     if (oauth) for (const connection of brain.connections.values()) connection.status = "Not connected";
     await brain.restore();
     if (slackCombined) slackInstallation!.link = { scopes: slackConfig.scopes,
-      store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); await brain.change(async () => { brain.markConnected(admin, "slack"); await brain.persist(); }); },
+      // The bot only ever sees channels someone invited it to, so adding it already says what to read.
+      store: async (admin, grant) => { await oauth!.storeGrant("slack", admin, grant); await brain.change(async () => { brain.markConnected(admin, "slack", { mode: "all" }); await brain.persist(); }); },
       discard: async () => { await oauth!.remove("slack"); } };
     // On a serverless host the function may stop once a reply is sent; imports keep it running until they finish.
     if (process.env.VERCEL) brain.onBackground = work => waitUntil(work);

@@ -92,6 +92,13 @@ it("reconnecting a source keeps the scope the admin chose, while a new connectio
   await brain.disconnect(admin, "jira");
   brain.markConnected(admin, "jira");
   expect(brain.connections.get("jira")!.scope).toEqual({ mode: "none" });
+  // Adding the Slack bot is the choice: it reads the channels it was invited to, and a reconnect still keeps a narrower choice.
+  brain.connections.get("slack")!.status = "Not connected";
+  brain.markConnected(admin, "slack", { mode: "all" });
+  expect(brain.connections.get("slack")!.scope).toEqual({ mode: "all" });
+  await brain.setScope(admin, "slack", { mode: "selected", containers: ["payments-cutover"] });
+  brain.markConnected(admin, "slack", { mode: "all" });
+  expect(brain.connections.get("slack")!.scope).toMatchObject({ mode: "selected" });
 });
 
 it("shows why a source is in error, keeps its documents, and clears the reason once it syncs", async () => {
