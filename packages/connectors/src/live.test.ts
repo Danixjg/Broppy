@@ -55,6 +55,17 @@ describe("live source adapters", () => {
   }
 });
 
+it("checks items another instance read once they are remembered from storage, and only those", async () => {
+  const { transport } = provider("jira");
+  const fresh = new LiveConnector("jira", { ids: [], baseUrl: "https://atlassian.example.test/", serviceAuthorization: "Bearer service",
+    userAuthorizations: { ravi: "Bearer user" } }, [user], transport as typeof fetch);
+  await expect(fresh.checkAccess(user, "jira:PAY-101")).rejects.toThrow("Unknown source item");
+  fresh.remember(["jira:PAY-101", "slack:C123", "jira:"]);
+  expect(await fresh.checkAccess(user, "jira:PAY-101")).toBe(true);
+  expect(await fresh.listIds()).toEqual(["jira:PAY-101"]);
+  await expect(fresh.checkAccess(user, "jira:PAY-999")).rejects.toThrow("Unknown source item");
+});
+
 it("discovers all Slack pages and imports every history page and thread reply", async () => {
   const transport = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));

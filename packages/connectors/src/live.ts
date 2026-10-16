@@ -141,6 +141,17 @@ export class LiveConnector extends MockConnector {
     this.settings.cloudId = site.cloudId;
   }
 
+  /**
+   * Items this company already read, loaded from storage. Another server instance did the reading, so without this a
+   * fresh instance would refuse to check or refresh any of them until it ran a sync itself.
+   */
+  remember(docIds: readonly string[]): void {
+    const prefix = `${this.source}:`;
+    const known = new Set(this.settings.ids);
+    for (const docId of docIds) if (docId.startsWith(prefix) && docId.length > prefix.length) known.add(docId.slice(prefix.length));
+    this.settings.ids = [...known];
+  }
+
   private nativeId(docId: string): string {
     const prefix = `${this.source}:`;
     if (!docId.startsWith(prefix) || !this.settings.ids.includes(docId.slice(prefix.length))) {
