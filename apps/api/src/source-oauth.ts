@@ -116,13 +116,18 @@ export class SourceOAuth {
       try { const url = new URL(item.url); return url.protocol === "https:" ? [{ baseUrl: url.origin, cloudId: item.id }] : []; } catch { return []; }
     });
   }
-  /** Configuration may pin a site (cloudId or baseUrl); otherwise the only reachable site is used. */
+  /**
+   * The site to connect: the configured one (cloudId or baseUrl) when the account can reach it, otherwise the only site
+   * the account can reach. Every company on a deployment shares its configuration but has its own Atlassian site, so a
+   * configured site that this account can't reach doesn't stop another company connecting its own.
+   */
   private chooseSite(source: Source, sites: Site[]): Site {
     const config = this.configs[source];
     const pinned = config?.cloudId ? sites.filter(site => site.cloudId === config.cloudId) :
-      config?.baseUrl ? sites.filter(site => site.baseUrl === new URL(config.baseUrl!).origin) : sites;
+      config?.baseUrl ? sites.filter(site => site.baseUrl === new URL(config.baseUrl!).origin) : [];
     if (pinned.length === 1) return pinned[0];
-    if (!pinned.length) throw new Error("This account has no access to an Atlassian site that matches the configuration");
+    if (sites.length === 1) return sites[0];
+    if (!sites.length) throw new Error("This account has no access to an Atlassian site");
     throw new Error("Several Atlassian sites are available; set baseUrl or cloudId in the source configuration to choose one");
   }
   /** The organization's Atlassian site: found at connect time, or pinned by configuration. */

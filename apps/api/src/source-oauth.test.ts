@@ -95,6 +95,11 @@ it("finds the Atlassian site at sign-in, stores it with the org token", async ()
   const pinned = new SourceOAuth({ jira: { ...config.jira, cloudId: "cloud-9" } }, "https://api.example.test", { orgId: "org_a", request: flows() } as unknown as Persistence, fetcher);
   await pinned.complete("jira", new URL(await pinned.begin("jira", user)).searchParams.get("state")!, "code", async () => user);
   expect(await pinned.orgSite("jira")).toEqual({ baseUrl: "https://other.atlassian.net", cloudId: "cloud-9" });
+  // Another company's account can't reach the configured site: it connects the one site it can reach.
+  sites = [{ id: "cloud-2", url: "https://beta.atlassian.net", name: "Beta" }];
+  const another = new SourceOAuth({ jira: { ...config.jira, cloudId: "cloud-9" } }, "https://api.example.test", { orgId: "org_a", request: flows() } as unknown as Persistence, fetcher);
+  await another.complete("jira", new URL(await another.begin("jira", user)).searchParams.get("state")!, "code", async () => user);
+  expect(await another.orgSite("jira")).toEqual({ baseUrl: "https://beta.atlassian.net", cloudId: "cloud-2" });
 });
 
 it("keeps sign-in state in shared storage so a callback can reach a different instance, and uses a token another instance already refreshed", async () => {
