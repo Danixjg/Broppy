@@ -51,8 +51,13 @@ export function trackedLine(key: string, url: string, trackedBy: string, assigne
 }
 
 /** A short answer: its first few sentences, then the sources it came from. Visible only to the person who asked. */
+const NO_RESULT = "No accessible information was found for this query.";
+// The same words for a restricted item as for one that doesn't exist, so a miss never hints that something is hidden.
+export const NOTHING_FOUND = "Hmm, I couldn't find anything on that. If you expected an answer, the file may be out of date or not in Broppy yet. Check with your admin or manager.";
+
 export function answerBlocks(question: string, answer: BroppyAnswer, openUrl: string) {
-  const short = answer.text.length > 600 ? `${answer.text.slice(0, 597).trimEnd()}...` : answer.text;
+  const said = answer.text.trim() === NO_RESULT && !answer.citations.length ? NOTHING_FOUND : answer.text;
+  const short = said.length > 600 ? `${said.slice(0, 597).trimEnd()}...` : said;
   const sources = answer.citations.slice(0, 4).map(c => `<${c.url}|${escape(c.title)}>`).join("  ·  ");
   return [
     { type: "context", elements: [text(`You asked: _${escape(question.slice(0, 200))}_ · only visible to you`)] },
