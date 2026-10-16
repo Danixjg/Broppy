@@ -679,7 +679,8 @@ function renderAnswer(target, result, question) {
   const sources = numberSources(result.citations);
   // With nothing read yet, the honest answer is why there is none, not that nothing was "accessible".
   const text = nothingRead() && !sources.length ? "Broppy hasn't read any of your tools yet, so it has nothing to answer from. Connect a tool, or choose what Broppy reads, in Setup."
-    : safeText(result.text) === NO_RESULT_TEXT ? "Broppy couldn't find anything you can open that answers this. Try other words, or ask your admin whether that tool is connected."
+    // The same words for a restricted item as for one that doesn't exist, so a miss never hints that something is hidden.
+    : safeText(result.text) === NO_RESULT_TEXT ? "Hmm, I couldn't find anything on that. If you expected an answer, the file may be out of date or not in Broppy yet. Check with your admin or manager."
     : safeText(result.text) || "No answer returned.";
   const lines = answerLines(text, sources, result.check);
   const body = node("div", "answer-lines");
