@@ -213,7 +213,7 @@ describe("several companies in one API", () => {
     expect((await call("GET", "/v1/me", { sub: "auth0|mallory", org: "org_new1" })).body).toMatchObject({ code: "email_unverified" });
     emails["auth0|dana"] = { email: "dana@acme.test", verified: true };
     const me = await call("GET", "/v1/me", dana);
-    expect(me).toMatchObject({ status: 200, body: { id: "dana", role: "admin" } });
+    expect(me).toMatchObject({ status: 200, body: { id: "dana", role: "admin", company: "Acme & Sons" } });
     // The same person's token for the home organization is not a member there.
     expect((await call("GET", "/v1/me", { sub: "auth0|dana", org: HOME })).status).toBe(403);
   });
