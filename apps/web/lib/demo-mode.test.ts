@@ -47,6 +47,9 @@ it("serves the start page and demo visitors without SSO settings, and nothing el
   expect((await proxy(visit("/api/brain/v1/me"))).status).toBe(503);
   vi.stubEnv("DEMO_API_URL", "");
   expect((await proxy(visit("/workspace/index.html", true))).headers.get("location")).toBe("https://broppy.example/");
+  // The privacy policy and support page stay open everywhere.
+  expect(passes(await proxy(visit("/privacy")))).toBe(true);
+  expect(passes(await proxy(visit("/support")))).toBe(true);
   expect(sdk.middleware).not.toHaveBeenCalled();
 });
 
