@@ -442,6 +442,9 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           await owner.brain.change(async () => { for (const item of connected) owner.brain.markConnected(approved, item); await owner.brain.persist(); });
           location = returnLocation(webOrigin, returned.page, { connected: connected.join(",") });
         } catch (error) {
+          // The reason is Broppy's own error message, never a token or code.
+          console.warn(JSON.stringify({ event: "source_connect_failed", source, company: returned.company ?? null,
+            sourceError: (url.searchParams.get("error") ?? "").slice(0, 60), cause: (error instanceof Error ? error.message : "unknown").slice(0, 200) }));
           location = returnLocation(webOrigin, returned.page, { connect_failed: source, reason: connectFailure(error, url.searchParams.get("error") ?? "") });
         }
         response.writeHead(302, { location, "cache-control": "no-store", "referrer-policy": "no-referrer" });
