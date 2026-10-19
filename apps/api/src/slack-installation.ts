@@ -26,17 +26,25 @@ export interface SlackSourceLink {
   /** Called when the install was refused after the token was stored. */
   discard(): Promise<void>;
 }
+/** A Slack channel whose agreed tasks go to a Jira project, and the channel members allowed to see the Jira link. */
+export interface ChannelRoute { channel: string; project: string; audience: string[] }
+
 /**
  * What the shared Slack app is told about a company that signed itself up: where to reach the API, the task store, and
- * a service secret for that company alone. The people, channel projects and Jira destinations a company's Slack setup
- * may later declare start empty, so the bot answers questions and offers nothing to Jira until they are set.
+ * a service secret for that company alone. Each channel an admin routed to a Jira project gets "Track in Jira", with
+ * the members saved on the route as its audience and only the summary disclosed. With no route, or no Jira site, the
+ * bot answers questions and offers nothing to Jira.
  */
-export function companyRuntime(env: NodeJS.ProcessEnv, orgId: string, jiraBaseUrl?: string): TrustedRuntime {
+export function companyRuntime(env: NodeJS.ProcessEnv, orgId: string, jiraBaseUrl?: string, routes: ChannelRoute[] = []): TrustedRuntime {
   if (!env.SLACK_SERVICE_TOKEN) throw new SlackSetupError("Slack for other companies needs SLACK_SERVICE_TOKEN");
+  const routed = jiraBaseUrl ? routes.filter(route => route.audience.length) : [];
   return parseRuntime({ orgId, apiUrl: env.API_ORIGIN, webUrl: env.WEB_ORIGIN, storeUrl: env.SUPABASE_URL, storeKey: env.SUPABASE_SECRET_KEY,
-    serviceToken: companyServiceToken(env.SLACK_SERVICE_TOKEN, orgId), people: [], channelProjects: {}, defaultProject: "",
+    serviceToken: companyServiceToken(env.SLACK_SERVICE_TOKEN, orgId), people: [],
+    channelProjects: Object.fromEntries(routed.map(route => [route.channel, route.project])), defaultProject: "",
     threshold: env.TASK_SCORE_THRESHOLD ? Number(env.TASK_SCORE_THRESHOLD) : DEFAULT_THRESHOLD,
-    ...(jiraBaseUrl ? { jiraBaseUrl } : {}), destinations: [], completionPolicies: [] });
+    ...(jiraBaseUrl ? { jiraBaseUrl } : {}),
+    destinations: routed.map(route => ({ channel: route.channel, project: route.project, allowedSlackIds: route.audience, disclosureFields: ["summary"] })),
+    completionPolicies: routed.map(route => ({ channel: route.channel, project: route.project, allowedSlackIds: route.audience })) });
 }
 
 export class SlackInstallationOAuth {
@@ -56,11 +64,11 @@ export class SlackInstallationOAuth {
   }
   /** The same Slack app, installed by a company that signed itself up. Undefined when the app isn't configured. */
   static forCompany(env: NodeJS.ProcessEnv, orgId: string, directory: (sub: string) => Promise<User | undefined>,
-    jiraSite: () => Promise<string | undefined>): SlackInstallationOAuth | undefined {
+    jiraSite: () => Promise<string | undefined>, routes: () => ChannelRoute[] = () => []): SlackInstallationOAuth | undefined {
     if (!env.SLACK_APP_ID || !env.SLACK_CLIENT_ID || !env.SLACK_CLIENT_SECRET || !env.SLACK_SERVICE_TOKEN) return undefined;
     return new SlackInstallationOAuth({ appId: env.SLACK_APP_ID, clientId: env.SLACK_CLIENT_ID, clientSecret: env.SLACK_CLIENT_SECRET,
       orgId, apiOrigin: env.API_ORIGIN ?? "", webOrigin: env.WEB_ORIGIN ?? "" }, SupabaseInstallationRegistry.fromEnv(env),
-      async () => companyRuntime(env, orgId, await jiraSite()), directory);
+      async () => companyRuntime(env, orgId, await jiraSite(), routes()), directory);
   }
   private async admin(actor: User): Promise<User> {
     if (!actor.auth0Sub) throw new Error("Forbidden");
@@ -143,6 +151,12 @@ export class SlackInstallationOAuth {
     }
   }
   async status(actor: User): Promise<InstallationStatus> { await this.admin(actor); return this.registry.status(this.config.orgId, this.config.appId); }
+  /** Sends the current settings to the installed bot, when there is one; false when it isn't installed and active. */
+  async publish(actor: User): Promise<boolean> {
+    await this.admin(actor);
+    const status = await this.registry.status(this.config.orgId, this.config.appId);
+    return status.state === "active" && this.registry.refresh(this.config.orgId, this.config.appId, status.generation, await this.runtime());
+  }
   async refresh(actor: User, generation: number): Promise<boolean> { await this.admin(actor); return this.registry.refresh(this.config.orgId, this.config.appId, generation, await this.runtime()); }
   async disconnect(actor: User, generation: number): Promise<boolean> {
     await this.admin(actor);

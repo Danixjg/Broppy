@@ -250,7 +250,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
     const oauth = oauthConfigs && persistence ? new SourceOAuth(oauthConfigs, process.env.API_ORIGIN ?? "http://127.0.0.1:3000", persistence) : undefined;
     // Every company can add the shared Slack app to its own Slack. A company that signed itself up is given its own service secret.
     const slackInstallation = !directory ? undefined : isHome ? SlackInstallationOAuth.fromEnv(process.env, sub => directory.bySub(sub))
-      : SlackInstallationOAuth.forCompany(process.env, orgId, sub => tenantDirectory!.bySub(sub), async () => (await oauth?.orgSite("jira"))?.baseUrl);
+      : SlackInstallationOAuth.forCompany(process.env, orgId, sub => tenantDirectory!.bySub(sub), async () => (await oauth?.orgSite("jira"))?.baseUrl,
+        () => [...brain.slackRoutes.values()]);
     const accountIds = oauth ? atlassianAccountIds(oauth) : undefined;
     const connectors = (isHome ? liveConnectorsFromEnv(users ?? loadMockCorpus().users) : undefined) ?? (oauth ? Object.fromEntries(
       (["slack", "jira", "confluence", "drive"] as Source[]).map(source => [source, oauthConfigs[source] ? new LiveConnector(source, {
@@ -499,6 +500,30 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
           return await reply(response, changed ? 200 : 409, changed ? { ok: true } : { error: "The Slack installation changed. Reload and try again." });
         }
         return await reply(response, 404, { error: "Not found" });
+      }
+
+      // Which Slack channels send their agreed tasks to which Jira project. The company named in the deployment declares
+      // its Slack setup in environment settings instead, so it can only read this.
+      if (url.pathname === "/v1/admin/slack-routing" && (request.method === "GET" || request.method === "PUT")) {
+        if (user.role !== "admin") return await reply(response, 403, { error: "Forbidden" });
+        const jiraSite = Boolean(await oauth?.orgSite("jira").catch(() => undefined));
+        if (request.method === "GET") return await reply(response, 200, { ...brain.slackRouting(user), jiraConnected: jiraSite, managedByDeployment: tenant.isHome });
+        if (tenant.isHome) return await reply(response, 409, { error: "This company's Slack-to-Jira routes are set in its deployment settings." });
+        const input = await body(request);
+        if (typeof input.channel !== "string" || (input.project !== null && typeof input.project !== "string")) throw new Error("Invalid route");
+        const project = input.project === null ? undefined : input.project as string;
+        // Checked before asking Slack who is in the channel, so only channels Broppy already reads are ever looked up.
+        if (!brain.slackRouting(user).channels.some(channel => channel.id === input.channel)) throw new Error("Broppy doesn't read that Slack channel");
+        if (project && !jiraSite) return await reply(response, 409, { error: "Connect Jira before sending Slack tasks to it." });
+        const slack = connectors?.slack;
+        if (project && !(slack instanceof LiveConnector)) return await reply(response, 409, { error: "Connect Slack before sending its tasks to Jira." });
+        const audience = project ? await (slack as LiveConnector).slackChannelMembers(input.channel) : [];
+        await brain.routeSlackChannel(user, input.channel, project, audience);
+        const published = slackInstallation ? await slackInstallation.publish(user).catch(error => {
+          console.warn(JSON.stringify({ event: "slack_routing_publish_failed", org: tenant.orgId, error: error instanceof Error ? error.message : String(error) }));
+          return false;
+        }) : false;
+        return await reply(response, 200, { ok: true, published, audience: audience.length });
       }
 
       if (service && url.pathname === "/v1/service/actor") return await reply(response, 200, { active: true });
@@ -979,6 +1004,9 @@ const PLAIN_MESSAGES = new Set([
   "We couldn't confirm whether Jira created the task. Check Jira before trying again.",
   "Your Jira account can't create issues in that project", "Jira didn't let you mark this task done", "Only Jira tasks can be marked done",
   "Native permission edits may only narrow access",
+  "Jira refused this task. Check the project's required fields in Jira, then try again.",
+  "Broppy doesn't read that Slack channel", "Broppy doesn't know that Jira project",
+  "Channels with more than 100 people can't send tasks to Jira yet", "Broppy couldn't read who is in that channel",
   "Your Broppy profile needs a Slack email before you can add Broppy to Slack. Ask your administrator to update it."
 ]);
 

@@ -571,6 +571,28 @@ export class LiveConnector extends MockConnector {
     return value;
   }
 
+  private channelMembers(id: string, authorization: string): Promise<Set<string>> {
+    const escaped = encodeURIComponent(id);
+    return this.cached(`slack-members:${id}`, async () => {
+      const ids = new Set<string>(); let cursor = "";
+      do {
+        const page = optional(await this.get(`/api/conversations.members?channel=${escaped}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, authorization));
+        if (page.ok !== true) throw new Error(`Slack member list failed (${text(page.error) || "unknown"})`);
+        for (const member of Array.isArray(page.members) ? page.members : []) ids.add(text(member));
+        cursor = text(optional(page.response_metadata).next_cursor);
+      } while (cursor);
+      return ids;
+    });
+  }
+
+  /** Everyone in a Slack channel now, by Slack user ID, read with the shared connection. */
+  async slackChannelMembers(channelId: string): Promise<string[]> {
+    if (this.source !== "slack" || !/^[CG][A-Z0-9]{2,20}$/.test(channelId)) throw new Error("Not a Slack channel");
+    const authorization = this.settings.authorization ? await this.settings.authorization() : undefined;
+    if (!authorization) throw new SourceNotConnected();
+    return [...await this.channelMembers(channelId, authorization)].filter(id => /^[UW][A-Z0-9]+$/.test(id));
+  }
+
   /** Whether this person may see the item at the source, read with the shared connection. Anything unclear is a no. */
   private async canView(user: User, id: string, authorization: string): Promise<boolean> {
     const email = user.platformIdentities![this.source]!.trim().toLowerCase();
@@ -591,17 +613,7 @@ export class LiveConnector extends MockConnector {
         throw new Error(`Slack channel lookup failed (${text(info.error) || "unknown"})`);
       }
       if (optional(info.channel).is_private !== true) return true;
-      const members = await this.cached(`slack-members:${id}`, async () => {
-        const ids = new Set<string>(); let cursor = "";
-        do {
-          const page = optional(await this.get(`/api/conversations.members?channel=${escaped}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, authorization));
-          if (page.ok !== true) throw new Error(`Slack member list failed (${text(page.error) || "unknown"})`);
-          for (const member of Array.isArray(page.members) ? page.members : []) ids.add(text(member));
-          cursor = text(optional(page.response_metadata).next_cursor);
-        } while (cursor);
-        return ids;
-      });
-      return members.has(slackId);
+      return (await this.channelMembers(id, authorization)).has(slackId);
     }
     if (this.source === "drive") {
       const grants = await this.cached(`drive-permissions:${id}`, async () => {

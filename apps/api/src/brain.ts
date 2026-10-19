@@ -41,6 +41,12 @@ export function taskIsDone(metadata: Record<string, string>): boolean {
   return metadata.statusCategory ? metadata.statusCategory === "done" : String(metadata.status ?? "").trim().toLowerCase() === "done";
 }
 
+/**
+ * Where a Slack channel's agreed tasks go in Jira. `audience` is who was in the channel when an admin saved the route:
+ * the people allowed to see the Jira link in that channel. Someone who joins later is outside it until the route is saved again.
+ */
+export interface SlackRoute { channel: string; project: string; audience: string[]; savedBy: string; savedAt: string }
+
 /** A task Broppy created. `omitted` names reviewed fields Jira went without, so the person is told rather than surprised. */
 export interface CreatedTask { docId: string; title: string; omitted?: Array<"owner" | "due date"> }
 
@@ -55,6 +61,8 @@ export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; updatedAt?: string; finishedAt?: string }>();
   readonly orgId: string;
+  /** Slack channel → Jira project routes an admin chose, for a company whose Slack setup isn't declared by environment. */
+  readonly slackRoutes = new Map<string, SlackRoute>();
   private persistence?: Persistence;
   private persistQueue: Promise<void> = Promise.resolve();
   readonly users: User[];
@@ -120,6 +128,8 @@ export class Brain {
     for (const run of snapshot.runs) this.runs.set(run.source, run);
     for (const connection of snapshot.connections ?? []) this.connections.set(connection.source, connection);
     for (const job of snapshot.jobs ?? []) this.jobs.set(job.source, job);
+    this.slackRoutes.clear();
+    for (const route of snapshot.slackRoutes ?? []) this.slackRoutes.set(route.channel, route);
     if (this.liveMode) {
       const stored = [...this.index.documents.values()].filter(doc => !doc.deletedAt).map(doc => doc.docId);
       for (const connector of Object.values(this.connectors)) if (connector instanceof LiveConnector) connector.remember(stored);
@@ -156,7 +166,7 @@ export class Brain {
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
-        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], connectorDocuments })
+        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], slackRoutes: [...this.slackRoutes.values()], connectorDocuments })
         .catch(async error => {
           // Another instance saved first. Take its state rather than overwrite it; the caller is told to try again.
           if (error instanceof StaleState) await this.restore();
@@ -176,6 +186,38 @@ export class Brain {
     await this.refreshIfStale().catch(() => false);
     try { return await apply(); }
     catch (error) { if (!(error instanceof StaleState)) throw error; return apply(); }
+  }
+
+  /** The Slack channels Broppy reads and the Jira projects it knows, with the route chosen for each channel. Admins only. */
+  slackRouting(actor: User): { channels: Array<{ id: string; name: string; project?: string; audience?: number }>; projects: string[] } {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    const live = [...this.index.documents.values()].filter(doc => !doc.deletedAt);
+    const channels = live.filter(doc => doc.source === "slack" && /^[CG][A-Z0-9]{2,20}$/.test(doc.sourceNativeId ?? ""))
+      .map(doc => ({ id: doc.sourceNativeId!, name: doc.title, ...(this.slackRoutes.get(doc.sourceNativeId!) ? {
+        project: this.slackRoutes.get(doc.sourceNativeId!)!.project, audience: this.slackRoutes.get(doc.sourceNativeId!)!.audience.length } : {}) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const projects = [...new Set(live.filter(doc => doc.source === "jira").map(doc => doc.metadata.project).filter(key => /^[A-Z][A-Z0-9]{0,9}$/.test(key ?? "")))].sort();
+    return { channels, projects };
+  }
+
+  /**
+   * Sends a Slack channel's agreed tasks to a Jira project, or stops (project undefined). The channel must be one Broppy
+   * reads and the project one it knows; `audience` is the channel's current members, read by the caller from Slack.
+   */
+  async routeSlackChannel(actor: User, channel: string, project: string | undefined, audience: string[]): Promise<void> {
+    const { channels, projects } = this.slackRouting(actor);
+    if (!channels.some(item => item.id === channel)) throw new Error("Broppy doesn't read that Slack channel");
+    if (project !== undefined && !projects.includes(project)) throw new Error("Broppy doesn't know that Jira project");
+    if (project !== undefined && (!audience.length || audience.length > 100 || audience.some(id => !/^[UW][A-Z0-9]+$/.test(id)))) {
+      throw new Error(audience.length > 100 ? "Channels with more than 100 people can't send tasks to Jira yet" : "Broppy couldn't read who is in that channel");
+    }
+    await this.change(async () => {
+      if (project === undefined) this.slackRoutes.delete(channel);
+      else this.slackRoutes.set(channel, { channel, project, audience: [...new Set(audience)].sort(), savedBy: actor.id, savedAt: new Date().toISOString() });
+      await this.persist();
+    });
+    this.audit.append("slack_route_changed", actor.id, { channel, ...(project ? { project, audience: audience.length } : { project: null }) });
   }
 
   private assertOrg(user: User): void {
