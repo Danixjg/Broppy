@@ -64,6 +64,23 @@ function optional(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/**
+ * What Broppy keeps about an issue besides its text. The status name is for display; `statusCategory` (new, indeterminate,
+ * done) is what decides whether a task is finished, since a workflow may call done "Closed" or "Released". The assignee is
+ * deliberately not kept: it is Atlassian account data, which Broppy stores none of.
+ */
+export function jiraMetadata(fields: Record<string, unknown>): Record<string, string> {
+  const status = optional(fields.status);
+  const category = text(optional(status.statusCategory).key);
+  const due = text(fields.duedate);
+  return {
+    status: text(status.name), project: text(optional(fields.project).key),
+    ...(["new", "indeterminate", "done"].includes(category) ? { statusCategory: category } : {}),
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(due) ? { dueDate: due } : {}),
+    ...(text(optional(fields.priority).name) ? { priority: text(optional(fields.priority).name) } : {})
+  };
+}
+
 function adf(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
@@ -362,7 +379,7 @@ export class LiveConnector extends MockConnector {
         slackMessages: evidence };
     }
     if (this.source === "jira") {
-      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks`, authorization);
+      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks,duedate,priority`, authorization);
       if (!result) return undefined;
       const issue = object(result); const fields = object(issue.fields);
       const updatedAt = text(fields.updated);
@@ -372,7 +389,7 @@ export class LiveConnector extends MockConnector {
         return text(optional(entry.outwardIssue ?? entry.inwardIssue).key);
       }).filter(key => /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(key)).map(key => `jira:${key}`);
       return { title: text(fields.summary) || id, content: adf(fields.description), updatedAt,
-        url: `${this.origin}/browse/${escaped}`, metadata: { status: text(object(fields.status ?? {}).name), project: text(object(fields.project ?? {}).key) },
+        url: `${this.origin}/browse/${escaped}`, metadata: jiraMetadata(fields),
         links: [...issueLinks, ...adfLinks(fields.description, this.linkOrigins())] };
     }
     if (this.source === "confluence") {
@@ -554,6 +571,28 @@ export class LiveConnector extends MockConnector {
     return value;
   }
 
+  private channelMembers(id: string, authorization: string): Promise<Set<string>> {
+    const escaped = encodeURIComponent(id);
+    return this.cached(`slack-members:${id}`, async () => {
+      const ids = new Set<string>(); let cursor = "";
+      do {
+        const page = optional(await this.get(`/api/conversations.members?channel=${escaped}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, authorization));
+        if (page.ok !== true) throw new Error(`Slack member list failed (${text(page.error) || "unknown"})`);
+        for (const member of Array.isArray(page.members) ? page.members : []) ids.add(text(member));
+        cursor = text(optional(page.response_metadata).next_cursor);
+      } while (cursor);
+      return ids;
+    });
+  }
+
+  /** Everyone in a Slack channel now, by Slack user ID, read with the shared connection. */
+  async slackChannelMembers(channelId: string): Promise<string[]> {
+    if (this.source !== "slack" || !/^[CG][A-Z0-9]{2,20}$/.test(channelId)) throw new Error("Not a Slack channel");
+    const authorization = this.settings.authorization ? await this.settings.authorization() : undefined;
+    if (!authorization) throw new SourceNotConnected();
+    return [...await this.channelMembers(channelId, authorization)].filter(id => /^[UW][A-Z0-9]+$/.test(id));
+  }
+
   /** Whether this person may see the item at the source, read with the shared connection. Anything unclear is a no. */
   private async canView(user: User, id: string, authorization: string): Promise<boolean> {
     const email = user.platformIdentities![this.source]!.trim().toLowerCase();
@@ -574,17 +613,7 @@ export class LiveConnector extends MockConnector {
         throw new Error(`Slack channel lookup failed (${text(info.error) || "unknown"})`);
       }
       if (optional(info.channel).is_private !== true) return true;
-      const members = await this.cached(`slack-members:${id}`, async () => {
-        const ids = new Set<string>(); let cursor = "";
-        do {
-          const page = optional(await this.get(`/api/conversations.members?channel=${escaped}&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, authorization));
-          if (page.ok !== true) throw new Error(`Slack member list failed (${text(page.error) || "unknown"})`);
-          for (const member of Array.isArray(page.members) ? page.members : []) ids.add(text(member));
-          cursor = text(optional(page.response_metadata).next_cursor);
-        } while (cursor);
-        return ids;
-      });
-      return members.has(slackId);
+      return (await this.channelMembers(id, authorization)).has(slackId);
     }
     if (this.source === "drive") {
       const grants = await this.cached(`drive-permissions:${id}`, async () => {

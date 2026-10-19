@@ -36,9 +36,24 @@ const EMBEDDING_PAUSE_MS = 5 * 60_000;
 export type Corpus = "curated" | "demo";
 
 /** The Jira writes the workspace makes for live sources. JiraAsUser implements it with the company's shared connection. */
+/** Whether a Jira task is finished: Jira's status category when known, else the mock data's plain "done". */
+export function taskIsDone(metadata: Record<string, string>): boolean {
+  return metadata.statusCategory ? metadata.statusCategory === "done" : String(metadata.status ?? "").trim().toLowerCase() === "done";
+}
+
+/**
+ * Where a Slack channel's agreed tasks go in Jira. `audience` is who was in the channel when an admin saved the route:
+ * the people allowed to see the Jira link in that channel. Someone who joins later is outside it until the route is saved again.
+ */
+export interface SlackRoute { channel: string; project: string; audience: string[]; savedBy: string; savedAt: string }
+
+/** A task Broppy created. `omitted` names reviewed fields Jira went without, so the person is told rather than surprised. */
+export interface CreatedTask { docId: string; title: string; omitted?: Array<"owner" | "due date"> }
+
 export interface LiveJira {
   canCreate(user: User, project: string): Promise<boolean>;
-  createIssue(user: User, input: { project: string; summary: string; description: string }): Promise<{ key: string; url: string } | undefined>;
+  createIssue(user: User, input: { project: string; summary: string; description: string; assigneeEmail?: string; dueDate?: string }):
+    Promise<{ key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined>;
   markDone(user: User, key: string): Promise<boolean>;
 }
 
@@ -46,6 +61,8 @@ export class Brain {
   readonly connections = new Map<Source, { source: Source; status: string; scope: ImportScope; connectedBy?: string; connectedAt?: string; error?: string }>();
   readonly jobs = new Map<Source, { source: Source; status: string; found: number; indexed: number; skipped: number; failed: number; error?: string; startedAt: string; updatedAt?: string; finishedAt?: string }>();
   readonly orgId: string;
+  /** Slack channel → Jira project routes an admin chose, for a company whose Slack setup isn't declared by environment. */
+  readonly slackRoutes = new Map<string, SlackRoute>();
   private persistence?: Persistence;
   private persistQueue: Promise<void> = Promise.resolve();
   readonly users: User[];
@@ -111,6 +128,8 @@ export class Brain {
     for (const run of snapshot.runs) this.runs.set(run.source, run);
     for (const connection of snapshot.connections ?? []) this.connections.set(connection.source, connection);
     for (const job of snapshot.jobs ?? []) this.jobs.set(job.source, job);
+    this.slackRoutes.clear();
+    for (const route of snapshot.slackRoutes ?? []) this.slackRoutes.set(route.channel, route);
     if (this.liveMode) {
       const stored = [...this.index.documents.values()].filter(doc => !doc.deletedAt).map(doc => doc.docId);
       for (const connector of Object.values(this.connectors)) if (connector instanceof LiveConnector) connector.remember(stored);
@@ -147,7 +166,7 @@ export class Brain {
       await this.persistence.saveState({ orgId: this.orgId, documents: [...this.index.documents.values()],
         grants: this.fga.snapshot(), semanticVectors: this.index.semanticSnapshot(),
         remoteSynced: [...this.remoteSynced], supabaseSynced: [...this.supabaseSynced], states: [...this.states.values()], runs: [...this.runs.values()],
-        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], connectorDocuments })
+        users: this.users, connections: [...this.connections.values()], jobs: [...this.jobs.values()], slackRoutes: [...this.slackRoutes.values()], connectorDocuments })
         .catch(async error => {
           // Another instance saved first. Take its state rather than overwrite it; the caller is told to try again.
           if (error instanceof StaleState) await this.restore();
@@ -167,6 +186,38 @@ export class Brain {
     await this.refreshIfStale().catch(() => false);
     try { return await apply(); }
     catch (error) { if (!(error instanceof StaleState)) throw error; return apply(); }
+  }
+
+  /** The Slack channels Broppy reads and the Jira projects it knows, with the route chosen for each channel. Admins only. */
+  slackRouting(actor: User): { channels: Array<{ id: string; name: string; project?: string; audience?: number }>; projects: string[] } {
+    this.assertOrg(actor);
+    if (actor.role !== "admin") throw new Error("Forbidden");
+    const live = [...this.index.documents.values()].filter(doc => !doc.deletedAt);
+    const channels = live.filter(doc => doc.source === "slack" && /^[CG][A-Z0-9]{2,20}$/.test(doc.sourceNativeId ?? ""))
+      .map(doc => ({ id: doc.sourceNativeId!, name: doc.title, ...(this.slackRoutes.get(doc.sourceNativeId!) ? {
+        project: this.slackRoutes.get(doc.sourceNativeId!)!.project, audience: this.slackRoutes.get(doc.sourceNativeId!)!.audience.length } : {}) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const projects = [...new Set(live.filter(doc => doc.source === "jira").map(doc => doc.metadata.project).filter(key => /^[A-Z][A-Z0-9]{0,9}$/.test(key ?? "")))].sort();
+    return { channels, projects };
+  }
+
+  /**
+   * Sends a Slack channel's agreed tasks to a Jira project, or stops (project undefined). The channel must be one Broppy
+   * reads and the project one it knows; `audience` is the channel's current members, read by the caller from Slack.
+   */
+  async routeSlackChannel(actor: User, channel: string, project: string | undefined, audience: string[]): Promise<void> {
+    const { channels, projects } = this.slackRouting(actor);
+    if (!channels.some(item => item.id === channel)) throw new Error("Broppy doesn't read that Slack channel");
+    if (project !== undefined && !projects.includes(project)) throw new Error("Broppy doesn't know that Jira project");
+    if (project !== undefined && (!audience.length || audience.length > 100 || audience.some(id => !/^[UW][A-Z0-9]+$/.test(id)))) {
+      throw new Error(audience.length > 100 ? "Channels with more than 100 people can't send tasks to Jira yet" : "Broppy couldn't read who is in that channel");
+    }
+    await this.change(async () => {
+      if (project === undefined) this.slackRoutes.delete(channel);
+      else this.slackRoutes.set(channel, { channel, project, audience: [...new Set(audience)].sort(), savedBy: actor.id, savedAt: new Date().toISOString() });
+      await this.persist();
+    });
+    this.audit.append("slack_route_changed", actor.id, { channel, ...(project ? { project, audience: audience.length } : { project: null }) });
   }
 
   private assertOrg(user: User): void {
@@ -606,7 +657,9 @@ export class Brain {
     const statuses = askedStatuses(trimmed);
     const listed = statuses ? [...this.index.documents.values()]
       .filter(doc => doc.source === "jira" && !doc.deletedAt && doc.chunks.length &&
-        statuses.has(String(doc.metadata.status ?? "").trim().toLowerCase()))
+        (statuses.has(String(doc.metadata.status ?? "").trim().toLowerCase()) ||
+          // A workflow's own names ("Released", "Backlog") still answer by category; "in progress" has no category of its own.
+          (statuses.has("done") && doc.metadata.statusCategory === "done") || (statuses.has("to do") && doc.metadata.statusCategory === "new")))
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
       .map(doc => ({ docId: doc.docId, chunkId: doc.chunks[0].chunkId, score: 1, coverage: 1 })) : [];
     const listsStatus = listed.length > 0;
@@ -1020,11 +1073,11 @@ export class Brain {
    * title and text come from the agreed sentence alone. It copies the permissions and tier of the project issue it's
    * modelled on (the one the thread links to, else the project's latest), so it is never visible to more people.
    */
-  async createTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
+  async createTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<CreatedTask> {
     return this.serializeReview(() => this.createReviewedTask(actor, threadDocId, sentence, approved));
   }
 
-  private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
+  private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<CreatedTask> {
     this.assertOrg(actor);
     if (this.liveMode && !this.liveJira) throw new Error("Live sources are read-only");
     let reviewed = approved ? await this.proposalSource(actor, approved.proposalId, approved.revision) : undefined;
@@ -1111,8 +1164,16 @@ export class Brain {
    * text or name. Each attempt is reserved first, so a repeat never creates a second issue, and an attempt whose result
    * is unknown stays blocked until it is reconciled.
    */
-  private async createLiveTask(actor: User, proposal: Proposal, thread: { docId: string }, summary: string, project: string): Promise<{ docId: string; title: string }> {
+  /** The reviewed owner's Jira email: their Jira identity in Broppy, else their sign-in email. Undefined when no one here has that Slack ID. */
+  private ownerJiraEmail(slackId: string): string | undefined {
+    const owner = this.users.find(person => person.active !== false && (person.orgId ?? "demo-company-a") === this.orgId && this.slackId(person) === slackId);
+    return owner ? (owner.platformIdentities?.jira || owner.email || undefined) : undefined;
+  }
+
+  private async createLiveTask(actor: User, proposal: Proposal, thread: { docId: string }, summary: string, project: string): Promise<CreatedTask> {
     const jira = this.liveJira!;
+    const owner = proposal.suggestion.a ? this.ownerJiraEmail(proposal.suggestion.a) : undefined;
+    const omitted = new Set<"owner" | "due date">(proposal.suggestion.a && !owner ? ["owner"] : []);
     if (!await jira.canCreate(actor, project)) throw new Error("Your Jira account can't create issues in that project");
     let operation = await this.taskStore.reserveOperation(proposal, `workspace:${actor.id}`);
     if (!operation || operation.proposalId !== proposal.id || operation.proposalRevision !== proposal.revision ||
@@ -1121,9 +1182,19 @@ export class Brain {
       const creating = await this.taskStore.advanceOperation(operation.id, operation.state, { state: "creating" });
       if (!creating) throw new Error("Stale commitment revision");
       operation = creating;
-      let created: { key: string; url: string } | undefined;
-      try { created = await jira.createIssue(actor, { project, summary, description: `Approved summary: ${summary}\nBroppy operation: ${operation.id}` }); }
+      let created: { key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined;
+      try {
+        created = await jira.createIssue(actor, { project, summary, description: `Approved summary: ${summary}\nBroppy operation: ${operation.id}`,
+          ...(owner ? { assigneeEmail: owner } : {}), ...(proposal.suggestion.d ? { dueDate: proposal.suggestion.d } : {}) });
+        for (const field of created?.omitted ?? []) omitted.add(field);
+      }
       catch (error) {
+        // Jira answering 4xx is a definite refusal: no issue exists, so the reservation can be tried again after a fix.
+        const status = (error as { status?: unknown }).status;
+        if (typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429) {
+          await this.taskStore.advanceOperation(operation.id, "creating", { state: "refused" }).catch(() => undefined);
+          throw new Error("Jira refused this task. Check the project's required fields in Jira, then try again.");
+        }
         await this.taskStore.advanceOperation(operation.id, "creating", { state: "uncertain" }).catch(() => undefined);
         console.error("Jira task needs reconciliation", { operationId: operation.id, error: error instanceof Error ? error.message : String(error) });
         throw new Error("We couldn't confirm whether Jira created the task. Check Jira before trying again.");
@@ -1146,7 +1217,7 @@ export class Brain {
     this.audit.append("task_created", actor.id, { docId, source: "jira", project, fromDocId: thread.docId });
     // The new issue shows in the workspace once the next Jira sync reads it; a failed sync here is retried by the scheduler.
     await this.sync("jira").catch(() => undefined);
-    return { docId, title: `${operation.issueKey} ${summary}` };
+    return { docId, title: `${operation.issueKey} ${summary}`, ...(omitted.size ? { omitted: [...omitted] } : {}) };
   }
 
   /**
@@ -1176,7 +1247,7 @@ export class Brain {
     if (!docId.startsWith("jira:")) throw new Error("Only Jira tasks can be marked done");
     const issue = this.fga.check(actor, docId).allowed ? await this.liveAuthorizedDocument(actor, docId) : undefined;
     if (!issue) throw new Error("Unknown document");
-    if (issue.metadata.status === "done") return;
+    if (taskIsDone(issue.metadata)) return;
     if (this.liveMode) {
       // Jira decides: the person's own account must be allowed to move the issue, and the workflow must reach done.
       if (!await this.liveJira!.markDone(actor, docId.slice("jira:".length))) throw new Error("Jira didn't let you mark this task done");

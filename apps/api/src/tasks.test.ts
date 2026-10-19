@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { loadMockCorpus } from "@brain/connectors";
-import { Brain, type LiveJira } from "./brain.js";
+import { Brain, taskIsDone, type LiveJira } from "./brain.js";
 import type { Persistence } from "./persistence.js";
 import { createApiServer } from "./server.js";
 
@@ -160,6 +160,22 @@ describe("tasks with live sources and a connected Jira", () => {
     expect(created).toHaveLength(1);
   });
 
+  it("sends the reviewed owner and due date to Jira, and reports a field Jira went without", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors, slackUserIds: { maya: "UMAYA", david: "UDAVID" } });
+    const { jira, created } = fakeJira({ createIssue: async (user, input) => {
+      created.push({ user: user.id, input }); return { key: "DB-77", url: "https://acme.atlassian.net/browse/DB-77", omitted: ["due date"] };
+    } });
+    live.liveJira = jira;
+    const david = live.user("david")!;
+    const proposal = (await live.workspace(david)).suggestions[0];
+    const edited = await live.reviewCommitment(david, { id: proposal.id, revision: proposal.revision, action: "edit",
+      summary: "Raise the replica quota", ownerSlackId: "UMAYA", dueDate: "2026-11-03" });
+    const result = await live.createTask(david, proposal.threadDocId, proposal.sentence, { proposalId: proposal.id, revision: edited.revision });
+    const maya = live.user("maya")!;
+    expect(created[0].input).toMatchObject({ assigneeEmail: maya.platformIdentities?.jira || maya.email, dueDate: "2026-11-03" });
+    expect(result).toMatchObject({ docId: "jira:DB-77", omitted: ["due date"] });
+  });
+
   it("refuses a person whose Jira account can't create there, and someone who can't open the thread", async () => {
     const live = await brainWith({ connectors: loadMockCorpus().connectors });
     const { jira, created } = fakeJira({ canCreate: async () => false });
@@ -167,6 +183,16 @@ describe("tasks with live sources and a connected Jira", () => {
     await expect(live.createTask(live.user("david")!, thread, sentence)).rejects.toThrow("can't create issues in that project");
     await expect(live.createTask(live.user("alex")!, thread, sentence)).rejects.toThrow("Unknown document");
     expect(created).toEqual([]);
+  });
+
+  it("lets a task Jira refused outright be tried again, since nothing was created", async () => {
+    const live = await brainWith({ connectors: loadMockCorpus().connectors });
+    let calls = 0;
+    live.liveJira = fakeJira({ createIssue: async () => { calls++; if (calls === 1) throw Object.assign(new Error("Jira request failed (400)"), { status: 400 });
+      return { key: "DB-77", url: "https://acme.atlassian.net/browse/DB-77" }; } }).jira;
+    await expect(live.createTask(live.user("david")!, thread, sentence)).rejects.toThrow("Jira refused this task");
+    expect(await live.createTask(live.user("david")!, thread, sentence)).toMatchObject({ docId: "jira:DB-77" });
+    expect(calls).toBe(2);
   });
 
   it("blocks a retry when Jira's answer was lost, so a task is never created twice", async () => {
@@ -189,5 +215,14 @@ describe("tasks with live sources and a connected Jira", () => {
     live.liveJira = fakeJira({ markDone: async () => false }).jira;
     await expect(live.markDone(live.user("ravi")!, "jira:DB-15")).rejects.toThrow("didn't let you");
     expect(closed).toEqual(["DB-15"]);
+  });
+});
+
+describe("whether a task is done", () => {
+  it("follows Jira's status category, so Closed and Released count and a status merely named Done-ish does not", () => {
+    expect(taskIsDone({ status: "Released", statusCategory: "done" })).toBe(true);
+    expect(taskIsDone({ status: "Done review", statusCategory: "indeterminate" })).toBe(false);
+    expect(taskIsDone({ status: "done" })).toBe(true);
+    expect(taskIsDone({ status: "open" })).toBe(false);
   });
 });

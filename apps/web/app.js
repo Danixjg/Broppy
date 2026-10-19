@@ -33,6 +33,8 @@ const appendText = (parent, tag, className, text) => parent.append(node(tag, cla
 const setMessage = (element, message) => { element.textContent = message; };
 const sourceName = source => ({ slack: "Slack", jira: "Jira", confluence: "Confluence", drive: "Drive" })[source] || "Source";
 const documentStatus = doc => safeText(doc.metadata?.status) || "source";
+// Jira's status category decides done; a workflow may name its done status "Closed" or "Released".
+const taskIsDone = doc => doc.metadata?.statusCategory ? doc.metadata.statusCategory === "done" : documentStatus(doc).toLowerCase() === "done";
 const safeUrl = value => {
   try { const url = new URL(value); return url.protocol === "https:" ? url.href : null; } catch { return null; }
 };
@@ -245,6 +247,8 @@ function openTask(doc, quotes = [], options = {}) {
   const key = doc.docId.split(":")[1] || "";
   const work = linkedDocs(doc).filter(item => ["confluence", "drive"].includes(item.source));
   const target = work.find(item => sentencesOf(item.content).some(sentence => sentence.includes(key))) || work[0];
+  const facts = [doc.metadata?.dueDate ? `Due ${safeText(doc.metadata.dueDate)}` : "", doc.metadata?.priority ? `${safeText(doc.metadata.priority)} priority` : ""].filter(Boolean);
+  if (facts.length) appendText(box, "p", "detail-meta", facts.join(" · "));
   const wrap = node("div", "answer-block");
   if (target) {
     appendText(wrap, "strong", "", `Working doc: ${target.title}`);
@@ -255,7 +259,7 @@ function openTask(doc, quotes = [], options = {}) {
     wrap.append(open);
     if (!isDemoAddress(target.url)) wrap.append(" ", sourceLink(target.url, target.source));
   } else appendText(wrap, "p", "muted", "No linked page or file that you can open.");
-  if (documentStatus(doc) === "done") appendText(wrap, "p", "muted", "This task is done.");
+  if (taskIsDone(doc)) appendText(wrap, "p", "muted", "This task is done.");
   else if (state.workspace.capabilities.markDone === true) {
     const done = node("button", "secondary-button", "Mark done"); done.type = "button";
     done.addEventListener("click", () => markDone(doc, done));
@@ -353,6 +357,13 @@ async function reviewCommitment(item, command, button) {
     if (generation === state.identity) $("globalStatus").textContent = command.action === "edit" ? "Review saved. Create or link after reviewing the saved fields." : "Commitment review saved.";
   } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }
 }
+/** Reviewed fields Jira went without, said plainly so the person can set them in Jira. */
+function omittedNotes(omitted) {
+  const list = Array.isArray(omitted) ? omitted : [];
+  if (!list.length) return [];
+  return [list.includes("owner") ? "No owner was set in Jira: we couldn't match them to a Jira account it would accept." : "",
+    list.includes("due date") ? "No due date was set: Jira didn't accept one for this project." : "", "Set it in Jira."].filter(Boolean);
+}
 async function createTask(item, button) {
   const generation = state.identity;
   button.disabled = true; $("globalStatus").textContent = "Creating the Jira task…";
@@ -361,7 +372,7 @@ async function createTask(item, button) {
     if (generation !== state.identity) return;
     await loadWorkspace();
     if (generation !== state.identity) return;
-    $("globalStatus").textContent = `Created ${safeText(result.title)}.`;
+    $("globalStatus").textContent = [`Created ${safeText(result.title)}.`, ...omittedNotes(result.omitted)].join(" ");
     const created = docById(result.docId);
     if (created) { state.selected = created.docId; openTask(created); }
   } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }

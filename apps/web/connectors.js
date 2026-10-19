@@ -170,6 +170,39 @@ function botCard(installation) {
   }
 }
 
+// ---- Slack tasks to Jira ----
+async function loadRouting() {
+  const status = $("slack-jira-status"), box = $("slack-jira-routes");
+  let routing;
+  try { routing = await request("/v1/admin/slack-routing"); } catch (error) { status.textContent = error.message; box.replaceChildren(); return; }
+  if (box.contains(document.activeElement)) return;
+  if (routing.managedByDeployment) { status.textContent = "This company's channels and projects are set in its deployment settings."; box.replaceChildren(); return; }
+  if (!routing.jiraConnected) { status.textContent = "Connect Jira above first."; box.replaceChildren(); return; }
+  if (!routing.channels.length) { status.textContent = "Broppy doesn't read any Slack channels yet. Connect Slack and choose channels above."; box.replaceChildren(); return; }
+  if (!routing.projects.length) { status.textContent = "Broppy hasn't read any Jira projects yet. Wait for Jira to finish reading."; box.replaceChildren(); return; }
+  const routed = routing.channels.filter(channel => channel.project).length;
+  status.textContent = routed ? `${routed} ${routed === 1 ? "channel sends" : "channels send"} tasks to Jira.` : "No channel sends tasks to Jira yet.";
+  box.replaceChildren(...routing.channels.map(channel => {
+    const select = h("select", { "aria-label": `Jira project for ${channel.name}` },
+      h("option", { value: "" }, "Not sent to Jira"), ...routing.projects.map(project => h("option", { value: project, ...(project === channel.project ? { selected: true } : {}) }, project)));
+    const save = project => run(select, async () => {
+      const result = await request("/v1/admin/slack-routing", "PUT", { channel: channel.id, project: project || null });
+      notice({ kind: "good", text: project
+        ? `${channel.name} now sends tasks to ${project}. ${result.audience} ${result.audience === 1 ? "person" : "people"} there can see the Jira link.${result.published ? " Slack has the new setting." : " Add Broppy to Slack to use it."}`
+        : `${channel.name} no longer sends tasks to Jira.` });
+      await loadRouting();
+    });
+    select.onchange = () => save(select.value);
+    const row = h("div", { class: "route" }, h("span", { class: "route-name" }, channel.name), select);
+    if (channel.project) {
+      const again = h("button", { type: "button", class: "btn" }, "Update who can see links");
+      again.onclick = () => run(again, () => save(channel.project));
+      row.append(h("span", { class: "muted" }, `${channel.audience} ${channel.audience === 1 ? "person" : "people"}`), again);
+    }
+    return row;
+  }));
+}
+
 // ---- AI model ----
 const modelProvider = $("model-provider");
 const syncModelForm = () => { $("model-url-label").hidden = modelProvider.value !== "openai_compatible"; };
@@ -233,4 +266,5 @@ async function load() {
 $("onboard").onclick = () => run($("onboard"), async () => { await request("/v1/admin/onboard", "POST"); await load(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void load(); });
 void loadModel();
+void loadRouting();
 void load();

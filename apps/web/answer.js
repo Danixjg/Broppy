@@ -218,6 +218,7 @@ export function auditSummary(entry) {
     case "jira_comment_added_from_slack": return `Added a comment to Jira issue ${text(data.key)} from Slack`;
     case "commitment_reviewed": return `Reviewed the commitment in ${text(data.fromDocId)}: ${text(data.action)}, revision ${count(data.revision)}`;
     case "task_status_changed": return `Marked ${doc} ${text(data.status)}`;
+    case "slack_route_changed": return data.project ? `Sent Slack channel ${text(data.channel)}'s tasks to Jira project ${text(data.project)}` : `Stopped sending Slack channel ${text(data.channel)}'s tasks to Jira`;
     case "tier_narrowed": return `Narrowed ${doc} to the ${text(data.tier)} tier`;
     case "native_permission_changed": return `Changed the source permissions of ${doc}`;
     case "user_blocked": return `Blocked ${text(data.userId)} from ${doc}`;

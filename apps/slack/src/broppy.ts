@@ -8,12 +8,14 @@ export interface JiraIssueRequest {
   summary: string;
   description: string;
   assigneeAccountId?: string;
+  /** The owner's Slack email, for Broppy to match to their Jira account when no account ID is configured. */
+  assigneeEmail?: string;
   dueDate?: string;
 }
 
 export interface BroppyApi {
   /** Creates the issue through the organization's shared Jira connection, for this person; undefined when the admin hasn't connected Jira. */
-  createIssue(slackEmail: string, issue: JiraIssueRequest): Promise<{ key: string; url: string } | undefined>;
+  createIssue(slackEmail: string, issue: JiraIssueRequest): Promise<{ key: string; url: string; omitted?: string[] } | undefined>;
   /** Comments through the shared Jira connection, for this person; false when the admin hasn't connected Jira. */
   comment(slackEmail: string, key: string, text: string): Promise<boolean>;
   ask(slackEmail: string, question: string): Promise<BroppyAnswer>;
@@ -56,7 +58,8 @@ export class BroppyClient implements BroppyApi {
     if (!response.ok) throw new Error(`Broppy Jira issue failed (${response.status})`);
     const payload: any = await response.json();
     if (typeof payload.key !== "string" || typeof payload.url !== "string") throw new Error("Broppy returned no issue");
-    return { key: payload.key, url: payload.url };
+    const omitted = Array.isArray(payload.omitted) ? payload.omitted.filter((field: unknown) => field === "owner" || field === "due date") : [];
+    return { key: payload.key, url: payload.url, ...(omitted.length ? { omitted } : {}) };
   }
 
   async comment(slackEmail: string, key: string, text: string) {
