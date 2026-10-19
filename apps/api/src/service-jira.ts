@@ -6,7 +6,17 @@ export interface IssueInput {
   summary: string;
   description: string;
   assigneeAccountId?: string;
+  /** The owner's email, when the caller knows the person but not their Jira account; resolved here. */
+  assigneeEmail?: string;
   dueDate?: string;
+}
+
+/** A reviewed field the new issue went without, so the person can be told instead of finding out in Jira. */
+export type OmittedField = "owner" | "due date";
+
+/** Jira answered with an error. A 400 is a definite refusal: nothing was created, so trying again cannot duplicate. */
+export class JiraRequestError extends Error {
+  constructor(readonly status: number, readonly fields: string[]) { super(`Jira request failed (${status})`); }
 }
 
 export interface JiraIssueAccess {
@@ -31,13 +41,21 @@ const adf = (text: string) => ({
 
 /** Checks a request body before it goes to Jira; throws on anything the Slack app would never send. */
 export function parseIssue(input: Record<string, unknown>): IssueInput {
-  const { project, summary, description, assigneeAccountId, dueDate } = input;
+  const { project, summary, description, assigneeAccountId, assigneeEmail, dueDate } = input;
   if (typeof project !== "string" || !/^[A-Z][A-Z0-9]{0,9}$/.test(project)) throw new Error("Invalid issue");
   if (typeof summary !== "string" || !summary.trim() || summary.length > 250) throw new Error("Invalid issue");
   if (typeof description !== "string" || description.length > 5000) throw new Error("Invalid issue");
   if (assigneeAccountId !== undefined && (typeof assigneeAccountId !== "string" || !/^[\w:.-]{1,128}$/.test(assigneeAccountId))) throw new Error("Invalid issue");
-  if (dueDate !== undefined && (typeof dueDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate))) throw new Error("Invalid issue");
-  return { project, summary, description, ...(assigneeAccountId ? { assigneeAccountId } : {}), ...(dueDate ? { dueDate } : {}) };
+  if (assigneeEmail !== undefined && (typeof assigneeEmail !== "string" || assigneeEmail.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(assigneeEmail))) throw new Error("Invalid issue");
+  if (dueDate !== undefined && (typeof dueDate !== "string" || !validDate(dueDate))) throw new Error("Invalid issue");
+  return { project, summary, description, ...(assigneeAccountId ? { assigneeAccountId } : {}), ...(assigneeEmail ? { assigneeEmail } : {}), ...(dueDate ? { dueDate } : {}) };
+}
+
+/** A real calendar date in Jira's YYYY-MM-DD form; 2026-02-30 is not one. */
+export function validDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 export function parseComment(input: Record<string, unknown>): { key: string; text: string } {
@@ -117,22 +135,44 @@ export class JiraAsUser {
       method: "POST", headers: { authorization, "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify(body), signal: AbortSignal.timeout(10_000), redirect: "error"
     });
-    if (!response.ok) throw new Error(`Jira request failed (${response.status})`);
+    if (!response.ok) {
+      const refusal: any = response.status === 400 ? await response.json().catch(() => undefined) : undefined;
+      throw new JiraRequestError(response.status, refusal?.errors && typeof refusal.errors === "object" ? Object.keys(refusal.errors) : []);
+    }
     const text = await response.text();
     return { site, data: text ? JSON.parse(text) : {} };
   }
 
-  async createIssue(user: User, input: IssueInput): Promise<{ key: string; url: string } | undefined> {
-    const result = await this.request(user, "issue", {
-      fields: {
-        project: { key: input.project }, summary: input.summary, issuetype: { name: "Task" }, description: adf(`${input.description}\n\nTracked in Broppy for ${user.name}.`),
-        ...(input.assigneeAccountId ? { assignee: { accountId: input.assigneeAccountId } } : {}),
-        ...(input.dueDate ? { duedate: input.dueDate } : {})
-      }
+  /**
+   * Creates the issue with the reviewed owner and due date when Jira will take them. An owner with no Jira account, or a
+   * field Jira refuses (not on the project's create screen, owner not assignable), is left out and listed in `omitted`.
+   */
+  async createIssue(user: User, input: IssueInput): Promise<{ key: string; url: string; omitted: OmittedField[] } | undefined> {
+    const omitted: OmittedField[] = [];
+    let assignee = input.assigneeAccountId;
+    if (!assignee && input.assigneeEmail) {
+      assignee = await this.accountId?.(input.assigneeEmail.trim().toLowerCase()).catch(() => undefined);
+      if (!assignee) omitted.push("owner");
+    }
+    let dueDate = input.dueDate;
+    const fields = () => ({
+      project: { key: input.project }, summary: input.summary, issuetype: { name: "Task" }, description: adf(`${input.description}\n\nTracked in Broppy for ${user.name}.`),
+      ...(assignee ? { assignee: { accountId: assignee } } : {}), ...(dueDate ? { duedate: dueDate } : {})
     });
+    let result;
+    try { result = await this.request(user, "issue", { fields: fields() }); }
+    catch (error) {
+      // Only a refusal that names the optional fields is retried, once, without them; anything else is the caller's to report.
+      if (!(error instanceof JiraRequestError) || error.status !== 400 || !error.fields.length) throw error;
+      const refused = new Set(error.fields);
+      if ([...refused].some(field => field !== "assignee" && field !== "duedate")) throw error;
+      if (refused.has("assignee") && assignee) { assignee = undefined; omitted.push("owner"); }
+      if (refused.has("duedate") && dueDate) { dueDate = undefined; omitted.push("due date"); }
+      result = await this.request(user, "issue", { fields: fields() });
+    }
     if (!result) return undefined;
     if (typeof result.data.key !== "string") throw new Error("Jira returned no issue key");
-    return { key: result.data.key, url: `${result.site.baseUrl}/browse/${result.data.key}` };
+    return { key: result.data.key, url: `${result.site.baseUrl}/browse/${result.data.key}`, omitted };
   }
 
   async comment(user: User, key: string, text: string): Promise<boolean> {

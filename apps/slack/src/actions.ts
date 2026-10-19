@@ -30,6 +30,7 @@ export async function confirmProposal(deps: Deps, proposal: Proposal, user: stri
   if (!validDestinationPolicy(policy)) return "This channel and Jira project have no complete approved audience and disclosure policy. Ask an admin to configure the destination.";
   if (policy!.allowedSlackIds.some(id => !members.includes(id))) return "The declared Jira audience includes someone outside this source channel. No Jira content was sent.";
   let op = proposal.operationId ? await deps.store.getOperation(proposal.operationId) : undefined;
+  let omitted: string[] = [];
   if (!op && proposal.status !== "pending") return proposal.issueKey ? `Already linked to ${proposal.issueKey}.` : "This proposal has already been reviewed.";
   if (!op) {
     const s = proposal.suggestion;
@@ -61,12 +62,15 @@ export async function confirmProposal(deps: Deps, proposal: Proposal, user: stri
     try {
       const source = policy!.disclosureFields.includes("permalink") ? `\nSource: ${op.proposal.permalink ?? `Slack channel ${s.c}, message ${s.ts}`}` : "";
       await requireCurrent(deps.workspace);
-      const created = await deps.broppy.createIssue(email, { project: s.p, summary: s.t, assigneeAccountId: person?.jiraAccountId, dueDate: s.d,
+      const ownerEmail = !person?.jiraAccountId && s.a ? await deps.slack.userEmail(s.a).catch(() => undefined) : undefined;
+      const created = await deps.broppy.createIssue(email, { project: s.p, summary: s.t, assigneeAccountId: person?.jiraAccountId,
+        ...(ownerEmail ? { assigneeEmail: ownerEmail } : {}), dueDate: s.d,
         description: `Approved summary: ${s.t}${source}\nBroppy operation: ${op.id}` });
       if (!created) {
         await deps.store.advanceOperation(op.id, "creating", { state: "refused" });
         return unavailable;
       }
+      omitted = created.omitted ?? [];
       const saved = await deps.store.advanceOperation(op.id, "creating", { state: "remote_succeeded", issueKey: created.key, issueUrl: created.url });
       if (!saved) return pending;
       op = saved;
@@ -107,7 +111,14 @@ export async function confirmProposal(deps: Deps, proposal: Proposal, user: stri
   const originalLink = await deps.store.findTask(op.project, op.fingerprint, [], deps.workspace?.teamId);
   if (originalLink && sameTeam(deps.workspace, originalLink.teamId) && originalLink.issueKey === op.issueKey) await deps.store.recordRepeat(originalLink, proposal.suggestion.c, proposal.suggestion.ts);
   if (op.proposalId !== proposal.id) return `Linked to <${op.issueUrl}|${op.issueKey}>. The original source is preserved.`;
-  return notifyTracking(deps, op);
+  const reply = await notifyTracking(deps, op);
+  return omitted.length ? `${reply} ${omittedNote(omitted)}` : reply;
+}
+
+/** Tells the approver which reviewed fields the Jira issue went without, so they can set them in Jira. */
+export function omittedNote(omitted: string[]): string {
+  return [omitted.includes("owner") ? "No owner was set in Jira: we couldn't match them to a Jira account it would accept." : "",
+    omitted.includes("due date") ? "No due date was set: Jira didn't accept one for this project." : "", "Set it in Jira."].filter(Boolean).join(" ");
 }
 
 async function notifyTracking(deps: Deps, op: TaskOperation): Promise<string> {

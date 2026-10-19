@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { nativeAllows } from "./index.js";
-import { CredentialRejected, LiveConnector, SourceAccessUnavailable } from "./live.js";
+import { CredentialRejected, LiveConnector, SourceAccessUnavailable, jiraMetadata } from "./live.js";
 import type { Source, User } from "@brain/types";
 
 const user: User = { id: "ravi", name: "Ravi", email: "ravi@example.test", auth0Sub: "auth0|ravi",
@@ -475,4 +475,13 @@ describe("accounts at the sources", () => {
     expect(permissions?.users).toEqual(["ravi@example.test"]);
     expect(permissions?.native).toMatchObject({ projectViewers: ["ravi@contractor.test"], issueViewers: ["ravi@contractor.test"] });
   });
+});
+
+it("keeps Jira's status category, due date and priority as task metadata, but not the assignee's account data", () => {
+  expect(jiraMetadata({ status: { name: "Released", statusCategory: { key: "done" } }, project: { key: "DB" },
+    assignee: { displayName: "Maya Tan", emailAddress: "hidden@acme.test" }, duedate: "2026-11-03", priority: { name: "High" } }))
+    .toEqual({ status: "Released", project: "DB", statusCategory: "done", dueDate: "2026-11-03", priority: "High" });
+  // Missing or unexpected values are left out rather than invented.
+  expect(jiraMetadata({ status: { name: "Open", statusCategory: { key: "bogus" } }, project: { key: "DB" }, assignee: null, duedate: "soon" }))
+    .toEqual({ status: "Open", project: "DB" });
 });

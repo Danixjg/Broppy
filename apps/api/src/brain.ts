@@ -36,9 +36,18 @@ const EMBEDDING_PAUSE_MS = 5 * 60_000;
 export type Corpus = "curated" | "demo";
 
 /** The Jira writes the workspace makes for live sources. JiraAsUser implements it with the company's shared connection. */
+/** Whether a Jira task is finished: Jira's status category when known, else the mock data's plain "done". */
+export function taskIsDone(metadata: Record<string, string>): boolean {
+  return metadata.statusCategory ? metadata.statusCategory === "done" : String(metadata.status ?? "").trim().toLowerCase() === "done";
+}
+
+/** A task Broppy created. `omitted` names reviewed fields Jira went without, so the person is told rather than surprised. */
+export interface CreatedTask { docId: string; title: string; omitted?: Array<"owner" | "due date"> }
+
 export interface LiveJira {
   canCreate(user: User, project: string): Promise<boolean>;
-  createIssue(user: User, input: { project: string; summary: string; description: string }): Promise<{ key: string; url: string } | undefined>;
+  createIssue(user: User, input: { project: string; summary: string; description: string; assigneeEmail?: string; dueDate?: string }):
+    Promise<{ key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined>;
   markDone(user: User, key: string): Promise<boolean>;
 }
 
@@ -606,7 +615,9 @@ export class Brain {
     const statuses = askedStatuses(trimmed);
     const listed = statuses ? [...this.index.documents.values()]
       .filter(doc => doc.source === "jira" && !doc.deletedAt && doc.chunks.length &&
-        statuses.has(String(doc.metadata.status ?? "").trim().toLowerCase()))
+        (statuses.has(String(doc.metadata.status ?? "").trim().toLowerCase()) ||
+          // A workflow's own names ("Released", "Backlog") still answer by category; "in progress" has no category of its own.
+          (statuses.has("done") && doc.metadata.statusCategory === "done") || (statuses.has("to do") && doc.metadata.statusCategory === "new")))
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
       .map(doc => ({ docId: doc.docId, chunkId: doc.chunks[0].chunkId, score: 1, coverage: 1 })) : [];
     const listsStatus = listed.length > 0;
@@ -1020,11 +1031,11 @@ export class Brain {
    * title and text come from the agreed sentence alone. It copies the permissions and tier of the project issue it's
    * modelled on (the one the thread links to, else the project's latest), so it is never visible to more people.
    */
-  async createTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
+  async createTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<CreatedTask> {
     return this.serializeReview(() => this.createReviewedTask(actor, threadDocId, sentence, approved));
   }
 
-  private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<{ docId: string; title: string }> {
+  private async createReviewedTask(actor: User, threadDocId: string, sentence: string, approved?: { proposalId: string; revision: number }): Promise<CreatedTask> {
     this.assertOrg(actor);
     if (this.liveMode && !this.liveJira) throw new Error("Live sources are read-only");
     let reviewed = approved ? await this.proposalSource(actor, approved.proposalId, approved.revision) : undefined;
@@ -1111,8 +1122,16 @@ export class Brain {
    * text or name. Each attempt is reserved first, so a repeat never creates a second issue, and an attempt whose result
    * is unknown stays blocked until it is reconciled.
    */
-  private async createLiveTask(actor: User, proposal: Proposal, thread: { docId: string }, summary: string, project: string): Promise<{ docId: string; title: string }> {
+  /** The reviewed owner's Jira email: their Jira identity in Broppy, else their sign-in email. Undefined when no one here has that Slack ID. */
+  private ownerJiraEmail(slackId: string): string | undefined {
+    const owner = this.users.find(person => person.active !== false && (person.orgId ?? "demo-company-a") === this.orgId && this.slackId(person) === slackId);
+    return owner ? (owner.platformIdentities?.jira || owner.email || undefined) : undefined;
+  }
+
+  private async createLiveTask(actor: User, proposal: Proposal, thread: { docId: string }, summary: string, project: string): Promise<CreatedTask> {
     const jira = this.liveJira!;
+    const owner = proposal.suggestion.a ? this.ownerJiraEmail(proposal.suggestion.a) : undefined;
+    const omitted = new Set<"owner" | "due date">(proposal.suggestion.a && !owner ? ["owner"] : []);
     if (!await jira.canCreate(actor, project)) throw new Error("Your Jira account can't create issues in that project");
     let operation = await this.taskStore.reserveOperation(proposal, `workspace:${actor.id}`);
     if (!operation || operation.proposalId !== proposal.id || operation.proposalRevision !== proposal.revision ||
@@ -1121,9 +1140,19 @@ export class Brain {
       const creating = await this.taskStore.advanceOperation(operation.id, operation.state, { state: "creating" });
       if (!creating) throw new Error("Stale commitment revision");
       operation = creating;
-      let created: { key: string; url: string } | undefined;
-      try { created = await jira.createIssue(actor, { project, summary, description: `Approved summary: ${summary}\nBroppy operation: ${operation.id}` }); }
+      let created: { key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined;
+      try {
+        created = await jira.createIssue(actor, { project, summary, description: `Approved summary: ${summary}\nBroppy operation: ${operation.id}`,
+          ...(owner ? { assigneeEmail: owner } : {}), ...(proposal.suggestion.d ? { dueDate: proposal.suggestion.d } : {}) });
+        for (const field of created?.omitted ?? []) omitted.add(field);
+      }
       catch (error) {
+        // Jira answering 4xx is a definite refusal: no issue exists, so the reservation can be tried again after a fix.
+        const status = (error as { status?: unknown }).status;
+        if (typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429) {
+          await this.taskStore.advanceOperation(operation.id, "creating", { state: "refused" }).catch(() => undefined);
+          throw new Error("Jira refused this task. Check the project's required fields in Jira, then try again.");
+        }
         await this.taskStore.advanceOperation(operation.id, "creating", { state: "uncertain" }).catch(() => undefined);
         console.error("Jira task needs reconciliation", { operationId: operation.id, error: error instanceof Error ? error.message : String(error) });
         throw new Error("We couldn't confirm whether Jira created the task. Check Jira before trying again.");
@@ -1146,7 +1175,7 @@ export class Brain {
     this.audit.append("task_created", actor.id, { docId, source: "jira", project, fromDocId: thread.docId });
     // The new issue shows in the workspace once the next Jira sync reads it; a failed sync here is retried by the scheduler.
     await this.sync("jira").catch(() => undefined);
-    return { docId, title: `${operation.issueKey} ${summary}` };
+    return { docId, title: `${operation.issueKey} ${summary}`, ...(omitted.size ? { omitted: [...omitted] } : {}) };
   }
 
   /**
@@ -1176,7 +1205,7 @@ export class Brain {
     if (!docId.startsWith("jira:")) throw new Error("Only Jira tasks can be marked done");
     const issue = this.fga.check(actor, docId).allowed ? await this.liveAuthorizedDocument(actor, docId) : undefined;
     if (!issue) throw new Error("Unknown document");
-    if (issue.metadata.status === "done") return;
+    if (taskIsDone(issue.metadata)) return;
     if (this.liveMode) {
       // Jira decides: the person's own account must be allowed to move the issue, and the workflow must reach done.
       if (!await this.liveJira!.markDone(actor, docId.slice("jira:".length))) throw new Error("Jira didn't let you mark this task done");

@@ -84,6 +84,14 @@ describe("durable Jira actions", () => {
     const value = buttonValue(await suggestion(ctx), "edit_task"); await click(ctx, value);
     expect(ctx.calls.created).toHaveLength(0); expect(ctx.calls.messages).toHaveLength(0); expect(ctx.calls.legacy).toHaveLength(0);
   });
+  it("sends the owner's email when no Jira account is configured, and tells the approver what Jira left out", async () => {
+    const ctx = setup(); ctx.deps.people = ctx.deps.people.map(person => ({ slackId: person.slackId, name: person.name }));
+    const create = ctx.deps.broppy.createIssue;
+    ctx.deps.broppy.createIssue = async (email, input) => ({ ...(await create(email, input))!, omitted: ["due date"] });
+    await click(ctx, buttonValue(await suggestion(ctx)));
+    expect(ctx.calls.created[0].issue).toMatchObject({ assigneeEmail: "maya@x.test" });
+    expect(JSON.stringify(ctx.calls.responses)).toContain("No due date was set");
+  });
   it("omits the source pointer unless the destination policy approves that field", async () => {
     const ctx = setup(); ctx.deps.destinations![0].disclosureFields = ["summary"];
     const eph = await suggestion(ctx); expect(eph.blocks[0].text.text).toContain("Jira task visible to: <@UMAYA>");

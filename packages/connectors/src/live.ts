@@ -64,6 +64,23 @@ function optional(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/**
+ * What Broppy keeps about an issue besides its text. The status name is for display; `statusCategory` (new, indeterminate,
+ * done) is what decides whether a task is finished, since a workflow may call done "Closed" or "Released". The assignee is
+ * deliberately not kept: it is Atlassian account data, which Broppy stores none of.
+ */
+export function jiraMetadata(fields: Record<string, unknown>): Record<string, string> {
+  const status = optional(fields.status);
+  const category = text(optional(status.statusCategory).key);
+  const due = text(fields.duedate);
+  return {
+    status: text(status.name), project: text(optional(fields.project).key),
+    ...(["new", "indeterminate", "done"].includes(category) ? { statusCategory: category } : {}),
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(due) ? { dueDate: due } : {}),
+    ...(text(optional(fields.priority).name) ? { priority: text(optional(fields.priority).name) } : {})
+  };
+}
+
 function adf(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
@@ -362,7 +379,7 @@ export class LiveConnector extends MockConnector {
         slackMessages: evidence };
     }
     if (this.source === "jira") {
-      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks`, authorization);
+      const result = await this.get(`/rest/api/3/issue/${escaped}?fields=summary,description,updated,status,project,issuelinks,duedate,priority`, authorization);
       if (!result) return undefined;
       const issue = object(result); const fields = object(issue.fields);
       const updatedAt = text(fields.updated);
@@ -372,7 +389,7 @@ export class LiveConnector extends MockConnector {
         return text(optional(entry.outwardIssue ?? entry.inwardIssue).key);
       }).filter(key => /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(key)).map(key => `jira:${key}`);
       return { title: text(fields.summary) || id, content: adf(fields.description), updatedAt,
-        url: `${this.origin}/browse/${escaped}`, metadata: { status: text(object(fields.status ?? {}).name), project: text(object(fields.project ?? {}).key) },
+        url: `${this.origin}/browse/${escaped}`, metadata: jiraMetadata(fields),
         links: [...issueLinks, ...adfLinks(fields.description, this.linkOrigins())] };
     }
     if (this.source === "confluence") {

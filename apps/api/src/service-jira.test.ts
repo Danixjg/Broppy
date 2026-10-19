@@ -14,12 +14,51 @@ describe("JiraAsUser", () => {
       return new Response(JSON.stringify({ key: "DB-9" }), { status: 201 });
     });
     expect(await jira.createIssue(maya, { project: "DB", summary: "Raise quota", description: "d", dueDate: "2026-10-16" }))
-      .toEqual({ key: "DB-9", url: "https://acme.atlassian.net/browse/DB-9" });
+      .toEqual({ key: "DB-9", url: "https://acme.atlassian.net/browse/DB-9", omitted: [] });
     expect(seen.url).toBe("https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/issue");
     expect(seen.headers.authorization).toBe("Bearer mine");
     expect(JSON.stringify(seen.body.fields.description)).toContain("Tracked in Broppy for Maya.");
     expect(seen.body.fields).toMatchObject({ project: { key: "DB" }, summary: "Raise quota", duedate: "2026-10-16" });
   });
+  it("assigns the owner found by email and sends the due date", async () => {
+    const bodies: any[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer t", siteFor: async () => site }, accountId, async (_url, init) => {
+      bodies.push(JSON.parse((init as any).body)); return Response.json({ key: "DB-9" }, { status: 201 });
+    });
+    expect(await jira.createIssue(maya, { project: "DB", summary: "s", description: "d", assigneeEmail: "Maya@Acme.test", dueDate: "2026-11-03" }))
+      .toMatchObject({ key: "DB-9", omitted: [] });
+    expect(bodies[0].fields).toMatchObject({ assignee: { accountId: "acct-maya" }, duedate: "2026-11-03" });
+  });
+
+  it("names an owner it can't match to Jira instead of dropping them silently", async () => {
+    const jira = new JiraAsUser({ authorization: async () => "Bearer t", siteFor: async () => site }, accountId, async (_url, init) => {
+      expect(JSON.parse((init as any).body).fields.assignee).toBeUndefined(); return Response.json({ key: "DB-9" }, { status: 201 });
+    });
+    expect((await jira.createIssue(maya, { project: "DB", summary: "s", description: "d", assigneeEmail: "nobody@acme.test" }))?.omitted).toEqual(["owner"]);
+  });
+
+  it("retries once without the fields Jira refused, and says which", async () => {
+    const bodies: any[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer t", siteFor: async () => site }, accountId, async (_url, init) => {
+      bodies.push(JSON.parse((init as any).body).fields);
+      return bodies.length === 1 ? Response.json({ errors: { duedate: "Field 'duedate' cannot be set." } }, { status: 400 }) : Response.json({ key: "DB-9" }, { status: 201 });
+    });
+    expect((await jira.createIssue(maya, { project: "DB", summary: "s", description: "d", assigneeEmail: "maya@acme.test", dueDate: "2026-11-03" }))?.omitted)
+      .toEqual(["due date"]);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ assignee: { accountId: "acct-maya" } });
+    expect(bodies[1].duedate).toBeUndefined();
+  });
+
+  it("does not retry a refusal about anything other than owner or due date", async () => {
+    let calls = 0;
+    const jira = new JiraAsUser({ authorization: async () => "Bearer t", siteFor: async () => site }, accountId, async () => {
+      calls++; return Response.json({ errors: { customfield_10010: "Team is required." } }, { status: 400 });
+    });
+    await expect(jira.createIssue(maya, { project: "DB", summary: "s", description: "d", dueDate: "2026-11-03" })).rejects.toThrow("Jira request failed (400)");
+    expect(calls).toBe(1);
+  });
+
   it("returns undefined without calling Jira when the admin hasn't connected Jira", async () => {
     let called = false;
     const jira = new JiraAsUser({ authorization: async () => undefined, siteFor: async () => site }, undefined, async () => { called = true; return new Response("{}"); });

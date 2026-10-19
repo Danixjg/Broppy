@@ -521,7 +521,15 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (!jiraAsUser) return await reply(response, 404, { error: "Source OAuth is not configured" });
         const input = await body(request);
         if (url.pathname === "/v1/service/jira/issue") {
-          const issue = await jiraAsUser.createIssue(user, parseIssue(input));
+          const parsed = parseIssue(input);
+          if (parsed.assigneeEmail) {
+            // The bot knows the owner's Slack email; their Jira email may differ, and Broppy's profile records both.
+            const email = parsed.assigneeEmail.trim().toLowerCase();
+            const owner = brain.users.find(person => person.active !== false && person.orgId === user.orgId &&
+              [person.platformIdentities?.slack, person.email].some(value => value?.trim().toLowerCase() === email));
+            parsed.assigneeEmail = owner?.platformIdentities?.jira || owner?.email || email;
+          }
+          const issue = await jiraAsUser.createIssue(user, parsed);
           if (!issue) return await reply(response, 409, { error: "Jira is not connected" });
           brain.audit.append("jira_issue_created_from_slack", user.id, { key: issue.key, via: "shared_connection" });
           return await reply(response, 201, issue);
