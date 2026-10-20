@@ -66,7 +66,7 @@ const migrationQuestion =
 const runbookQuestion = "What's the latest runbook for the payment-service incident?";
 const failoverStep = "Step 4: if errors persist for ten minutes, fail over payment traffic to the standby region.";
 
-// Every scenario runs on the 26 hand-written items, and again with the generated company loaded beside them (the
+// Every scenario runs on the 28 hand-written items, and again with the generated company loaded beside them (the
 // demo API's data): the cited documents must be the same.
 describe.each(["curated", "demo"] as const)("on the %s data", corpus => {
   describe("Scenario 1: unified natural-language query", () => {

@@ -6,9 +6,9 @@ describe("pnpm bench", () => {
   it("asks every person every question on the demo's data, and reports times, memory and refusals", async () => {
     expect(BENCH_QUESTIONS).toHaveLength(20);
     const report = await runBench({ scale: "demo" });
-    expect(report.items).toBe(526);
+    expect(report.items).toBe(528);
     expect(report.projects).toBe(8);
-    expect(report.bySource).toEqual({ confluence: 154, drive: 160, jira: 145, slack: 67 });
+    expect(report.bySource).toEqual({ confluence: 154, drive: 160, jira: 147, slack: 67 });
     expect(report.questions).toBe(20);
     expect(report.people.map(person => person.id)).toEqual(["ravi", "maya", "alex", "david", "nur", "wei"]);
     for (const person of report.people) {
@@ -27,7 +27,7 @@ describe("pnpm bench", () => {
     expect(report.rssMb).toBeGreaterThan(0);
     const text = formatBench(report);
     for (const name of ["Ravi", "Maya", "Alex", "David", "Nur", "Wei Ming"]) expect(text).toContain(name);
-    expect(text).toContain("526 items");
+    expect(text).toContain("528 items");
     expect(BENCH_QUESTIONS).toContain(report.slowest.question);
     expect(text).toContain(`Slowest: "${report.slowest.question}"`);
   }, 60_000);

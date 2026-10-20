@@ -27,9 +27,9 @@ describe("Stage 1 mock corpus", () => {
       "drive:steering-deck", "drive:api-spec",
       "jira:DB-12", "jira:DB-15", "slack:db-migration", "slack:db-oncall", "slack:db-planning",
       "confluence:db-migration-plan", "confluence:payment-service-runbook", "drive:runbook-2025",
-      "drive:db-wave-checklist", "drive:api-spec-copy"
+      "drive:db-wave-checklist", "drive:api-spec-copy", "jira:REL-9", "jira:OPS-3"
     ]));
-    expect(ids).toHaveLength(26);
+    expect(ids).toHaveLength(28);
     for (const connector of Object.values(connectors)) {
       for (const doc of await connector.listItems()) {
         expect(doc.content).toBeTruthy();
@@ -94,14 +94,14 @@ describe("Stage 1 mock corpus", () => {
       (await Promise.all(Object.values(corpus.connectors).map(connector => connector.listItems()))).flat();
     const generated = generatedDocuments as Array<{ docId: string; updatedAt: string }>;
     const all = await items(both);
-    expect(all).toHaveLength(26 + generated.length);
+    expect(all).toHaveLength(28 + generated.length);
     expect(new Set(all.map(doc => doc.docId)).size).toBe(all.length);
     const shifted = new Map(all.map(doc => [doc.docId, Date.parse(doc.updatedAt)]));
     for (const doc of generated) expect(shifted.get(doc.docId)! - Date.parse(doc.updatedAt)).toBe(16 * 86_400_000);
-    // The hand-written items are the same either way, and the default stays at those 26.
+    // The hand-written items are the same either way, and the default stays at those 28.
     const byId = new Map(all.map(doc => [doc.docId, doc]));
     for (const doc of await items(handWritten)) expect(byId.get(doc.docId)).toEqual(doc);
-    expect(await items(loadMockCorpus(now))).toHaveLength(26);
+    expect(await items(loadMockCorpus(now))).toHaveLength(28);
     for (const user of both.users) {
       const before = handWritten.users.find(item => item.id === user.id)!;
       expect(user.groups).toEqual([...new Set([...before.groups, ...generatedGroups[user.id as keyof typeof generatedGroups]])].sort());
@@ -116,7 +116,7 @@ describe("Stage 1 mock corpus", () => {
     const extra = { ...page, docId: "confluence:900001", sourceNativeId: "900001" };
     const corpus = loadMockCorpus(now, { generated: { documents: [extra], personaGroups: { david: ["data"], nur: ["risk"] } } });
     const all = (await Promise.all(Object.values(corpus.connectors).map(connector => connector.listItems()))).flat();
-    expect(all).toHaveLength(27);
+    expect(all).toHaveLength(29);
     expect(Date.parse(all.find(doc => doc.docId === extra.docId)!.updatedAt) - Date.parse(extra.updatedAt)).toBe(16 * 86_400_000);
     expect(corpus.users.find(user => user.id === "david")!.groups).toEqual(["data", "payments", "security"]);
     expect(corpus.users.find(user => user.id === "nur")!.groups).toEqual(["compliance", "payments", "risk"]);

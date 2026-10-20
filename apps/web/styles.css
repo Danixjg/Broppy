@@ -1026,6 +1026,37 @@ td button {
 .hidden {
   display:none!important
 }
+/* Tasks view: labels sit above their controls (the audit-toggle label keeps its own look).
+   The pressed view toggle marks which of List or Board is showing. */
+.task-filter-row {
+  flex-wrap:wrap
+}
+.task-filter-row label:not(.audit-toggle) {
+  display:grid;
+  gap:.3rem;
+  font-size:.7rem;
+  font-weight:700;
+  color:#576c7a
+}
+.task-filter-row select,.task-filter-row input {
+  border:1px solid #c4d0d8;
+  border-radius:.35rem;
+  background:#fff;
+  padding:.42rem .5rem;
+  color:#243549;
+  font-size:.78rem
+}
+.task-filter-row select[multiple] {
+  min-width:10rem
+}
+.task-filter-row .audit-toggle {
+  padding-top:.4rem
+}
+.toolbar .secondary-button[aria-pressed="true"] {
+  background:#edf7f0;
+  border-color:#d8ebdf;
+  color:#1b654f
+}
 @media(max-width:1150px) {
   .workspace-layout,.workspace-layout.chat-collapsed {
     grid-template-columns:minmax(200px,240px) minmax(350px,1fr)

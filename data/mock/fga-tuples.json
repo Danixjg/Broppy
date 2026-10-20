@@ -188,5 +188,15 @@
     "user": "group:payments#member",
     "relation": "group_reader",
     "object": "document:drive:api-spec-copy"
+  },
+  {
+    "user": "group:payments#member",
+    "relation": "group_reader",
+    "object": "document:jira:REL-9"
+  },
+  {
+    "user": "group:fraud-ops#member",
+    "relation": "group_reader",
+    "object": "document:jira:OPS-3"
   }
 ]

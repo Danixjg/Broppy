@@ -13,6 +13,7 @@ import { FgaAdapter, type RemoteFgaAdapter } from "@brain/fga-adapter";
 import { checkAnswer, distinctiveWords, hash, HybridIndex, LocalGroundedLlm, NO_RESULT, terms, type LlmClient, type SemanticEmbeddingClient,
   type SupabaseIndex } from "@brain/retrieval";
 import type {
+  AccessDecision,
   Citation,
   ConnectorState,
   QueryAnswer,
@@ -25,13 +26,15 @@ import type {
   Tier,
   User
 } from "@brain/types";
+import type { DataGeneration } from "./tasks-lens.js";
+import type { TaskCatalogAccess, TaskDetail } from "./tasks.js";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 const reviewQueues = new Map<string, Promise<unknown>>();
 // After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
 // questions don't wait on it meanwhile.
 const EMBEDDING_PAUSE_MS = 5 * 60_000;
-/** The mock data: the 26 hand-written items, or those plus the generated company (`pnpm dataset`). A `Brain` also takes
+/** The mock data: the 28 hand-written items, or those plus the generated company (`pnpm dataset`). A `Brain` also takes
  * a company generated in memory, as `pnpm bench` does at the brief's scale. */
 export type Corpus = "curated" | "demo";
 
@@ -85,6 +88,9 @@ export class Brain {
   private readonly fallbackLlm = new LocalGroundedLlm();
   readonly lastTraceIds = new Map<string, string>();
   private readonly syncQueues = new Map<Source, Promise<void>>();
+  /** Bumped whenever the synced permission index changes outside a sync. A data generation does not come from the
+   * sync watermark alone, so a cursor held across a permission change still expires honestly. */
+  private fgaEpoch = 0;
   /** Told about work that carries on after a request's reply, so a serverless host keeps running until it finishes. */
   onBackground?: (work: Promise<unknown>) => void;
   private readonly remoteSynced = new Set<string>();
@@ -465,12 +471,15 @@ export class Brain {
       ids: scope.ids?.length ?? 0, futureOnly: Boolean(scope.futureOnly), since: scope.since });
     // Scope narrowing is applied immediately to local access. Background sync purges remote data.
     const keep = new Set(await this.connectors[source].discover(scope));
+    let removed = 0;
     for (const doc of this.index.documents.values()) if (doc.source === source && !keep.has(doc.docId)) {
       this.index.tombstone(doc.docId); this.fga.remove(doc.docId);
       await this.remoteFga?.removeDocument(doc.docId);
       if (this.supabase) await this.supabase.purge(doc.docId);
       this.remoteSynced.delete(doc.docId); this.supabaseSynced.delete(doc.docId);
+      removed++;
     }
+    if (removed) this.bumpFgaEpoch();
     this.runs.delete(source);
     this.states.set(source, { source, cursor: 0 });
     await this.persist();
@@ -525,6 +534,7 @@ export class Brain {
     if (actor.role !== "admin") throw new Error("Forbidden");
     this.connections.get(source)!.status = "Not connected";
     await this.syncQueues.get(source);
+    let removed = 0;
     for (const doc of [...this.index.documents.values()]) if (doc.source === source) {
       this.fga.remove(doc.docId);
       this.index.tombstone(doc.docId);
@@ -532,7 +542,9 @@ export class Brain {
       await this.supabase?.purge(doc.docId);
       this.remoteSynced.delete(doc.docId); this.supabaseSynced.delete(doc.docId);
       this.index.remove(doc.docId);
+      removed++;
     }
+    if (removed) this.bumpFgaEpoch();
     this.runs.delete(source); this.jobs.delete(source);
     this.states.set(source, { source, cursor: 0 });
     this.connections.get(source)!.status = "Not connected";
@@ -596,14 +608,7 @@ export class Brain {
 
     // ② Access is decided on document IDs only, and every decision is audited.
     const authorize = async (docIds: string[]): Promise<Set<string>> => {
-      const localDecisions = this.fga.batchCheck(user, docIds);
-      const remoteDecisions = this.remoteFga ? await this.remoteFga.batchCheck(user, docIds) : undefined;
-      const remoteById = new Map(remoteDecisions?.map(decision => [decision.docId, decision]));
-      const decisions = localDecisions.map(decision => {
-        const remote = remoteById.get(decision.docId);
-        return decision.allowed && remote && !remote.allowed ? remote :
-          remoteDecisions && !remote ? { ...decision, allowed: false } : decision;
-      });
+      const decisions = await this.fgaDecisions(user, docIds);
       for (const decision of decisions) {
         audit("access_decision", {
           ...this.auditDocument(decision.docId),
@@ -896,6 +901,24 @@ export class Brain {
     return ranked;
   }
 
+  /** The combined local + mirrored FGA decisions for a set of document ids. A remote denial wins over a local
+   * allow; a provider the mirror is missing reaches nobody. Callers audit what they need to. */
+  private async fgaDecisions(user: User, docIds: readonly string[]): Promise<AccessDecision[]> {
+    const local = this.fga.batchCheck(user, [...docIds]);
+    if (!this.remoteFga) return local;
+    const remote = await this.remoteFga.batchCheck(user, [...docIds]);
+    const remoteById = new Map(remote.map(decision => [decision.docId, decision]));
+    return local.map(decision => {
+      const mirrored = remoteById.get(decision.docId);
+      return decision.allowed && mirrored && !mirrored.allowed ? mirrored :
+        this.remoteFga && !mirrored ? { ...decision, allowed: false } : decision;
+    });
+  }
+
+  private bumpFgaEpoch(): void {
+    this.fgaEpoch++;
+  }
+
   async visibleDocuments(user: User): Promise<Array<WorkspaceDocument & { tier: Tier; lastIndexedAt: string; lastPermissionSyncAt: string }>> {
     const visible: Array<Omit<WorkspaceDocument, "links"> & { tier: Tier; lastIndexedAt: string; lastPermissionSyncAt: string }> = [];
     this.assertOrg(user);
@@ -923,6 +946,62 @@ export class Brain {
     const ids = new Set(visible.map(doc => doc.docId));
     const linked = this.linkGraph();
     return visible.map(doc => ({ ...doc, links: linked(doc.docId).filter(id => ids.has(id)) }));
+  }
+
+  /** Synced-only view of the tenant corpus for the task list: rows authorize from the FGA index alone, so this
+   * port exposes no per-document fresh check. The fresh half is taskDetail's. */
+  taskCatalog(): TaskCatalogAccess {
+    return {
+      orgId: this.orgId,
+      liveMode: this.connectors.jira instanceof LiveConnector,
+      docs: () => [...this.index.documents.values()],
+      generation: () => this.taskGeneration(),
+      checkSynced: (user, docIds) => this.fgaDecisions(user, docIds),
+      mineDocIds: user => this.taskMineDocIds(user),
+      refreshPending: this.jobs.get("jira")?.status === "running"
+    };
+  }
+
+  /** The task's detail face: synced gate, then the fresh live check (C2's detail half). undefined is hidden
+   * or missing — no distinction survives to the caller. */
+  async taskDetail(actor: User, docId: string): Promise<TaskDetail | undefined> {
+    this.assertOrg(actor);
+    if (!this.fga.check(actor, docId).allowed) return undefined;
+    if (!await this.liveAuthorizedDocument(actor, docId)) return undefined;
+    const document = this.index.documents.get(docId);
+    if (!document || document.deletedAt) return undefined;
+    const mine = new Set(await this.taskMineDocIds(actor)).has(docId);
+    const linked = this.linkGraph()(docId).filter(id => {
+      const item = this.index.documents.get(id);
+      return Boolean(item) && !item!.deletedAt;
+    });
+    const allowed = new Set((await this.fgaDecisions(actor, linked)).filter(d => d.allowed).map(d => d.docId));
+    return { document, mine, links: allowed.size ? linked.filter(id => allowed.has(id))
+      .map(id => ({ id, title: this.index.documents.get(id)!.title })) : [] };
+  }
+
+  private taskGeneration(): DataGeneration {
+    const observed = this.states.get("jira")?.lastSuccessfulSyncAt;
+    let count = 0, maxVersion = 0;
+    for (const doc of this.index.documents.values()) if (doc.source === "jira" && !doc.deletedAt) {
+      count++; maxVersion = Math.max(maxVersion, doc.version);
+    }
+    const incomplete = this.connections.get("jira")?.status === "Error" ||
+      this.runs.get("jira")?.status === "failed" || this.jobs.get("jira")?.status === "failed";
+    return {
+      id: `${this.orgId}|jira|${observed ?? "never"}|${count}|${maxVersion}|${this.fgaEpoch}`,
+      observedAt: observed ?? "1970-01-01T00:00:00.000Z",
+      dataComplete: !incomplete
+    };
+  }
+
+  /** "Mine" names only issues Broppy created for this person's reviewed commitments; the Slack task link is
+   * the one record of that (C13 keeps names off the row entirely). */
+  private async taskMineDocIds(user: User): Promise<readonly string[]> {
+    const assignee = this.slackId(user);
+    if (!assignee) return [];
+    const links = await this.taskStore.listTasks(100);
+    return links.filter(link => link.assigneeSlackId === assignee).map(link => `jira:${link.issueKey}`);
   }
 
   /**
@@ -1255,7 +1334,7 @@ export class Brain {
       await this.sync("jira").catch(() => undefined);
       return;
     }
-    this.connectors.jira.updateMetadata(docId, { status: "done" });
+    this.connectors.jira.updateMetadata(docId, { status: "done", statusCategory: "done" });
     await this.sync("jira");
     this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });
   }
@@ -1265,6 +1344,7 @@ export class Brain {
     if (actor.role !== "admin") throw new Error("Forbidden");
     this.remoteFga?.narrowTier(docId, tier);
     this.fga.narrowTier(docId, tier);
+    this.bumpFgaEpoch();
     this.audit.append("tier_narrowed", actor.id, { ...this.auditDocument(docId), tier });
   }
 
@@ -1289,6 +1369,7 @@ export class Brain {
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (!this.user(userId)) throw new Error("Unknown user");
     this.fga.block(docId, userId);
+    this.bumpFgaEpoch();
     this.audit.append("user_blocked", actor.id, { ...this.auditDocument(docId), userId });
     await this.persist();
   }
@@ -1298,6 +1379,7 @@ export class Brain {
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (!this.user(userId)) throw new Error("Unknown user");
     this.fga.unblock(docId, userId);
+    this.bumpFgaEpoch();
     this.audit.append("user_unblocked", actor.id, { ...this.auditDocument(docId), userId });
     await this.persist();
   }
@@ -1308,13 +1390,16 @@ export class Brain {
     if (actor.role !== "admin") throw new Error("Forbidden");
     if (!this.user(userId)) throw new Error("Unknown user");
     this.fga.grantRestricted(docId, { userId, owner: actor.id, reason: reason.trim(), expiresAt });
+    this.bumpFgaEpoch();
     this.audit.append("restricted_grant_created", actor.id, { ...this.auditDocument(docId), userId, reason: reason.trim(), expiresAt });
     await this.persist();
   }
 
   /** Removes restricted grants that have ended, and records each one. */
   sweepRestrictedGrants(now = new Date()): void {
-    for (const item of this.fga.sweepExpired(now)) {
+    const expired = this.fga.sweepExpired(now);
+    if (expired.length) this.bumpFgaEpoch();
+    for (const item of expired) {
       this.audit.append("restricted_grant_expired", "sync", { ...this.auditDocument(item.docId), userId: item.userId, owner: item.owner });
     }
   }
@@ -1404,8 +1489,9 @@ export class Brain {
           const indexed = this.index.documents.get(docId);
           const permissions = indexed && !indexed.deletedAt ? withViewer(indexed.permissions, user) : undefined;
           if (!indexed || !permissions) return;
-          this.index.upsert({ ...indexed, permissions });
+          const upsert = this.index.upsert({ ...indexed, permissions });
           this.fga.upsert({ docId, permissions, tier: indexed.tier });
+          if (upsert.permissionChanged) this.bumpFgaEpoch();
           await this.persistSearch(docId, false);
           if (this.remoteFga) {
             try { await this.remoteFga.syncDocument({ docId, permissions, tier: indexed.tier }); this.remoteSynced.add(docId); }
@@ -1450,6 +1536,7 @@ export class Brain {
     if (version === undefined || !permissions) {
       this.index.tombstone(docId);
       this.fga.remove(docId);
+      this.bumpFgaEpoch();
       await this.remoteFga?.removeDocument(docId);
       this.remoteSynced.delete(docId);
       const deletedAt = this.index.documents.get(docId)?.deletedAt;
@@ -1463,6 +1550,7 @@ export class Brain {
         const changed = { ...indexed, permissions };
         this.index.upsert(changed);
         this.fga.upsert(changed);
+        this.bumpFgaEpoch();
         await this.persistSearch(docId, false);
         if (this.remoteFga) {
           try {
@@ -1482,6 +1570,7 @@ export class Brain {
       doc.orgId = this.orgId;
       const result = this.index.upsert(doc);
       this.fga.upsert(doc);
+      if (result.permissionChanged) this.bumpFgaEpoch();
       await this.persistSearch(docId, result.contentChanged);
       if (this.remoteFga) {
         try {
@@ -1564,6 +1653,7 @@ export class Brain {
       if (indexed && permissions) {
         this.index.upsert({ ...indexed, permissions });
         this.fga.upsert({ docId, permissions, tier: indexed.tier });
+        this.bumpFgaEpoch();
         if (this.remoteFga) {
           try {
             await this.remoteFga.syncDocument({ docId, permissions, tier: indexed.tier });
@@ -1575,6 +1665,7 @@ export class Brain {
       } else {
         this.index.tombstone(docId);
         this.fga.remove(docId);
+        this.bumpFgaEpoch();
         if (this.remoteFga) {
           try {
             await this.remoteFga.removeDocument(docId);

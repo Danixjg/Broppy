@@ -72,7 +72,10 @@
     "updatedAt": "2026-09-26T11:00:00.000Z",
     "metadata": {
       "project": "PAY",
-      "status": "in review"
+      "status": "in review",
+      "statusCategory": "indeterminate",
+      "dueDate": "2026-10-23",
+      "priority": "High"
     },
     "permissions": {
       "users": [],
@@ -115,7 +118,10 @@
     "updatedAt": "2026-09-26T11:05:00.000Z",
     "metadata": {
       "project": "SEC",
-      "status": "open"
+      "status": "open",
+      "statusCategory": "new",
+      "dueDate": "2026-10-20",
+      "priority": "Highest"
     },
     "permissions": {
       "users": [],
@@ -151,7 +157,8 @@
     "updatedAt": "2026-09-26T11:10:00.000Z",
     "metadata": {
       "project": "SETL",
-      "status": "open"
+      "status": "open",
+      "statusCategory": "new"
     },
     "permissions": {
       "users": [],
@@ -571,7 +578,9 @@
     "updatedAt": "2026-09-28T03:00:00.000Z",
     "metadata": {
       "project": "DB",
-      "status": "in progress"
+      "status": "in progress",
+      "statusCategory": "indeterminate",
+      "priority": "Medium"
     },
     "permissions": {
       "users": [],
@@ -614,7 +623,10 @@
     "updatedAt": "2026-09-28T05:00:00.000Z",
     "metadata": {
       "project": "DB",
-      "status": "blocked"
+      "status": "blocked",
+      "statusCategory": "indeterminate",
+      "dueDate": "2026-10-02",
+      "priority": "Critical"
     },
     "permissions": {
       "users": [],
@@ -916,6 +928,82 @@
           "ravi@aspire.example",
           "david@aspire.example",
           "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal"
+  },
+  {
+    "docId": "jira:REL-9",
+    "source": "jira",
+    "sourceNativeId": "REL-9",
+    "title": "REL-9 Release checklist",
+    "content": "REL-9 is the payment cutover release checklist. Every runbook step is ticked and the cutover shipped.",
+    "url": "https://jira.example/browse/REL-9",
+    "version": 1,
+    "updatedAt": "2026-09-25T09:30:00.000Z",
+    "metadata": {
+      "project": "REL",
+      "status": "Released",
+      "statusCategory": "done",
+      "priority": "Low"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "payments"
+      ],
+      "public": false,
+      "native": {
+        "source": "jira",
+        "projectKey": "REL",
+        "projectViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ],
+        "issueViewers": [
+          "ravi@aspire.example",
+          "maya@aspire.example",
+          "david@aspire.example",
+          "nur@aspire.example"
+        ]
+      }
+    },
+    "tier": "internal",
+    "links": [
+      "confluence:payment-master",
+      "slack:payments-cutover"
+    ]
+  },
+  {
+    "docId": "jira:OPS-3",
+    "source": "jira",
+    "sourceNativeId": "OPS-3",
+    "title": "OPS-3 Post-release monitoring",
+    "content": "OPS-3 watches cutover monitoring signals for two weeks after the release; the findings feed the next cutover check.",
+    "url": "https://jira.example/browse/OPS-3",
+    "version": 1,
+    "updatedAt": "2026-09-24T14:00:00.000Z",
+    "metadata": {
+      "project": "OPS",
+      "status": "released"
+    },
+    "permissions": {
+      "users": [],
+      "groups": [
+        "fraud-ops"
+      ],
+      "public": false,
+      "native": {
+        "source": "jira",
+        "projectKey": "OPS",
+        "projectViewers": [
+          "ravi@aspire.example"
+        ],
+        "issueViewers": [
+          "ravi@aspire.example"
         ]
       }
     },

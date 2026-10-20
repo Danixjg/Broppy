@@ -6,7 +6,7 @@ import type { AuditEntry } from "@brain/types";
 import { generateCorpus } from "../../../data/generate.js";
 import { Brain } from "./brain.js";
 
-// pnpm bench: the brief's scale (about 20,000 items in 30 projects) built in memory beside the 26 hand-written items,
+// pnpm bench: the brief's scale (about 20,000 items in 30 projects) built in memory beside the 28 hand-written items,
 // indexed by the same Brain the demo API runs, then asked the same questions by each of the six people.
 
 /**
@@ -176,7 +176,7 @@ export function formatBench(report: BenchReport): string {
   return [
     `pnpm bench at the ${report.scale === "brief" ? "brief's" : "demo's"} scale, in memory`,
     `Data: ${thousands(report.items)} items (${count("confluence", "Confluence pages")}, ${count("jira", "Jira issues")}, ` +
-      `${count("slack", "Slack channels")} and ${count("drive", "Drive files")}) in ${report.projects} projects, the 26 hand-written items included.`,
+      `${count("slack", "Slack channels")} and ${count("drive", "Drive files")}) in ${report.projects} projects, the 28 hand-written items included.`,
     `Generated in ${seconds(report.generateMs)} and indexed in ${seconds(report.buildMs)}. After indexing, the heap holds ` +
       `${thousands(report.heapMb)} MB more than before, and the process ${thousands(report.rssMb)} MB in all.`,
     `Each person asked the same ${report.questions} questions, after one warm-up pass.`,
