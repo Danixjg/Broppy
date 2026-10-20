@@ -3,12 +3,16 @@ import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, l
 import { showMoreLabel, visibleItems } from "./lists.js";
 import { chosenProject } from "./projects.js";
 import { linkedTask } from "./links.js";
+import { countsText, countText, detailPath, doneTileLabel, dueText, errorText, FALLBACKS, nameText,
+  priorityText, taskQuery } from "./tasks.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
 const emptyWorkspace = () => ({ projects: [], latest: [], duplicates: [], suggestions: [], commitments: [], owners: [], capabilities: {} });
+// The Tasks draft: one view, its filters, and the project/status options this identity has already seen.
+const emptyTask = () => ({ view: "list", filters: { projectIds: [], mine: false, priority: "", status: "", due: "any", q: "", preset: "" }, projects: [], statuses: [], load: 0 });
 let deepLinkApplied = false;
-const state = { chat: [], docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null };
+const state = { chat: [], docs: [], workspace: emptyWorkspace(), project: null, selected: null, selectedQuotes: [], view: "workspace", identity: 0, audit: null, auditEntries: [], proof: null, landingApplied: false, authConfig: null, authMode: "loading", signedIn: false, me: null, nativeLoad: 0, nativeDoc: null, nativeCurrent: null, task: emptyTask() };
 const roles = { maya: "admin", nur: "compliance" };
 // The lists opened in full since the last search, project or person change.
 const expandedLists = new Set();
@@ -82,6 +86,8 @@ async function call(path, options = {}) {
   if (!response.ok) {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
+    // New-style error envelopes (the task routes) keep their body, so one helper reads code and field notes.
+    error.payload = payload && typeof payload === "object" ? payload : null;
     if (response.status === 401 && state.authMode !== "demo") {
       // The proxy marks an API rejection of a live session; anything else means the session is gone.
       if (payload.code !== "account_rejected") state.signedIn = false;
@@ -106,7 +112,7 @@ function setView(view, { load = true } = {}) {
   if (view === "admin" && !practiceControls()) view = "workspace";
   if (view === "compliance" && role() !== "compliance") view = "workspace";
   state.view = view;
-  for (const name of ["workspace", "admin", "compliance", "operations"]) {
+  for (const name of ["workspace", "tasks", "admin", "compliance", "operations"]) {
     $(`${name}View`).hidden = name !== view;
     const button = document.querySelector(`[data-view="${name}"]`);
     button.classList.toggle("active", name === view);
@@ -114,6 +120,16 @@ function setView(view, { load = true } = {}) {
   }
   if (view === "compliance" && load) loadAudit();
   if (view === "operations") loadHealth();
+  if (view === "tasks" && load) { loadTaskProjects(); loadTasks(); }
+}
+// The Tasks view resets with the identity: another persona sees another authorized snapshot, never this one's pages.
+function resetTasks() {
+  state.task = emptyTask();
+  for (const id of ["tasksCounts", "tasksList", "tasksBoard", "tasksDetail", "tasksProjects"]) clear($(id));
+  $("tasksDetail").hidden = true; $("tasksBoard").hidden = true; $("tasksList").hidden = false;
+  setMessage($("tasksStatus"), ""); setMessage($("tasksCountsText"), "");
+  syncTaskControls();
+  renderTaskProjects();
 }
 function resetIdentity() {
   state.identity++;
@@ -126,6 +142,7 @@ function resetIdentity() {
   $("hideRoutine").checked = true;
   for (const id of ["masterBadge", "activityCount", "driveCount", "latestExplanation", "adminDoc"]) clear($(id));
   clearNativeEditor();
+  resetTasks();
   $("adminTab").hidden = !practiceControls();
   // Settings links in the top bar, for admins. The public demo has no directory or tools of its own to set up.
   $("adminLinks").hidden = role() !== "admin" || state.authMode === "demo";
@@ -276,6 +293,239 @@ async function markDone(doc, button) {
     await loadWorkspace();
     if (generation === state.identity) $("globalStatus").textContent = `${doc.title} is done.`;
   } catch (error) { if (generation === state.identity) { $("globalStatus").textContent = error.message; button.disabled = false; } }
+}
+// -- The Tasks view: one authorized snapshot per request, drawn exactly as the response reported it ----
+
+const taskFiltered = () => state.task.filters.projectIds.length > 0 || state.task.filters.mine ||
+  ["priority", "status", "q", "preset"].some(field => state.task.filters[field]) || state.task.filters.due !== "any";
+const taskEmptyText = () => nothingRead() ? "Jira tasks appear here once Broppy has read them."
+  : taskFiltered() ? "No tasks match these filters." : "No Jira tasks here yet.";
+
+// The draft's controls mirror state; a change writes state first and reloads from it.
+function syncTaskControls() {
+  $("tasksSearch").value = state.task.filters.q;
+  $("tasksMine").checked = state.task.filters.mine;
+  $("tasksPriority").value = state.task.filters.priority;
+  $("tasksStatusFilter").value = state.task.filters.status;
+  $("tasksDue").value = state.task.filters.due;
+  $("tasksPreset").value = state.task.filters.preset;
+  $("tasksListView").setAttribute("aria-pressed", String(state.task.view === "list"));
+  $("tasksBoardView").setAttribute("aria-pressed", String(state.task.view === "board"));
+}
+
+function renderTaskProjects() {
+  const select = $("tasksProjects"); clear(select);
+  const picked = new Set(state.task.filters.projectIds);
+  const all = node("option", "", "All projects"); all.value = ""; select.append(all);
+  for (const project of state.task.projects) {
+    const option = node("option", "", project.name); option.value = project.key; option.selected = picked.has(project.key);
+    select.append(option);
+  }
+}
+
+async function loadTaskProjects() {
+  const generation = state.identity;
+  try {
+    const result = await call("/v1/tasks/projects");
+    if (generation !== state.identity) return;
+    state.task.projects = (Array.isArray(result.projects) ? result.projects : [])
+      .filter(item => item && typeof item.key === "string" && item.key)
+      .map(item => ({ key: item.key, name: typeof item.name === "string" && item.name ? item.name : item.key }));
+  } catch { /* The rest of the view works without it; entering again fetches once more. */ }
+  renderTaskProjects();
+}
+
+function renderTaskCounts(summary) {
+  clear($("tasksCounts"));
+  $("tasksCountsText").textContent = countsText(summary);
+  for (const [label, number] of [
+    ["Open", countText(summary.open)],
+    ["Due this week", countText(summary.dueThisWeek)],
+    ["Overdue", countText(summary.overdue)],
+    [doneTileLabel(summary), countText(summary.doneThisWeek?.knownCount)]
+  ]) {
+    const tile = node("div", "surface");
+    appendText(tile, "strong", "", number);
+    appendText(tile, "p", "muted", label);
+    $("tasksCounts").append(tile);
+  }
+}
+
+// Status options are the names this identity's own responses have shown. No client-fixed vocabulary
+// invents a name the snapshot may not hold, and no counts per option leak.
+function renderTaskStatuses(response) {
+  const cards = state.task.view === "board"
+    ? (Array.isArray(response.columns) ? response.columns : []).flatMap(column => Array.isArray(column.items) ? column.items : [])
+    : Array.isArray(response.items) ? response.items : [];
+  state.task.statuses = [...new Set([...state.task.statuses, ...cards
+    .map(card => card?.status?.name).filter(value => typeof value === "string" && value.trim() !== "")])];
+  const select = $("tasksStatusFilter"); clear(select);
+  const all = node("option", "", "All statuses"); all.value = ""; select.append(all);
+  for (const status of state.task.statuses) {
+    const option = node("option", "", status); option.value = status; option.selected = status === state.task.filters.status;
+    select.append(option);
+  }
+}
+
+async function loadTasks() {
+  const generation = state.identity;
+  const request = ++state.task.load;
+  setMessage($("tasksStatus"), "Loading tasks…");
+  try {
+    const response = await call(`/v1/tasks?${taskQuery(state.task.view, state.task.filters)}`);
+    if (request !== state.task.load || generation !== state.identity) return;
+    renderTaskCounts(response.summary ?? {});
+    renderTaskStatuses(response);
+    if (state.task.view === "board") renderTaskBoard(response); else renderTaskList(response);
+    setMessage($("tasksStatus"), "");
+  } catch (error) {
+    if (request !== state.task.load || generation !== state.identity) return;
+    // A cursor can outlive its data generation; the only recovery is redrawing the first page.
+    if (error.status === 409) { await loadTasks(); return; }
+    setMessage($("tasksStatus"), errorText(error.payload));
+  }
+}
+
+// One card row for a list or a board column, from the fields the response carried, and no others.
+function taskCard(card, variant) {
+  const button = node("button", "activity-item"); button.type = "button";
+  button.append(node("span", "item-title", nameText(card.title)));
+  const due = card.dueDate ? `Due ${fmtDay(card.dueDate)}` : dueText(card.dueDate);
+  const priority = card.priority ? `${card.priority} priority` : priorityText(card.priority);
+  button.append(node("span", "item-meta", variant === "board"
+    ? [safeText(card.key), due].join(" · ")
+    : [safeText(card.key), safeText(card.projectKey), due, priority].join(" · ")));
+  button.append(node("span", "status-badge", nameText(card.status?.name)));
+  if (card.mine === true) button.append(node("span", "badge", "Mine"));
+  button.addEventListener("click", () => openTaskDetail(card.id));
+  return button;
+}
+
+function renderTaskList(response) {
+  const list = $("tasksList"); clear(list); list.hidden = false;
+  const cards = Array.isArray(response.items) ? response.items : [];
+  for (const card of cards) list.append(taskCard(card, "list"));
+  if (!cards.length) appendText(list, "p", "empty", taskEmptyText());
+  const page = response.page ?? {};
+  if (page.hasMore === true && typeof page.nextCursor === "string") list.append(taskMore(page.nextCursor));
+}
+
+// The next page rides the same filters and the response's cursor; a dead cursor redraws the first page.
+function taskMore(cursor) {
+  const more = node("button", "text-button show-more", "Show more tasks"); more.type = "button";
+  more.addEventListener("click", async () => {
+    const generation = state.identity;
+    const request = ++state.task.load;
+    more.disabled = true;
+    try {
+      const params = taskQuery(state.task.view, state.task.filters); params.set("cursor", cursor);
+      const response = await call(`/v1/tasks?${params}`);
+      if (request !== state.task.load || generation !== state.identity) return;
+      for (const card of Array.isArray(response.items) ? response.items : []) $("tasksList").append(taskCard(card, "list"));
+      renderTaskStatuses(response);
+      const page = response.page ?? {};
+      const next = page.hasMore === true && typeof page.nextCursor === "string" ? page.nextCursor : null;
+      if (next === null) more.remove(); else { more.disabled = false; cursor = next; }
+    } catch (error) {
+      if (request !== state.task.load || generation !== state.identity) return;
+      if (error.status === 409) { await loadTasks(); return; }
+      more.disabled = false;
+      setMessage($("tasksStatus"), errorText(error.payload));
+    }
+  });
+  return more;
+}
+
+function renderTaskBoard(response) {
+  const board = $("tasksBoard"); clear(board); board.hidden = false;
+  const columns = Array.isArray(response.columns) ? response.columns : [];
+  for (const column of columns) {
+    const cell = node("div", "surface");
+    const heading = node("h2", "", typeof column.name === "string" && column.name.trim() ? column.name : FALLBACKS.column);
+    heading.append(" ", node("span", "muted", countText(column.total)));
+    const stack = node("div", "stack");
+    const cards = Array.isArray(column.items) ? column.items : [];
+    for (const card of cards) stack.append(taskCard(card, "board"));
+    if (!cards.length) appendText(stack, "p", "empty", "No tasks");
+    cell.append(heading, stack);
+    board.append(cell);
+  }
+  if (!columns.length) appendText(board, "p", "empty", taskEmptyText());
+}
+
+function setTaskView(view) {
+  if (state.task.view === view) return;
+  state.task.view = view;
+  syncTaskControls();
+  $("tasksList").hidden = view !== "list";
+  $("tasksBoard").hidden = view !== "board";
+  loadTasks();
+}
+
+// The drawer is fed by the detail route alone: the address is the summary's key split into segments,
+// never workspace state, and never a classifier of why the task is out of reach.
+async function openTaskDetail(docId, { focus = false } = {}) {
+  const generation = state.identity;
+  const path = detailPath(docId);
+  if (!path) renderTaskUnavailable();
+  else {
+    setMessage($("tasksStatus"), "Loading task…");
+    try {
+      const detail = await call(path);
+      if (generation !== state.identity) return;
+      setMessage($("tasksStatus"), "");
+      renderTaskDetail(detail);
+    } catch (error) {
+      if (generation !== state.identity) return;
+      setMessage($("tasksStatus"), "");
+      // Hidden, missing and unparseable all land here: one panel, no difference that hints at the reason.
+      if (error.status === 404) renderTaskUnavailable();
+      else setMessage($("tasksStatus"), errorText(error.payload));
+    }
+  }
+  const heading = $("tasksDetail").querySelector("h3");
+  if (focus && heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+  reveal($("tasksDetail"), "nearest");
+}
+
+function renderTaskDetail(detail) {
+  const box = $("tasksDetail"); clear(box); box.hidden = false;
+  appendText(box, "p", "eyebrow", ["Jira", safeText(detail.key), nameText(detail.status?.name)].join(" · "));
+  const heading = node("h3", "", nameText(detail.title)); heading.tabIndex = -1; box.append(heading);
+  appendText(box, "p", "detail-meta", [
+    detail.dueDate ? `Due ${fmtDay(detail.dueDate)}` : dueText(detail.dueDate),
+    detail.priority ? `${detail.priority} priority` : priorityText(detail.priority)
+  ].join(" · "));
+  if (detail.mine === true) box.append(node("span", "badge", "Mine"));
+  const description = safeText(detail.description);
+  if (description) appendText(box, "p", "", description);
+  const links = Array.isArray(detail.links) ? detail.links : [];
+  if (links.length) box.append(taskLinks(links));
+  box.append(sourceLink(detail.url, "jira"));
+}
+
+// Linked items the synced index lets this identity open also open here, in the workspace view.
+function taskLinks(links) {
+  const wrap = node("div", "linked-items"); appendText(wrap, "strong", "", "Linked items");
+  for (const link of links) {
+    const label = nameText(link?.title);
+    const doc = typeof link?.id === "string" ? docById(link.id) : undefined;
+    if (!doc) { appendText(wrap, "span", "", label); continue; }
+    const open = node("button", "text-button", label); open.type = "button";
+    open.addEventListener("click", () => {
+      setView("workspace", { load: false });
+      (doc.source === "jira" ? openTask : selectDoc)(doc, [], { focus: true });
+    });
+    wrap.append(open);
+  }
+  return wrap;
+}
+
+// One presentation for hidden, missing and unparseable identities; none of them says which.
+function renderTaskUnavailable() {
+  const box = $("tasksDetail"); clear(box); box.hidden = false;
+  const heading = node("h3", "", "Task unavailable."); heading.tabIndex = -1; box.append(heading);
+  appendText(box, "p", "muted", "Broppy couldn't open it. It may not exist, or this identity may not have access to it.");
 }
 // Agreements in this project's threads that could become a Jira task. The API offers them only from threads this
 // person may open, and only when creating the task here is possible; with live sources it links to Jira instead.
@@ -625,6 +875,14 @@ async function loadWorkspace() {
 function applyDeepLink() {
   if (deepLinkApplied) return;
   const params = new URLSearchParams(location.search);
+  // The Tasks view owns a task deep link: it opens there, fed by the detail route, not by the workspace list.
+  if (params.get("view") === "tasks") {
+    deepLinkApplied = true;
+    setView("tasks");
+    const requested = params.get("task");
+    if (requested) openTaskDetail(requested, { focus: true });
+    return;
+  }
   if (!["task", "ask", "doc", "proposal", "project"].some(key => params.has(key))) return;
   deepLinkApplied = true;
   const project = params.get("project");
@@ -1084,6 +1342,33 @@ $("projectSelect").addEventListener("change", () => {
   clear($("catchUpResult")); $("catchUpResult").hidden = true;
   expandedLists.clear();
   renderWorkspace();
+});
+$("tasksListView").addEventListener("click", () => setTaskView("list"));
+$("tasksBoardView").addEventListener("click", () => setTaskView("board"));
+$("tasksProjects").addEventListener("change", () => {
+  state.task.filters.projectIds = [...$("tasksProjects").selectedOptions].map(option => option.value).filter(Boolean);
+  loadTasks();
+});
+$("tasksMine").addEventListener("change", () => { state.task.filters.mine = $("tasksMine").checked; loadTasks(); });
+for (const [id, field] of [["tasksPriority", "priority"], ["tasksStatusFilter", "status"], ["tasksDue", "due"], ["tasksPreset", "preset"]]) {
+  $(id).addEventListener("change", () => { state.task.filters[field] = $(id).value; loadTasks(); });
+}
+let tasksSearchTimer;
+$("tasksSearch").addEventListener("input", () => {
+  // The search is a server round trip, so typing calms down before a request goes out.
+  clearTimeout(tasksSearchTimer);
+  tasksSearchTimer = setTimeout(() => {
+    if (state.view !== "tasks") return;
+    state.task.filters.q = $("tasksSearch").value;
+    loadTasks();
+  }, 250);
+});
+$("tasksFilterForm").addEventListener("submit", event => event.preventDefault());
+$("tasksClear").addEventListener("click", () => {
+  state.task.filters = emptyTask().filters;
+  syncTaskControls();
+  renderTaskProjects();
+  loadTasks();
 });
 $("contentForm").addEventListener("submit", event => { event.preventDefault(); adminAction("/v1/admin/content", { docId: $("adminDoc").value, content: $("adminContent").value }, "Content updated and synced."); });
 $("adminDoc").addEventListener("change", loadNativePermissions);

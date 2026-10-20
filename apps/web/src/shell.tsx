@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Activity, BookOpenText, Command, LayoutGrid, Search, Settings2, ShieldCheck } from "lucide-react";
+import { Activity, BookOpenText, Command, LayoutGrid, ListChecks, Search, Settings2, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { ExpandableTabs } from "@/components/expandable-tabs";
 
 const tabs = [
   { view: "workspace", title: "Workspace", icon: LayoutGrid },
+  { view: "tasks", title: "Tasks", icon: ListChecks },
   { view: "admin", title: "Admin", icon: Settings2, id: "adminTab", hidden: true },
   { view: "compliance", title: "Compliance", icon: ShieldCheck, id: "complianceTab", hidden: true },
   { view: "operations", title: "Sync health", icon: Activity },
