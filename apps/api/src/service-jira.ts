@@ -19,6 +19,19 @@ export class JiraRequestError extends Error {
   constructor(readonly status: number, readonly fields: string[]) { super(`Jira request failed (${status})`); }
 }
 
+/**
+ * What the service route tells the Slack app when Jira refused: a 4xx was refused before anything was created, so the
+ * app may record a refusal and let the person try again at once. A timeout, throttle or provider outage leaves the
+ * outcome unknown, which the app must reconcile instead of retrying.
+ */
+export function jiraRefusal(error: unknown): { status: 400; error: string } | { status: 502; error: string } | undefined {
+  if (!(error instanceof JiraRequestError)) return undefined;
+  if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    return { status: 400, error: "Jira refused this task. Check the project's required fields in Jira, then try again." };
+  }
+  return { status: 502, error: `Jira refused that (${error.status}). Check the project key and that your Jira account can work in it.` };
+}
+
 export interface JiraIssueAccess {
   key: string;
   url: string;
