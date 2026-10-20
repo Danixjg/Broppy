@@ -12,6 +12,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Brain, type Corpus } from "./brain.js";
+import { getTaskRoutes } from "./tasks.js";
 import { SyncOrchestrator } from "./orchestrator.js";
 import { AccessDenied, createAuth0TokenValidatorFromEnv, WorkspaceUnavailable, type Auth0TokenValidator } from "./auth.js";
 import { companyLimitsFromEnv, companyModels, modelsFromEnv } from "./llm-budget.js";
@@ -764,6 +765,12 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         if (match[2] === "import" && request.method === "POST") { await brain.startImport(user, source); return await reply(response, 202, { ok: true }); }
         if (!match[2] && request.method === "DELETE") { await brain.disconnect(user, source); await oauth?.remove(source); return await reply(response, 200, { ok: true }); }
         return await reply(response, 404, { error: "Not found" });
+      }
+
+      if (request.method === "GET" && (url.pathname === "/v1/tasks" || url.pathname.startsWith("/v1/tasks/"))) {
+        const routed = await getTaskRoutes({ url, user,
+          list: brain.taskCatalog(), detail: { get: (person, docId) => brain.taskDetail(person, docId) } });
+        if (routed) return await reply(response, routed.status, routed.body);
       }
 
       if (request.method === "GET" && url.pathname === "/v1/workspace") {

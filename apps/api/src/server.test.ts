@@ -9,7 +9,7 @@ afterEach(async () => {
   await Promise.all(openServers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))));
 });
 
-// These tests are about the 26 hand-written items; the generated company has its own tests below.
+// These tests are about the 28 hand-written items; the generated company has its own tests below.
 async function start() {
   process.env.ALLOW_DEMO_AUTH = "true";
   const api = await createApiServer({ startOrchestrator: false, corpus: "curated" });

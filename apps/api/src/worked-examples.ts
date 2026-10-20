@@ -109,7 +109,7 @@ function introduction(writer: string, withModel: boolean, search?: string): stri
         "below is real output.",
     "",
     "- **Date:** Thursday 15 October 2026, UTC. Demo content is dated relative to the clock, so \"last week\" finds it.",
-    "- **Data:** what the demo API serves: the 26 hand-written items the scenarios are about, and the generated company " +
+    "- **Data:** what the demo API serves: the 28 hand-written items the scenarios are about, and the generated company " +
       "of 500 more beside them (`pnpm dataset`), with six other projects that compete for every answer.",
     `- **Writer:** ${writer}`,
     ...(search ? [`- **Search:** ${search}`] : []),

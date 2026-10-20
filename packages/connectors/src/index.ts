@@ -228,7 +228,7 @@ export interface GeneratedItems {
 }
 
 /**
- * The demo company. By default, the 26 hand-written items the scenarios and tests use. With `generated`, the generated
+ * The demo company. By default, the 28 hand-written items the scenarios and tests use. With `generated`, the generated
  * company (`pnpm dataset`) joins them: about 500 more items, and the extra groups its six people belong to there. A
  * company generated in memory joins them the same way.
  */

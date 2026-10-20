@@ -389,7 +389,7 @@ export class LiveConnector extends MockConnector {
         return text(optional(entry.outwardIssue ?? entry.inwardIssue).key);
       }).filter(key => /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(key)).map(key => `jira:${key}`);
       return { title: text(fields.summary) || id, content: adf(fields.description), updatedAt,
-        url: `${this.origin}/browse/${escaped}`, metadata: jiraMetadata(fields),
+        url: `${this.origin}/browse/${escaped}`, metadata: { ...jiraMetadata(fields), ...(text(issue.id) ? { issueId: text(issue.id) } : {}) },
         links: [...issueLinks, ...adfLinks(fields.description, this.linkOrigins())] };
     }
     if (this.source === "confluence") {

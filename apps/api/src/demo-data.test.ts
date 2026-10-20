@@ -6,7 +6,7 @@ import { personaViews } from "../../../data/dataset/validate.js";
 import { Brain } from "./brain.js";
 import { actorTrace } from "./server.js";
 
-// The demo API's data: the 26 hand-written items and the generated company beside them.
+// The demo API's data: the 28 hand-written items and the generated company beside them.
 
 async function demoBrain(llm?: LlmClient) {
   const brain = new Brain(llm, { corpus: "demo" });
