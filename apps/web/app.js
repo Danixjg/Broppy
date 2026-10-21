@@ -3,7 +3,7 @@ import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, l
 import { showMoreLabel, visibleItems } from "./lists.js";
 import { chosenProject } from "./projects.js";
 import { linkedTask } from "./links.js";
-import { countsText, countText, detailPath, doneTileLabel, dueText, errorText, FALLBACKS, nameText,
+import { changedFields, countsText, countText, detailPath, doneTileLabel, dueText, errorText, FALLBACKS, nameText,
   priorityText, taskQuery } from "./tasks.js";
 
 const API = "/api/brain";
@@ -502,7 +502,208 @@ function renderTaskDetail(detail) {
   const links = Array.isArray(detail.links) ? detail.links : [];
   if (links.length) box.append(taskLinks(links));
   box.append(sourceLink(detail.url, "jira"));
+  // Writes ride the detail's revision and stay local to this drawer; nothing else re-renders from a draft.
+  if (detail.capabilities?.edit === true && detail.revision) {
+    const form = taskEditForm(detail);
+    box.append(form);
+    taskTransitionsForm(detail);
+  }
 }
+
+// One submission, one intent: the key and the logical intent persist with the draft through retries and reloads,
+// and they die with the identity, so another persona never replays this one's keys.
+function taskIntent(docId) {
+  const pending = state.task.pending;
+  if (pending && pending.docId === docId) return pending;
+  const fresh = { docId, identity: state.identity, idempotencyKey: crypto.randomUUID(), intentId: crypto.randomUUID(), saving: false };
+  state.task.pending = fresh;
+  return fresh;
+}
+
+function taskEditForm(detail) {
+  const form = node("form", "stack task-edit"); form.id = "tasksEditForm";
+  const summary = labeledInput("Summary", "input"); summary.name = "summary"; summary.value = safeText(detail.title); summary.maxLength = 250;
+  const due = labeledInput("Due date", "input"); due.type = "date"; due.name = "dueDate"; due.value = safeText(detail.dueDate);
+  const priority = labeledInput("Priority", "select"); priority.name = "priority";
+  const none = node("option", "", "No priority"); none.value = ""; priority.append(none);
+  for (const name of ["Highest", "High", "Medium", "Low", "Lowest"]) {
+    const option = node("option", "", name); option.value = name; priority.append(option);
+  }
+  priority.value = safeText(detail.priority);
+  const save = node("button", "primary-button", "Save changes"); save.type = "submit";
+  const note = node("span", "muted", ""); note.className = "muted task-edit-note";
+  form.append(summary, due, priority, save, note);
+  form.addEventListener("submit", event => { event.preventDefault(); saveTaskEdit(detail, form, note); });
+  return form;
+}
+
+function labeledInput(label, tag) {
+  const wrap = node("label", "field");
+  wrap.append(node("span", "", label), document.createElement(tag));
+  return wrap.querySelector(tag);
+}
+
+// Only changed fields ride the command (FT18); a conflict keeps the draft and tells the person what Jira has now (FT48).
+async function saveTaskEdit(detail, form, note) {
+  const pending = taskIntent(detail.id);
+  if (pending.saving) return;
+  const values = {
+    summary: form.querySelector("input[name=summary]")?.value.trim() ?? "",
+    dueDate: form.querySelector("input[name=dueDate]")?.value ?? "",
+    priority: form.querySelector("select[name=priority]")?.value ?? ""
+  };
+  const fields = changedFields({ summary: detail.title, dueDate: detail.dueDate ?? "", priority: detail.priority ?? "" }, values);
+  if (!Object.keys(fields).length) { setMessage(note, "Nothing changed yet."); return; }
+  return await runTaskCommand(detail, form, note, { clientIntentId: pending.intentId, fields });
+}
+
+// The command's one shape for every write the drawer makes: save, keep the pending state, and read only
+// receipts — a second dispatch is never the answer to a lost response.
+async function runTaskCommand(detail, form, note, body, transitionId) {
+  const pending = state.task.pending;
+  if (!pending || pending.saving) return;
+  pending.saving = true;
+  const submit = form.querySelector("button[type=submit]"); if (submit) submit.disabled = true;
+  setMessage(note, "Saving…");
+  try {
+    const receipt = await call(detailPath(detail.id) + (transitionId ? "/transitions" : ""), {
+      method: transitionId ? "POST" : "PUT",
+      headers: { "if-match": safeText(detail.revision), "idempotency-key": pending.idempotencyKey },
+      body: JSON.stringify(body) });
+    // 202 means the write is in flight without proof; the receipt poll answers, never a resend.
+    if (receipt.state === "uncertain") {
+      setMessage(note, "Checking Jira…");
+      pollTaskReceipt(receipt.operationId, detail.id, note);
+      return;
+    }
+    if (receipt.state === "applied" && receipt.task) {
+      setMessage(note, "");
+      state.task.pending = undefined;
+      await openTaskDetail(detail.id);
+      loadTasks();
+      return;
+    }
+    setMessage(note, "The change could not be saved.");
+  } catch (error) {
+    const payload = error.payload ?? {};
+    // A conflict keeps the draft; the person compares and reapplies deliberately.
+    if (error.status === 412) {
+      setMessage(note, "The task changed on Jira since you loaded it. Your draft is kept; reload the task to compare.");
+      return;
+    }
+    if (error.status === 409 && Array.isArray(payload.transitions)) {
+      setMessage(note, "Jira's workflow changed; the moves below are refreshed.");
+      await taskTransitionsForm(detail);
+      return;
+    }
+    setMessage(note, payload.error ? errorText(payload) : "The change could not be saved.");
+  } finally {
+    if (pending) pending.saving = false;
+    if (submit) submit.disabled = false;
+  }
+}
+
+// An uncertain write is polled, not retried: the receipt is the only thing that can say what Jira did.
+function pollTaskReceipt(operationId, docId, note, delay = 5000) {
+  if (!operationId) { setMessage(note, "Jira did not confirm the change. Check the task again in a moment."); return; }
+  setTimeout(async () => {
+    if (state.identity !== state.task.pending?.identity || state.task.pending?.docId !== docId) return;
+    try {
+      const receipt = await call(`/v1/task-operations/${encodeURIComponent(operationId)}`);
+      if (receipt.state === "applied") {
+        setMessage(note, "Jira confirmed the change.");
+        state.task.pending = undefined;
+        await openTaskDetail(docId);
+        loadTasks();
+        return;
+      }
+      if (receipt.state === "uncertain") return pollTaskReceipt(operationId, docId, note, delay);
+      setMessage(note, receipt.fieldErrors
+        ? errorText({ error: { message: "Jira refused the change.", fieldErrors: receipt.fieldErrors } })
+        : "Jira refused the change.");
+    } catch {
+      pollTaskReceipt(operationId, docId, note, delay);
+    }
+  }, delay);
+}
+
+// The moves the workflow legally allows right now; required fields are collected before Jira sees the command.
+async function taskTransitionsForm(detail) {
+  const box = $("tasksDetail");
+  const previous = box.querySelector(".task-transitions"); if (previous) previous.remove();
+  const form = node("form", "stack task-transitions"); form.id = "taskTransitionsForm";
+  const select = labeledInput("Move to", "select"); select.name = "transition";
+  const fields = node("div", "stack transition-fields");
+  const move = node("button", "primary-button", "Move"); move.type = "submit";
+  const note = node("span", "muted", ""); note.className = "muted task-transitions-note";
+  form.append(select, fields, move, note);
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    applyTaskTransition(detail, form, note);
+  });
+  box.append(form);
+  try {
+    const choices = await call(`${detailPath(detail.id)}/transitions`);
+    setMessage(note, "");
+    buildTaskTransitions(form, choices);
+  } catch (error) {
+    if (error.status !== 404) setMessage(note, "Jira's moves are unavailable right now.");
+    form.hidden = true;
+  }
+}
+
+function buildTaskTransitions(form, choices) {
+  const select = form.querySelector("select[name=transition]");
+  const fields = form.querySelector(".transition-fields");
+  clear(select); clear(fields);
+  const options = Array.isArray(choices.transitions) ? choices.transitions : [];
+  if (!options.length) { select.disabled = true; return; }
+  for (const option of options) {
+    const item = node("option", "", nameText(option.name));
+    item.value = option.id;
+    select.append(item);
+  }
+  select.disabled = false;
+  const chosen = () => options.find(item => item.id === select.value);
+  select.addEventListener("change", () => showTransitionFields(fields, chosen()));
+  showTransitionFields(fields, chosen());
+  select.closest("form").dataset.taskRevision = safeText(choices.taskRevision);
+}
+
+function showTransitionFields(fields, transition) {
+  clear(fields);
+  for (const field of transition?.fields ?? []) {
+    if (!field.required) continue;
+    if (field.supported === false) {
+      appendText(fields, "p", "muted", `${field.name} must be set in Jira.`);
+      continue;
+    }
+    const input = labeledInput(field.name, "select");
+    input.name = field.id;
+    const blank = node("option", "", `Choose a ${String(field.name).toLowerCase()}`); blank.value = ""; input.append(blank);
+    for (const value of field.allowedValues ?? []) {
+      const item = node("option", "", value.name); item.value = value.id; input.append(item);
+    }
+    fields.append(input);
+  }
+}
+
+async function applyTaskTransition(detail, form, note) {
+  const select = form.querySelector("select[name=transition]");
+  const transitionId = select?.value;
+  if (!transitionId || select.disabled) { setMessage(note, "Choose a move first."); return; }
+  const pending = taskIntent(detail.id);
+  if (pending.saving) return;
+  const fields = {};
+  let missing = [];
+  for (const input of form.querySelectorAll(".transition-fields select")) {
+    if (input.value) fields[input.name] = input.value; else missing.push(input.previousElementSibling?.textContent ?? input.name);
+  }
+  if (missing.length) { setMessage(note, `${missing.join(", ")} is required before Jira accepts the move.`); return; }
+  return await runTaskCommand({ ...detail, revision: form.dataset.taskRevision || detail.revision }, form, note,
+    { clientIntentId: pending.intentId, transitionId, fields }, transitionId);
+}
+
 
 // Linked items the synced index lets this identity open also open here, in the workspace view.
 function taskLinks(links) {
