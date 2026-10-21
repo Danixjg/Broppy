@@ -170,6 +170,12 @@ describe("summary", () => {
     expect(ids(presetRows(rows, "overdue", query(), NOW))).toEqual(["jira:DB-1"]);
     expect(ids(presetRows(rows, "doneThisWeek", query(), NOW))).toEqual(["jira:PAY-2", "jira:SEC-7"]);
   });
+
+  it("never lets a preset redefine the other tiles", () => {
+    expect(summarize(rows, { ...query(), summaryPreset: "doneThisWeek" }, NOW)).toEqual(summarize(rows, query(), NOW));
+    expect(summarize(rows, { ...query(), summaryPreset: "overdue" }, NOW)).toEqual(summarize(rows, query(), NOW));
+    expect(summarize(rows.filter(row => row.category === "done"), query(), NOW).open).toBe(0);
+  });
 });
 
 describe("sort and page", () => {

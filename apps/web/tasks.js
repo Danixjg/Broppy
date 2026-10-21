@@ -16,6 +16,13 @@ export const nameText = value => (word(value) ? value.trim() : FALLBACKS.name);
 export const dueText = value => (word(value) ? value.trim() : FALLBACKS.dueDate);
 export const priorityText = value => (word(value) ? value.trim() : FALLBACKS.priority);
 
+// Date-only strings order by calendar day, so a plain compare against today decides the urgency.
+export function dueUrgency(dueDate, today) {
+  if (!word(dueDate)) return "";
+  if (dueDate === today) return "today";
+  return dueDate < today ? "overdue" : "later";
+}
+
 // A count that isn't there reads as empty, never as a zero claimed by the page.
 export const countText = value => typeof value === "number" && Number.isFinite(value) ? String(value) : "–";
 
@@ -23,7 +30,7 @@ export const countText = value => typeof value === "number" && Number.isFinite(v
 // an absent param is the API default, which is the only meaning this side claims.
 export function taskQuery(view, filters = {}) {
   const params = new URLSearchParams();
-  params.set("view", view === "board" ? "board" : "list");
+  params.set("view", ["board", "personal"].includes(view) ? view : "list");
   const projects = (Array.isArray(filters.projectIds) ? filters.projectIds : []).map(value => `${value ?? ""}`.trim()).filter(Boolean);
   if (projects.length) params.set("projectIds", projects.join(","));
   for (const [field, key] of [["priority", "priorityIds"], ["status", "statusIds"],
@@ -43,6 +50,27 @@ export function detailPath(docId) {
   const segments = `${docId ?? ""}`.split(":").map(segment => segment.trim()).filter(Boolean);
   if (segments.length !== 2 || segments[0] !== "jira") return null;
   return `/v1/tasks/jira/${segments[1]}`;
+}
+
+// Jira's status category IS the board column id; a category the columns don't know falls to Unmapped.
+export function movesByColumn(transitions) {
+  const byColumn = new Map();
+  for (const transition of Array.isArray(transitions) ? transitions : []) {
+    if (!transition || typeof transition.id !== "string" || transition.id.trim() === "") continue;
+    const column = { new: "todo", indeterminate: "in-progress", done: "done" }[transition.target?.category] ?? "unmapped";
+    const moves = byColumn.get(column) ?? [];
+    moves.push(transition);
+    byColumn.set(column, moves);
+  }
+  return byColumn;
+}
+
+export function pickDrop(moves) {
+  const list = Array.isArray(moves) ? moves : [];
+  if (!list.length) return { kind: "none" };
+  const single = list.length === 1 ? list[0] : null;
+  if (single && !single.fields?.some(field => field?.required === true)) return { kind: "submit", transition: single };
+  return { kind: "pick" };
 }
 
 // The header text behind the count tiles: numbers as the response reported them, and the done tile

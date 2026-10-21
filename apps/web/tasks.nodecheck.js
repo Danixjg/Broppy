@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FALLBACKS, changedFields, countsText, detailPath, doneTileLabel, dueText, errorText, nameText,
-  priorityText, taskQuery } from "./tasks.js";
+import { FALLBACKS, changedFields, countsText, detailPath, doneTileLabel, dueText, dueUrgency, errorText, movesByColumn,
+  nameText, pickDrop, priorityText, taskQuery } from "./tasks.js";
 
 test("absent card fields state their fallback and present fields pass through unchanged", () => {
   assert.equal(nameText(""), FALLBACKS.name);
@@ -49,6 +49,7 @@ test("filter state and view round-trip through the one query string", () => {
   const quiet = taskQuery("list", {});
   assert.equal([...quiet.keys()].join(), "view");
   assert.equal(taskQuery("nonsense", {}).get("view"), "list");
+  assert.equal(taskQuery("personal", {}).toString(), "view=personal", "the personal widget asks the API's own personal view");
 });
 
 test("counts text reads the response and the untracked done tile says so", () => {
@@ -80,4 +81,37 @@ test("task route errors read as one plain message", () => {
   assert.equal(errorText({ error: "Not found" }), "Request failed.");
   assert.equal(errorText(undefined), "Request failed.");
   assert.equal(errorText({ error: {} }), "The request was not valid.");
+});
+
+test("personal widget dates name today and overdue days outright", () => {
+  assert.equal(dueUrgency("2026-10-02", "2026-10-21"), "overdue");
+  assert.equal(dueUrgency("2026-10-21", "2026-10-21"), "today");
+  assert.equal(dueUrgency("2026-10-23", "2026-10-21"), "later");
+  assert.equal(dueUrgency(null, "2026-10-21"), "");
+  assert.equal(dueUrgency("   ", "2026-10-21"), "");
+});
+
+test("board drop destinations come from the card's own transitions", () => {
+  const fieldless = { id: "21", name: "Start progress", target: { name: "in progress", category: "indeterminate" }, fields: [] };
+  const back = { id: "41", name: "Back to open", target: { name: "open", category: "new" }, fields: [] };
+  const done = { id: "31", name: "Done", target: { name: "released", category: "done" },
+    fields: [{ id: "resolutionId", name: "Resolution", required: true, supported: true, allowedValues: [{ id: "1", name: "Done" }] }] };
+  const release = { id: "91", name: "Release", target: { name: "released", category: "done" }, fields: [] };
+  const odd = { id: "77", name: "Unknown status", target: { name: "weird" }, fields: [] };
+  const columns = movesByColumn([fieldless, back, done, release, odd]);
+  assert.deepEqual(columns.get("in-progress"), [fieldless]);
+  assert.deepEqual(columns.get("todo"), [back]);
+  assert.deepEqual(columns.get("done"), [done, release]);
+  assert.deepEqual(columns.get("unmapped"), [odd], "a category the columns don't know may still land in Unmapped");
+  assert.equal(columns.get("no-such-column"), undefined, "only mapped columns offer a drop");
+  assert.deepEqual(movesByColumn([]).size, 0);
+  assert.deepEqual(movesByColumn(undefined).size, 0);
+  assert.deepEqual(movesByColumn([{ target: { category: "done" } }, { id: "  " }]).size, 0, "a move without an id is no destination");
+
+  assert.deepEqual(pickDrop([fieldless]), { kind: "submit", transition: fieldless });
+  assert.deepEqual(pickDrop([done]), { kind: "pick" }, "a move that needs fields opens the picker instead of a doomed submit");
+  assert.deepEqual(pickDrop([done, release]), { kind: "pick" });
+  assert.deepEqual(pickDrop([fieldless, back]), { kind: "pick" }, "two fieldless moves for one column ask which one");
+  assert.deepEqual(pickDrop([]), { kind: "none" });
+  assert.deepEqual(pickDrop(undefined), { kind: "none" });
 });

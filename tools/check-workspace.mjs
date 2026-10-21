@@ -57,6 +57,8 @@ try {
   let card = page.locator(`[data-proposal-id="${pending.id}"]`);
   const summary = `${pending.summary} browser review`;
   await card.getByLabel("Summary", { exact: true }).fill(summary);
+  await card.getByLabel("Owner", { exact: true }).selectOption("maya@aspire.example");
+  await card.getByLabel("Due date (blank means unknown)").fill("2026-10-02");
   assert(await card.getByRole("button", { name: /Create Jira task/ }).isDisabled(), "Unsaved review fields block creation");
   const saved = page.waitForResponse(response => response.url().endsWith("/v1/commitments/review") && response.request().method() === "POST");
   await card.getByRole("button", { name: "Save review", exact: true }).click();
@@ -122,6 +124,70 @@ try {
   const toggledKeys = await page.evaluate(() => [...document.querySelectorAll("#tasksList .item-meta")].map(item => item.textContent.split(" · ")[0]));
   assert.deepEqual(toggledKeys, listKeys, "Back on the list, the same issue identities are shown");
   await page.waitForFunction(() => document.querySelectorAll("#tasksProjects option").length > 1);
+  await page.click('[data-view="workspace"]');
+  await page.waitForFunction(() => document.querySelectorAll("#personalList .activity-item").length > 0);
+  assert((await page.locator("#personalNote").textContent()).includes("open task"), "The widget reports the count of open tasks due by today");
+  const widgetTitle = await page.evaluate(() => document.querySelector("#personalList .item-title")?.textContent ?? "");
+  await page.click("#personalList .activity-item");
+  await page.waitForFunction(title => document.querySelector("#tasksDetail h3")?.textContent === title, widgetTitle);
+  assert.equal(await page.locator("#tasksDetail h3").textContent(), widgetTitle, "A widget row opens the task's drawer on the Tasks view");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.getElementById("tasksDetail")?.hidden === true);
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset?.taskId !== undefined), true, "Closing the drawer returns focus to a task card");
+  await page.click('[data-view="workspace"]');
+  await page.waitForFunction(() => document.getElementById("personalSection")?.hidden === false);
+  await page.click("#personalAll");
+  await page.waitForFunction(() => document.getElementById("tasksView")?.hidden === false);
+  assert.equal(await page.locator("#tasksMine").isChecked(), true, "All tasks seeds the Mine only filter");
+  assert.equal(await page.locator("#tasksDue").inputValue(), "throughToday", "All tasks seeds the through-today filter");
+  assert(await page.locator("#tasksList .activity-item").filter({ hasText: "browser review" }).first().isVisible(), "The seeded filters show the task the journey created");
+  const transitionPosts = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && request.url().includes("/transitions")) transitionPosts.push(request.url());
+  });
+  await page.click("#tasksClear");
+  await page.waitForFunction(() => document.querySelectorAll("#tasksList .activity-item").length >= 5, undefined, { timeout: 15000 });
+  await page.click("#tasksBoardView");
+  await page.waitForFunction(() => document.querySelectorAll("#tasksBoard .surface").length === 4);
+  const dispatchDrag = async (key, column, thenDrop = true) => {
+    await page.evaluate(key => {
+      const handle = [...document.querySelectorAll("#tasksBoard .activity-item")]
+        .find(card => card.textContent.includes(key))?.querySelector(".drag-handle");
+      handle?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: new DataTransfer() }));
+    }, key);
+    await page.waitForTimeout(450);
+    return await page.evaluate(({ key, column, thenDrop }) => {
+      const cell = [...document.querySelectorAll("#tasksBoard .surface")]
+        .find(cell => cell.querySelector("h2")?.textContent.startsWith(column));
+      const transfer = new DataTransfer();
+      cell.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
+      const highlight = cell.classList.contains("drop-target");
+      if (thenDrop) cell.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+      return highlight;
+    }, { key, column, thenDrop });
+  };
+  assert.equal(await dispatchDrag("DB-12", "To do"), true, "DB-12's legal move highlights the To do column");
+  assert(await page.waitForFunction(() => document.getElementById("tasksStatus")?.textContent.includes("Back to open applied")).then(() => true), "The drop submits the one legal move and reports it");
+  assert(await page.waitForFunction(() => {
+    const cell = [...document.querySelectorAll("#tasksBoard .surface")]
+      .find(cell => [...cell.querySelectorAll(".item-meta")].some(item => item.textContent.startsWith("DB-12")));
+    return cell?.querySelector("h2")?.textContent.startsWith("To do");
+  }).then(() => true), "The moved card landed in To do");
+  const beforePick = transitionPosts.length;
+  assert.equal(await dispatchDrag("DB-12", "Done"), true, "the Done move still highlights as a legal destination");
+  await page.waitForFunction(() => document.activeElement === document.querySelector("#taskTransitionsForm select[name=transition]"), undefined, { timeout: 5000 });
+  assert.equal(transitionPosts.length, beforePick, "A move that needs a field opens the picker instead of dropping");
+  await page.click(".task-detail-close");
+  assert.equal(await dispatchDrag("REL-9", "To do", false), false, "A task with no legal moves highlights nothing");
+  const refusals = transitionPosts.length;
+  await dispatchDrag("REL-9", "To do");
+  await page.waitForFunction(() => document.getElementById("tasksStatus")?.textContent.includes("No legal move"));
+  assert.equal(transitionPosts.length, refusals, "An illegal drop never submits a transition");
+  await page.click("#tasksListView");
+  await page.click("#tasksClear");
+  await page.waitForFunction(() => document.querySelectorAll("#tasksList .activity-item").length > 0);
+  await page.locator("#tasksList .activity-item").filter({ hasText: "PAY-101" }).first().click();
+  await page.waitForFunction(() => Boolean(document.querySelector("#tasksEditForm")));
   const edited = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/v1/tasks/jira/PAY-101"));
   await page.fill("#tasksEditForm input[name=summary]", "Cutover rehearsal");
   await page.click("#tasksEditForm button[type=submit]");
@@ -197,7 +263,7 @@ try {
     await mkdir(artifacts, { recursive: true });
     await page.screenshot({ path: `${artifacts}/workspace.png`, fullPage: true });
   }
-  console.log("Workspace browser checks passed. Review, reload, creation, identity changes, Slack navigation and chat scope, the read-only Tasks view, task edits and moves, persona isolation and identical task refusals use the running API.");
+  console.log("Workspace browser checks passed. Review, reload, creation, identity changes, Slack navigation and chat scope, the read-only Tasks view, task edits, moves by menu and by drag, the personal widget, persona isolation and identical task refusals use the running API.");
 } catch (error) {
   console.error(output.join(""));
   throw error;
