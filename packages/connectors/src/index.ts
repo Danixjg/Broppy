@@ -199,7 +199,6 @@ export class MockConnector implements Connector {
     this.updateDocument(id, { metadata: fields });
   }
 
-  /** One provider-side write: top-level fields and metadata together, one version bump. */
   updateDocument(id: string, patch: { metadata?: Record<string, string>; title?: string; description?: string }): void {
     const doc = this.require(id);
     this.docs.set(id, { ...doc, ...(patch.title !== undefined ? { title: patch.title } : {}),

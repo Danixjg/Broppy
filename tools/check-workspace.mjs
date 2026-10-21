@@ -122,7 +122,6 @@ try {
   const toggledKeys = await page.evaluate(() => [...document.querySelectorAll("#tasksList .item-meta")].map(item => item.textContent.split(" · ")[0]));
   assert.deepEqual(toggledKeys, listKeys, "Back on the list, the same issue identities are shown");
   await page.waitForFunction(() => document.querySelectorAll("#tasksProjects option").length > 1);
-  // A save sends only the changed field, and the drawer refetches Jira's accepted value (FT18, FT19).
   const edited = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/v1/tasks/jira/PAY-101"));
   await page.fill("#tasksEditForm input[name=summary]", "Cutover rehearsal");
   await page.click("#tasksEditForm button[type=submit]");
@@ -134,7 +133,6 @@ try {
   await page.click("#tasksEditForm button[type=submit]");
   assert.equal((await redated).status(), 200);
   await page.waitForFunction(() => (document.querySelector("#tasksDetail .detail-meta")?.textContent ?? "").includes("Nov 2"));
-  // A move goes through the real workflow id and reads the new state back (FT24).
   await page.locator("#tasksList .activity-item").filter({ hasText: "SETL-27" }).first().click();
   await page.waitForFunction(() => document.querySelectorAll("#taskTransitionsForm select[name=transition] option").length > 1);
   await page.selectOption("#taskTransitionsForm select[name=transition]", "21");
@@ -143,7 +141,6 @@ try {
   assert.equal((await moved).status(), 200);
   await page.waitForFunction(() => (document.querySelector("#tasksDetail .eyebrow")?.textContent ?? "").includes("in progress"));
   await page.waitForFunction(() => [...document.querySelectorAll("#tasksList .status-badge")].some(item => item.textContent === "in progress"));
-  // A stale baseline keeps the draft and names the change instead of dispatching (FT48).
   await page.locator("#tasksList .activity-item").filter({ hasText: "DB-12" }).first().click();
   await page.waitForFunction(() => document.querySelector("#tasksEditForm input[name=summary]")?.value === "DB-12 Ledger database migration");
   await page.evaluate(async () => {

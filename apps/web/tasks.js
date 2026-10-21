@@ -63,8 +63,6 @@ export function doneTileLabel(summary = {}) {
   return done.historyComplete === true || (done.knownCount ?? 0) > 0 ? "Done this week" : "Not tracked yet";
 }
 
-// Only the fields the person actually changed ride the command: Jira receives exactly what was requested.
-// A cleared input rides as null (clear the field); an equal value stays out (no change).
 export function changedFields(current = {}, values = {}) {
   const fields = {};
   for (const [name, value] of Object.entries(values)) {

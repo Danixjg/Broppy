@@ -414,7 +414,6 @@ async function routeBody(input: GetTaskRoutesInput, now: Date): Promise<Routed> 
   }
 }
 
-/** What the executor offers the write routes. Brain satisfies it; the interfaces keep tasks.ts ignorant of Brain. */
 export interface TaskCommandPort {
   readonly taskEdit: (actor: User, docId: string, intent: CommandIntent, fields: EditFields) => Promise<CommandResult>;
   readonly taskTransition: (actor: User, docId: string, intent: CommandIntent, command: { transitionId: string; fields: Record<string, string> }) => Promise<CommandResult>;
@@ -445,8 +444,6 @@ export interface TaskCommandRouteInput {
   readonly commands: TaskCommandPort;
 }
 
-/** The write half of the task routes: one place turns executor results into envelopes and receipts, so no caller
- * rewraps a refusal into a legacy error string. Undefined means this method and path aren't one of ours. */
 export async function taskCommandRoutes(input: TaskCommandRouteInput): Promise<Routed | undefined> {
   const { method, url, user, list, commands } = input;
   const transitions = COMMAND_TRANSITIONS.exec(url.pathname);
@@ -475,7 +472,6 @@ export async function taskCommandRoutes(input: TaskCommandRouteInput): Promise<R
   return undefined;
 }
 
-/** Parse identity and payload at the boundary, then hand the executor one clean command. */
 async function submitCommand<T>(input: TaskCommandRouteInput, parse: (raw: Record<string, unknown>) => T,
   run: (user: User, docId: string, intent: CommandIntent, command: T) => Promise<CommandResult>): Promise<Routed> {
   const { url, user, list } = input;

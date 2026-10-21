@@ -20,8 +20,6 @@ export class JiraRequestError extends Error {
   constructor(readonly status: number, readonly fields: string[]) { super(`Jira request failed (${status})`); }
 }
 
-/** Jira's field names on a refused edit, and the one safe message each maps to. Unknown fields fold into one
- * base note; the raw provider body never passes through. */
 const PROVIDER_FIELD_IDS: Record<string, string> = {
   summary: "summary", duedate: "dueDate", assignee: "assignee", priority: "priority", labels: "labels"
 };
@@ -33,8 +31,6 @@ const PROVIDER_FIELD_MESSAGES: Record<string, string> = {
   labels: "Jira will not accept these labels for this issue."
 };
 
-/** The metadata one transition carries: its target status and its required fields, with `resolution` the one
- * provider field Broppy maps today. Required fields outside that list stay visible but unsupported. */
 function transitionMeta(item: any): TransitionMeta {
   const fields = Object.entries((item?.fields ?? {}) as Record<string, any>).map(([providerFieldId, meta]) => {
     const supported = providerFieldId === "resolution";
@@ -164,7 +160,6 @@ export class JiraAsUser {
     return true;
   }
 
-  /** The person's own Jira permission to change an issue's fields, as the shared token asks it for them. */
   private async mayEdit(user: User, key: string): Promise<boolean> {
     if (!/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(key) || user.active === false) return false;
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
@@ -172,8 +167,6 @@ export class JiraAsUser {
     return await this.mayView(user, key, authorization, site) && await this.holds(user, "EDIT_ISSUES", { issueKey: key });
   }
 
-  /** Applies one Jira PUT for the requested fields and reports what Broppy asked Jira to change; the receipt's task
-   * data is only what comes from a later fresh read. Field values arrive in their provider shape. */
   async editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>> {
     if (!await this.mayEdit(user, key)) throw new CommandRejection(403, "FORBIDDEN");
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
@@ -228,7 +221,6 @@ export class JiraAsUser {
     return intended instanceof Object && Object.entries(intended).every(([name, value]) => value === null ? fields[name] === null || fields[name] === undefined : matches(name, value));
   }
 
-  /** Definite Jira refusals name their safe fields here; anything else stays the executor's uncertainty. */
   private async writeOutcome(response: Response, accepted: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (response.ok) return { ...accepted };
     if (response.status === 403) throw new CommandRejection(403, "FORBIDDEN");
@@ -245,7 +237,6 @@ export class JiraAsUser {
     throw new Error(`Jira request failed (${response.status})`);
   }
 
-  /** The provider's transition listing becomes the one metadata shape every surface reads. */
   async legalTransitions(user: User, key: string): Promise<TransitionMeta[]> {
     if (user.active === false) return [];
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);

@@ -33,7 +33,6 @@ import { CommandOperation, CommandRejection, CommandResult, EditFields, MemoryTa
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 const reviewQueues = new Map<string, Promise<unknown>>();
-const intendedEditFields = (fields: EditFields): Record<string, unknown> => ({ ...fields });
 // After a failed embedding, the provider rests this long. A free plan that refuses or hangs is asked again later, and
 // questions don't wait on it meanwhile.
 const EMBEDDING_PAUSE_MS = 5 * 60_000;
@@ -61,7 +60,6 @@ export interface LiveJira {
   createIssue(user: User, input: { project: string; summary: string; description: string; assigneeEmail?: string; dueDate?: string }):
     Promise<{ key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined>;
   markDone(user: User, key: string): Promise<boolean>;
-  /** WP-C write surface: field edits and legal transitions, still on the shared connection until WP-A. */
   editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>>;
   legalTransitions(user: User, key: string): Promise<ReadonlyArray<TransitionMeta>>;
   transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>>;
@@ -1349,9 +1347,6 @@ export class Brain {
     this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });
   }
 
-/** A task edit or transition through the plan's §12 command path: reserve, lock, revalidate, one write, receipt.
- * Replays still pass the fresh availability check before a receipt carries task data back out, refusals keep
- * their rejected receipt (no barrier, no retry), and anything the write did not prove turns uncertain. */
   async taskEdit(actor: User, docId: string, getIntent: { ifMatch: string; idempotencyKey: string; intentId: string },
     fields: EditFields): Promise<CommandResult> {
     return await this.taskCommand(actor, docId, getIntent, { action: "edit", fields });
@@ -1362,8 +1357,6 @@ export class Brain {
     return await this.taskCommand(actor, docId, getIntent, { action: "transition", fields: command.fields, transitionId: command.transitionId });
   }
 
-  /** Executors host every seam in one place: demo writes ride the corpus connectors, live ones ride the shared
-   * Jira grant, and the operation store is injectable so the instance-race tests can share one backing store. */
   commandStore: TaskCommandStore = new MemoryTaskCommandStore();
 
   private async taskCommand(actor: User, docId: string, getIntent: { ifMatch: string; idempotencyKey: string; intentId: string },
@@ -1371,11 +1364,9 @@ export class Brain {
     Promise<CommandResult> {
     this.assertOrg(actor);
     if (actor.active === false) return { status: "forbidden" };
-    // Hidden, missing and unreadable task identities refuse exactly like the read routes (no existence oracle).
     const detail = await this.taskDetail(actor, docId);
     if (!detail) return { status: "unavailable" };
     if (this.liveMode && !this.liveJira) return { status: "forbidden" };
-    // A previous write of this issue ended unverifiably: nothing new dispatches until it is settled.
     const barrier = await this.commandStore.barrierFor(docId);
     if (barrier) return { status: "refused", rejection: new CommandRejection(409, "OPERATION_IN_PROGRESS", {}, { operationId: barrier.id }) };
     const reserved = await this.commandStore.reserve({
@@ -1391,57 +1382,47 @@ export class Brain {
       return { status: "refused", rejection: new CommandRejection(409, "OPERATION_IN_PROGRESS", {}, { operationId: lease.operation.id }) };
     }
     try {
-      // Preflight refusals persist the receipt, so replays repeat nothing and forget nothing.
-      const refusal = this.taskPreflight(detail.document, getIntent, command);
-      if (refusal) {
+      const checked = this.taskPreflight(detail.document, getIntent, command);
+      if (checked && checked.kind === "refusal") {
         await this.commandStore.advanceCommand(operation.id, "reserved",
-          { state: "rejected", fieldErrors: refusal.fieldErrors, outcomeCode: refusal.code });
-        this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: command.action, docId, outcome: refusal.code });
-        return { status: "refused", rejection: refusal.rejection };
+          { state: "rejected", fieldErrors: checked.fieldErrors, outcomeCode: checked.code });
+        this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: command.action, docId, outcome: checked.code });
+        return { status: "refused", rejection: checked.rejection };
       }
       if (command.action === "edit") return await this.runTaskEdit(actor, docId, operation, command.fields);
-      return await this.runTaskTransition(actor, docId, operation, command);
+      if (checked?.kind !== "legal") throw new Error("A transition command always preflights to legal or refused.");
+      return await this.runTaskTransition(actor, docId, operation, command, checked.meta);
     } finally {
       await this.commandStore.releaseLease(docId, operation.id);
     }
   }
 
-  /** Everything that stops a command before a writer is called: the stale baseline, the transition's legality
-   * against the issue's current state, its required fields, and a demonstrably unassignable target (demo only;
-   * live Jira enforces its own assignee rules at dispatch). */
   private taskPreflight(document: SourceDocument, getIntent: { ifMatch: string },
     command: { action: "edit"; fields: EditFields } | { action: "transition"; transitionId: string; fields: Record<string, string> }):
-    { code: string; fieldErrors: Record<string, string>; rejection: CommandRejection } | undefined {
+    { kind: "refusal"; code: string; fieldErrors: Record<string, string>; rejection: CommandRejection } |
+    { kind: "legal"; meta: TransitionMeta } | undefined {
     if (parseRevision(getIntent.ifMatch) !== document.version) {
-      return { code: "TASK_CHANGED", fieldErrors: {}, rejection:
+      return { kind: "refusal", code: "TASK_CHANGED", fieldErrors: {}, rejection:
         new CommandRejection(412, "TASK_CHANGED", {}, { currentRevision: revisionOf(document.version) }) };
     }
-    if (command.action === "transition") {
-      const legal = this.legalTransitions(document);
-      const meta = legal.find(item => item.id === command.transitionId);
-      if (!meta) return { code: "TRANSITION_UNAVAILABLE", fieldErrors: { transitionId: "Use one of the task's currently legal transitions." }, rejection:
-        new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
-      const missing = meta.fields.filter(field => field.required && !(command.fields[field.id] ?? "").trim());
-      if (missing.length) {
-        const unsupported = missing.filter(field => !field.supported);
-        if (unsupported.length) {
-          const fieldErrors = Object.fromEntries(unsupported.map(field => [field.id, "Set this field in Jira; Broppy cannot carry it yet."]));
-          return { code: "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, rejection: new CommandRejection(422, "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, { url: document.url }) };
-        }
-        const fieldErrors = Object.fromEntries(missing.map(field => [field.id, "This field is required before Jira accepts the change."]));
-        return { code: "FIELD_VALIDATION_FAILED", fieldErrors, rejection: new CommandRejection(422, "FIELD_VALIDATION_FAILED", fieldErrors) };
+    if (command.action === "edit") return undefined;
+    const legal = this.legalTransitions(document);
+    const meta = legal.find(item => item.id === command.transitionId);
+    if (!meta) return { kind: "refusal", code: "TRANSITION_UNAVAILABLE", fieldErrors: { transitionId: "Use one of the task's currently legal transitions." }, rejection:
+      new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
+    const missing = meta.fields.filter(field => field.required && !(command.fields[field.id] ?? "").trim());
+    if (missing.length) {
+      const unsupported = missing.filter(field => !field.supported);
+      if (unsupported.length) {
+        const fieldErrors = Object.fromEntries(unsupported.map(field => [field.id, "Set this field in Jira; Broppy cannot carry it yet."]));
+        return { kind: "refusal", code: "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, rejection: new CommandRejection(422, "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, { url: document.url }) };
       }
-    } else if (!this.liveMode && typeof command.fields.assignee === "string") {
-      const target = this.users.find(user => user.platformIdentities?.jira === command.fields.assignee && user.active !== false);
-      if (!target) {
-        return { code: "FIELD_VALIDATION_FAILED", fieldErrors: { assignee: "Nobody with that Jira identity is active in this workspace." }, rejection:
-          new CommandRejection(422, "FIELD_VALIDATION_FAILED", { assignee: "Nobody with that Jira identity is active in this workspace." }) };
-      }
+      const fieldErrors = Object.fromEntries(missing.map(field => [field.id, "This field is required before Jira accepts the change."]));
+      return { kind: "refusal", code: "FIELD_VALIDATION_FAILED", fieldErrors, rejection: new CommandRejection(422, "FIELD_VALIDATION_FAILED", fieldErrors) };
     }
-    return undefined;
+    return { kind: "legal", meta };
   }
 
-  /** The legal moves this issue's current state allows right now. Live Jira's answer carries its own names. */
   private legalTransitions(document: SourceDocument): ReadonlyArray<TransitionMeta> {
     return demoWorkflow(document.metadata.status);
   }
@@ -1460,18 +1441,19 @@ export class Brain {
       return { status: "applied", operation: { ...operation, ...applied }, fields: accepted,
         document: this.index.documents.get(docId) };
     } catch (error) {
-      return await this.taskCommandFailure(actor, docId, operation, "edit", error, intendedEditFields(fields));
+      return await this.taskCommandFailure(actor, docId, operation, "edit", error, { ...fields });
     }
   }
 
   private async runTaskTransition(actor: User, docId: string, operation: CommandOperation,
-    command: { action: "transition"; transitionId: string; fields: Record<string, string> }): Promise<CommandResult> {
+    command: { action: "transition"; transitionId: string; fields: Record<string, string> }, meta: TransitionMeta):
+    Promise<CommandResult> {
     await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing" });
     this.audit.append("task_command", actor.id, { operationId: operation.id, action: "transition", ...this.auditDocument(docId) });
     try {
       const accepted = this.liveMode
         ? await this.liveJira!.transitionIssue(actor, docId.slice("jira:".length), command)
-        : this.demoApplyTransition(docId, command);
+        : this.demoApplyTransition(docId, meta, command.fields);
       await this.sync("jira");
       this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: "transition", docId, outcome: "applied" });
       const applied = { state: "applied", outcome: "providerReceipt" } as const;
@@ -1484,8 +1466,6 @@ export class Brain {
     }
   }
 
-  /** A definitive writer refusal keeps the receipt and its sanitized field errors. Anything else the write
-   * could not prove keeps its issue blocked until a readback or an operator settles it. */
   private async taskCommandFailure(actor: User, docId: string, operation: CommandOperation, action: "edit" | "transition",
     error: unknown, intended?: Record<string, unknown>): Promise<CommandResult> {
     const rejection = error instanceof CommandRejection ? error : undefined;
@@ -1506,8 +1486,11 @@ export class Brain {
     return { status: "applied", operation, fields: {}, document };
   }
 
-  /** Where the person's edits land on the demo corpus. Jira owns the values; a null clears an optional field. */
   private demoApplyEdit(docId: string, fields: EditFields): Record<string, unknown> {
+    if (typeof fields.assignee === "string" && !this.users.some(user =>
+      user.platformIdentities?.jira === fields.assignee && user.active !== false)) {
+      throw new CommandRejection(422, "FIELD_VALIDATION_FAILED", { assignee: "Nobody with that Jira identity is active in this workspace." });
+    }
     const metadata: Record<string, string> = {};
     const accepted: Record<string, unknown> = {};
     if (fields.assignee !== undefined) { metadata.assignee = fields.assignee ?? ""; accepted.assignee = fields.assignee; }
@@ -1519,16 +1502,11 @@ export class Brain {
     return accepted;
   }
 
-  private demoApplyTransition(docId: string, command: { transitionId: string; fields: Record<string, string> }): Record<string, unknown> {
-    const document = this.index.documents.get(docId)!;
-    const meta = demoWorkflow(document.metadata.status).find(item => item.id === command.transitionId);
-    // The preflight already ruled; this covers a corpus that changed between the check and the write.
-    if (!meta) throw new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, {});
+  private demoApplyTransition(docId: string, meta: TransitionMeta, fields: Record<string, string>): Record<string, unknown> {
     this.connectors.jira.updateMetadata(docId, { status: meta.target.name, statusCategory: meta.target.category });
-    return { status: meta.target, ...Object.fromEntries(Object.entries(command.fields).map(([key, value]) => [key, value])) };
+    return { status: meta.target, ...fields };
   }
 
-  /** The operation's own receipt. The author (or an audit admin) sees their task data; someone else does not. */
   async taskOperationReceipt(actor: User, operationId: string): Promise<OperationReceipt> {
     const operation = await this.commandStore.getCommand(operationId);
     if (!operation || operation.orgId !== this.orgId || (actor.id !== operation.actorId && actor.role !== "admin")) {
@@ -1539,8 +1517,6 @@ export class Brain {
     return receipt;
   }
 
-  /** A readback settles an uncertain write: equality with the desired fields proves the state, but never who
-   * put it there, so attribution stays `desiredStateObserved`. Possible overwrites stay in review. */
   async settleUncertain(actor: User, operationId: string): Promise<OperationReceipt> {
     const operation = await this.commandStore.getCommand(operationId);
     if (!operation || operation.orgId !== this.orgId || (actor.id !== operation.actorId && actor.role !== "admin")) {
@@ -1550,14 +1526,13 @@ export class Brain {
       const proof = this.liveMode
         ? await this.liveJira!.settleUncertainEdit(actor, operation.issueKey.slice("jira:".length), operation.intendedFields ?? {})
         : false;
-      await this.commandStore.resolveUncertain(operationId, proof ? "desiredStateObserved" : "unresolved");
-      const settled = await this.commandStore.getCommand(operationId);
-      if (settled) return { ...this.commandReceipt(settled), taskUnavailable: !(await this.taskDetail(actor, operation.issueKey)) } as OperationReceipt;
+      if (proof) await this.commandStore.resolveUncertain(operationId, "desiredStateObserved");
+      const settled = (await this.commandStore.getCommand(operationId)) ?? operation;
+      return { ...this.commandReceipt(settled), taskUnavailable: !(await this.taskDetail(actor, operation.issueKey)) } as OperationReceipt;
     }
     return { ...this.commandReceipt(operation), taskUnavailable: !(await this.taskDetail(actor, operation.issueKey)) } as OperationReceipt;
   }
 
-  /** The moves the issue's workflow legally allows this viewer right now, with its current revision. */
   async taskTransitionChoices(actor: User, docId: string): Promise<TransitionChoices> {
     const detail = await this.taskDetail(actor, docId);
     if (!detail) return { status: "unavailable" };

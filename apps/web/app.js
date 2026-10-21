@@ -502,7 +502,6 @@ function renderTaskDetail(detail) {
   const links = Array.isArray(detail.links) ? detail.links : [];
   if (links.length) box.append(taskLinks(links));
   box.append(sourceLink(detail.url, "jira"));
-  // Writes ride the detail's revision and stay local to this drawer; nothing else re-renders from a draft.
   if (detail.capabilities?.edit === true && detail.revision) {
     const form = taskEditForm(detail);
     box.append(form);
@@ -510,8 +509,6 @@ function renderTaskDetail(detail) {
   }
 }
 
-// One submission, one intent: the key and the logical intent persist with the draft through retries and reloads,
-// and they die with the identity, so another persona never replays this one's keys.
 function taskIntent(docId) {
   const pending = state.task.pending;
   if (pending && pending.docId === docId) return pending;
@@ -543,7 +540,6 @@ function labeledInput(label, tag) {
   return wrap.querySelector(tag);
 }
 
-// Only changed fields ride the command (FT18); a conflict keeps the draft and tells the person what Jira has now (FT48).
 async function saveTaskEdit(detail, form, note) {
   const pending = taskIntent(detail.id);
   if (pending.saving) return;
@@ -557,8 +553,6 @@ async function saveTaskEdit(detail, form, note) {
   return await runTaskCommand(detail, form, note, { clientIntentId: pending.intentId, fields });
 }
 
-// The command's one shape for every write the drawer makes: save, keep the pending state, and read only
-// receipts — a second dispatch is never the answer to a lost response.
 async function runTaskCommand(detail, form, note, body, transitionId) {
   const pending = state.task.pending;
   if (!pending || pending.saving) return;
@@ -570,7 +564,6 @@ async function runTaskCommand(detail, form, note, body, transitionId) {
       method: transitionId ? "POST" : "PUT",
       headers: { "if-match": safeText(detail.revision), "idempotency-key": pending.idempotencyKey },
       body: JSON.stringify(body) });
-    // 202 means the write is in flight without proof; the receipt poll answers, never a resend.
     if (receipt.state === "uncertain") {
       setMessage(note, "Checking Jira…");
       pollTaskReceipt(receipt.operationId, detail.id, note);
@@ -586,7 +579,6 @@ async function runTaskCommand(detail, form, note, body, transitionId) {
     setMessage(note, "The change could not be saved.");
   } catch (error) {
     const payload = error.payload ?? {};
-    // A conflict keeps the draft; the person compares and reapplies deliberately.
     if (error.status === 412) {
       setMessage(note, "The task changed on Jira since you loaded it. Your draft is kept; reload the task to compare.");
       return;
@@ -603,7 +595,6 @@ async function runTaskCommand(detail, form, note, body, transitionId) {
   }
 }
 
-// An uncertain write is polled, not retried: the receipt is the only thing that can say what Jira did.
 function pollTaskReceipt(operationId, docId, note, delay = 5000) {
   if (!operationId) { setMessage(note, "Jira did not confirm the change. Check the task again in a moment."); return; }
   setTimeout(async () => {
@@ -627,7 +618,6 @@ function pollTaskReceipt(operationId, docId, note, delay = 5000) {
   }, delay);
 }
 
-// The moves the workflow legally allows right now; required fields are collected before Jira sees the command.
 async function taskTransitionsForm(detail) {
   const box = $("tasksDetail");
   const previous = box.querySelector(".task-transitions"); if (previous) previous.remove();

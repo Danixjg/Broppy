@@ -44,7 +44,6 @@ function demoHeaders(request: NextRequest, persona: string): Record<string, stri
   return headers;
 }
 
-// A preconditioned write passes its two headers through; everything else the browser sent is dropped.
 function writeHeaders(request: NextRequest, headers: Record<string, string>): Record<string, string> {
   const ifMatch = request.headers.get("if-match");
   const idempotencyKey = request.headers.get("idempotency-key");

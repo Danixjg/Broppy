@@ -1,7 +1,3 @@
-// The Jira task command layer: how an edit or a transition request is parsed at the HTTP boundary, reserved
-// against the operation store, and taken through the plan's §12.1 state machine — one writer dispatch per
-// reservation, uncertain on anything the receipt cannot prove, never a second dispatch for a lost receipt.
-
 import { createHash } from "node:crypto";
 import type { SourceDocument } from "@brain/types";
 
@@ -24,7 +20,6 @@ export interface CommandOperation {
   intendedFields?: Record<string, unknown>;
 }
 
-/** What one command row must be replayable from: who, the client keys, and what would change if retried. */
 export interface CommandReservation {
   orgId: string;
   actorId: string;
@@ -43,11 +38,9 @@ export interface TaskCommandStore {
   reserve(input: CommandReservation): Promise<ReserveResult>;
   getCommand(id: string): Promise<CommandOperation | undefined>;
   advanceCommand(id: string, expected: CommandState, patch: Partial<CommandOperation>): Promise<CommandOperation | undefined>;
-  /** One Jira command at a time per issue: the loser either replays the winner's receipt or is refused. */
   claimLease(issueKey: string, operationId: string, now: number): Promise<CommandLeaseResult>;
   releaseLease(issueKey: string, operationId: string): Promise<void>;
-  /** A settled live readback for an uncertain outcome; the barrier opens only when the evidence is conclusive. */
-  resolveUncertain(operationId: string, outcome: CommandOutcome | "unresolved"): Promise<CommandOperation | undefined>;
+  resolveUncertain(operationId: string, outcome: CommandOutcome): Promise<CommandOperation | undefined>;
   barrierFor(issueKey: string): Promise<CommandOperation | undefined>;
 }
 
@@ -106,22 +99,16 @@ export class MemoryTaskCommandStore implements TaskCommandStore {
     return { kind: "claimed" };
   }
   async releaseLease(issueKey: string, operationId: string) { if (this.leases.get(issueKey)?.operationId === operationId) this.leases.delete(issueKey); }
-  async resolveUncertain(operationId: string, outcome: CommandOutcome | "unresolved") {
+  async resolveUncertain(operationId: string, outcome: CommandOutcome) {
     const found = this.byId.get(operationId);
     if (!found || found.state !== "uncertain") return found && { ...found };
-    if (outcome === "unresolved") {
-      const next = await this.advanceCommand(operationId, "uncertain", { state: "uncertain" });
-      return next && { ...next };
-    }
-    const settled = await this.advanceCommand(operationId, "uncertain", { state: "applied", outcome });
-    return settled;
+    return await this.advanceCommand(operationId, "uncertain", { state: "applied", outcome });
   }
-  async barrierFor(issueKey: string) { this.byKey; return this.barriers.get(issueKey); }
+  async barrierFor(issueKey: string) { return this.barriers.get(issueKey); }
 }
 
 const terminal = (state: CommandState): boolean => state === "applied" || state === "rejected" || state === "uncertain";
 
-/** The write's envelope problems, one message per field. Every caller sees this shape; the route renders it. */
 export class CommandRejection extends Error {
   constructor(readonly status: number, readonly code: string, readonly fieldErrors: Record<string, string> = {}, readonly extra: Record<string, unknown> = {}) {
     super(code);
@@ -153,8 +140,6 @@ const commandIntentError = (fieldErrors: Record<string, string>): void => {
   if (Object.keys(fieldErrors).length) throw new CommandRejection(400, "INVALID_BODY", fieldErrors);
 };
 
-/** The request may omit If-Match (428) but never the two identity headers; both validators run before the
- * executor touches the task, so a well-formed refusal never dispatches anything (plan §12.2 step 2). */
 export function parseCommandIdentity(url: URL, ifMatchRaw: string | undefined, idempotencyRaw: string | undefined,
   body: Record<string, unknown>): { ifMatch: string; idempotencyKey: string; intentId: string } {
   if (url.search) throw new CommandRejection(400, "INVALID_BODY", {}, {});
@@ -216,7 +201,6 @@ const validCommandDate = (value: string): boolean => {
 
 export interface TransitionCommand { transitionId: string; fields: Record<string, string> }
 
-/** A transition names one legal workflow move and may carry its required fields (resolution). Nothing else. */
 export const parseTransitionCommand = (body: Record<string, unknown>): TransitionCommand => {
   const fieldErrors: Record<string, string> = {};
   const transitionId = `${body.transitionId ?? ""}`;
@@ -230,7 +214,6 @@ export const parseTransitionCommand = (body: Record<string, unknown>): Transitio
   return { transitionId, fields: rawFields && typeof rawFields === "object" ? rawFields as Record<string, string> : {} };
 };
 
-/** A Broppy revision names one synced version of a task; it preconditions writes, it is not a Jira lock token. */
 export const revisionOf = (version: number): string => `task-r${version}`;
 export const parseRevision = (raw: string): number | undefined => {
   const match = /^task-r(\d+)$/.exec(raw);
@@ -240,13 +223,12 @@ export const parseRevision = (raw: string): number | undefined => {
 export interface TransitionFieldMeta { readonly id: string; readonly name: string; readonly type: string; readonly required: boolean; readonly supported: boolean; readonly allowedValues?: ReadonlyArray<{ readonly id: string; readonly name: string }> }
 export interface TransitionMeta { readonly id: string; readonly name: string; readonly target: { readonly name: string; readonly category: "new" | "indeterminate" | "done" }; readonly fields: ReadonlyArray<TransitionFieldMeta> }
 
+/** The exact status spellings the mock corpus carries; a done task has no legal moves in the demo workflow. */
+export type DemoStatus = "open" | "in progress" | "in review" | "blocked" | "Released" | "released";
 const doneTransition: TransitionMeta = { id: "31", name: "Done", target: { name: "released", category: "done" },
   fields: [{ id: "resolutionId", name: "Resolution", type: "option", required: true, supported: true, allowedValues: [{ id: "1", name: "Done" }] }] };
 
-/** The demo corpus carries no workflow, so this fixture names what moving a demo task legally can do. Live
- * Jira gets transitions from the source itself; only these ids ride the demo. Case matches the mock's own
- * status spellings so nothing in the corpus changes style. */
-export const DEMO_WORKFLOW: ReadonlyArray<{ readonly status: string; readonly transitions: ReadonlyArray<TransitionMeta> }> = [
+export const DEMO_WORKFLOW: ReadonlyArray<{ readonly status: DemoStatus; readonly transitions: ReadonlyArray<TransitionMeta> }> = [
   { status: "open", transitions: [
     { id: "21", name: "Start progress", target: { name: "in progress", category: "indeterminate" }, fields: [] }, doneTransition] },
   { status: "in progress", transitions: [
@@ -261,8 +243,6 @@ export const DEMO_WORKFLOW: ReadonlyArray<{ readonly status: string; readonly tr
 ];
 export const demoWorkflow = (status: unknown): ReadonlyArray<TransitionMeta> =>
   (DEMO_WORKFLOW.find(entry => entry.status === status)?.transitions ?? []);
-
-/** The identity a write rides on: the preconditioned revision, the idempotency key, and the client's logical intent. */
 export interface CommandIntent { readonly ifMatch: string; readonly idempotencyKey: string; readonly intentId: string }
 
 export type TransitionChoices =
@@ -270,9 +250,9 @@ export type TransitionChoices =
   | { readonly status: "found"; readonly revision: string; readonly transitions: ReadonlyArray<TransitionMeta> };
 
 export type CommandResult =
-  | { readonly status: "unavailable" }                                                                  // 404
-  | { readonly status: "forbidden" }                                                                     // 403
-  | { readonly status: "refused"; readonly rejection: CommandRejection }                                  // 428/400/409/412/422
-  | { readonly status: "uncertain"; readonly operation: CommandOperation }                                // 202
+  | { readonly status: "unavailable" }
+  | { readonly status: "forbidden" }
+  | { readonly status: "refused"; readonly rejection: CommandRejection }
+  | { readonly status: "uncertain"; readonly operation: CommandOperation }
   | { readonly status: "rejected"; readonly operation: CommandOperation; readonly fieldErrors: Record<string, string> }
   | { readonly status: "applied"; readonly operation: CommandOperation; readonly fields: Record<string, unknown>; readonly document?: SourceDocument };

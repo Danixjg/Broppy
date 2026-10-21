@@ -252,7 +252,6 @@ export function isRoutineSync(entry) {
   return entry?.type === "document_synced" && entry.data?.contentChanged === false && entry.data?.permissionChanged === false;
 }
 
-/** The safe result words for a Jira command; the provider's own body never reaches this surface. */
 const TASK_OUTCOMES = {
   applied: "Jira accepted the change",
   uncertain: "Jira's answer is still unknown; it will be checked again",
