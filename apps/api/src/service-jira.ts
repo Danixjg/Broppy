@@ -1,5 +1,6 @@
 import type { User } from "@brain/types";
 import type { SourceOAuth } from "./source-oauth.js";
+import { CommandRejection, type EditFields, type TransitionMeta } from "./task-commands.js";
 
 export interface IssueInput {
   project: string;
@@ -17,6 +18,41 @@ export type OmittedField = "owner" | "due date";
 /** Jira answered with an error. A 400 is a definite refusal: nothing was created, so trying again cannot duplicate. */
 export class JiraRequestError extends Error {
   constructor(readonly status: number, readonly fields: string[]) { super(`Jira request failed (${status})`); }
+}
+
+/** Jira's field names on a refused edit, and the one safe message each maps to. Unknown fields fold into one
+ * base note; the raw provider body never passes through. */
+const PROVIDER_FIELD_IDS: Record<string, string> = {
+  summary: "summary", duedate: "dueDate", assignee: "assignee", priority: "priority", labels: "labels"
+};
+const PROVIDER_FIELD_MESSAGES: Record<string, string> = {
+  summary: "Jira will not accept this summary for this issue.",
+  dueDate: "Jira will not accept this due date for this issue.",
+  assignee: "Jira will not assign that account to this issue.",
+  priority: "Jira will not accept this priority for this issue.",
+  labels: "Jira will not accept these labels for this issue."
+};
+
+/** The metadata one transition carries: its target status and its required fields, with `resolution` the one
+ * provider field Broppy maps today. Required fields outside that list stay visible but unsupported. */
+function transitionMeta(item: any): TransitionMeta {
+  const fields = Object.entries((item?.fields ?? {}) as Record<string, any>).map(([providerFieldId, meta]) => {
+    const supported = providerFieldId === "resolution";
+    return {
+      id: supported ? "resolutionId" : providerFieldId,
+      name: `${meta?.name ?? providerFieldId}`,
+      type: `${meta?.schema?.type ?? "string"}`,
+      required: Boolean(meta?.required),
+      supported,
+      ...(meta?.allowedValues && Array.isArray(meta.allowedValues) && supported
+        ? { allowedValues: meta.allowedValues.map((value: any) => ({ id: `${value?.id}`, name: `${value?.name ?? ""}` })) } : {})
+    };
+  });
+  return {
+    id: `${item?.id}`, name: `${item?.name ?? ""}`,
+    target: { name: `${item?.to?.name ?? ""}`, category: item?.to?.statusCategory?.key },
+    fields
+  };
 }
 
 export interface JiraIssueAccess {
@@ -86,7 +122,7 @@ export class JiraAsUser {
   }
 
   /** Whether the person's own Jira account holds this permission, for a project or an issue. Without a Jira identity, no. */
-  private async holds(user: User, permission: "CREATE_ISSUES" | "TRANSITION_ISSUES", target: { projectKey: string } | { issueKey: string }): Promise<boolean> {
+  private async holds(user: User, permission: "CREATE_ISSUES" | "TRANSITION_ISSUES" | "EDIT_ISSUES", target: { projectKey: string } | { issueKey: string }): Promise<boolean> {
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
     if (!authorization || !site) return false;
     const email = (user.platformIdentities?.jira ?? "").trim().toLowerCase();
@@ -127,6 +163,101 @@ export class JiraAsUser {
     if (!moved.ok) throw new Error(`Jira transition failed (${moved.status})`);
     return true;
   }
+
+  /** The person's own Jira permission to change an issue's fields, as the shared token asks it for them. */
+  private async mayEdit(user: User, key: string): Promise<boolean> {
+    if (!/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(key) || user.active === false) return false;
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return false;
+    return await this.mayView(user, key, authorization, site) && await this.holds(user, "EDIT_ISSUES", { issueKey: key });
+  }
+
+  /** Applies one Jira PUT for the requested fields and reports what Broppy asked Jira to change; the receipt's task
+   * data is only what comes from a later fresh read. Field values arrive in their provider shape. */
+  async editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>> {
+    if (!await this.mayEdit(user, key)) throw new CommandRejection(403, "FORBIDDEN");
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) throw new CommandRejection(403, "FORBIDDEN");
+    const [assignee, summary, dueDate, priority, labels] = await Promise.all([
+      fields.assignee === undefined ? undefined : fields.assignee === null ? null : await this.accountId?.(fields.assignee.toLowerCase()),
+      fields.summary, fields.dueDate, fields.priority, fields.labels]);
+    if (fields.assignee && typeof assignee !== "string") {
+      throw new CommandRejection(422, "FIELD_VALIDATION_FAILED", { assignee: "Nobody with that Jira identity can be assigned here." });
+    }
+    const body = { fields: {
+      ...(summary === undefined ? {} : { summary }),
+      ...(dueDate === undefined ? {} : { duedate: dueDate }),
+      ...(priority === undefined ? {} : { priority: { name: priority } }),
+      ...(labels === undefined ? {} : { labels }),
+      ...(fields.assignee === undefined ? {} : assignee === null ? { assignee: null } : { assignee: { accountId: assignee } })
+    } };
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}`, {
+      method: "PUT", headers: { authorization, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10_000), redirect: "error" });
+    return await this.writeOutcome(response, { ...fields });
+  }
+
+  async transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>> {
+    if (!await this.mayEdit(user, key)) throw new CommandRejection(403, "FORBIDDEN");
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) throw new CommandRejection(403, "FORBIDDEN");
+    const body = { transition: { id: command.transitionId },
+      ...Object.keys(command.fields).length ? { fields: { resolution: { id: command.fields.resolutionId } } } : {} };
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+      method: "POST", headers: { authorization, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10_000), redirect: "error" });
+    return await this.writeOutcome(response, { ...command.fields });
+  }
+
+  async settleUncertainEdit(user: User, key: string, intended: Record<string, unknown>): Promise<boolean> {
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return false;
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,duedate,priority,labels,assignee`, {
+      headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!response.ok) return false;
+    const payload = await response.json() as { fields?: Record<string, any> };
+    const fields = payload.fields ?? {};
+    const matches = (name: string, value: unknown): boolean => {
+      if (value === undefined) return false;
+      if (name === "assignee") return !value ? fields.assignee === null : fields.assignee?.accountId === value;
+      if (name === "dueDate") return fields.duedate === value;
+      if (name === "priority") return fields.priority?.name === value || fields.priority?.id === value;
+      if (name === "labels") return Array.isArray(value) && JSON.stringify(fields.labels) === JSON.stringify(value);
+      return fields[name] === value;
+    };
+    return intended instanceof Object && Object.entries(intended).every(([name, value]) => value === null ? fields[name] === null || fields[name] === undefined : matches(name, value));
+  }
+
+  /** Definite Jira refusals name their safe fields here; anything else stays the executor's uncertainty. */
+  private async writeOutcome(response: Response, accepted: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (response.ok) return { ...accepted };
+    if (response.status === 403) throw new CommandRejection(403, "FORBIDDEN");
+    if (response.status === 400 || response.status === 404 || response.status === 422) {
+      const refusal: any = await response.json().catch(() => undefined);
+      const fieldErrors: Record<string, string> = {};
+      for (const field of Object.keys(refusal?.errors ?? {})) {
+        const ours = PROVIDER_FIELD_IDS[field];
+        if (ours) fieldErrors[ours] = PROVIDER_FIELD_MESSAGES[ours];
+        else fieldErrors._base = "Jira refused this change.";
+      }
+      throw new CommandRejection(422, "FIELD_VALIDATION_FAILED", fieldErrors);
+    }
+    throw new Error(`Jira request failed (${response.status})`);
+  }
+
+  /** The provider's transition listing becomes the one metadata shape every surface reads. */
+  async legalTransitions(user: User, key: string): Promise<TransitionMeta[]> {
+    if (user.active === false) return [];
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return [];
+    if (!await this.mayView(user, key, authorization, site) || !await this.holds(user, "TRANSITION_ISSUES", { issueKey: key })) return [];
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}/transitions?expand=transitions.fields`, {
+      headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!response.ok) throw new Error(`Jira transitions failed (${response.status})`);
+    const payload = await response.json() as { transitions?: unknown };
+    return (Array.isArray(payload.transitions) ? payload.transitions : []).map((item: any) => transitionMeta(item));
+  }
+
 
   private async request(user: User, path: string, body: unknown) {
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
