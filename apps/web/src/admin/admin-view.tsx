@@ -8,7 +8,7 @@ import { IDENTITY_CHANGED, WORKSPACE_DATA, WORKSPACE_RELOAD, type WorkspaceIdent
 import { applyContent, applyTier, loadPermissions, previewAccess, removeChannelMember, removeGroup, savePermissions,
   type SourcePermissions } from "./api";
 
-type AdminDocument = { docId: string; title: string; source: string };
+type AdminDocument = { docId: string; title: string; source: string; tier?: string };
 type WorkspaceData = { documents?: AdminDocument[]; capabilities?: { mode?: string } };
 type Preview = { name: string; documents: { docId: string; title: string; reason: string }[] };
 
@@ -27,8 +27,7 @@ export function AdminView() {
   const [nativeRestrictionText, setNativeRestrictionText] = useState("");
   const [nativeStatus, setNativeStatus] = useState("");
   const [nativeReload, setNativeReload] = useState(0);
-  const [memberUser, setMemberUser] = useState("ravi");
-  const [memberGroup, setMemberGroup] = useState("");
+  const [memberUser, setMemberUser] = useState("ravi");  const [memberGroup, setMemberGroup] = useState("");
   const [channelDoc, setChannelDoc] = useState("");
   const [previewUser, setPreviewUser] = useState("alex");
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -54,6 +53,13 @@ export function AdminView() {
     document.addEventListener(WORKSPACE_DATA, onData);
     return () => document.removeEventListener(WORKSPACE_DATA, onData);
   }, []);
+
+  // The tier control starts at the chosen document's own tier, so applying it narrows from where the
+  // document really is rather than from a guess.
+  useEffect(() => {
+    const current = documents.find(doc => doc.docId === docId)?.tier;
+    if (current) setTier(current);
+  }, [documents, docId]);
 
   useEffect(() => {
     const onIdentity = (event: Event) => {

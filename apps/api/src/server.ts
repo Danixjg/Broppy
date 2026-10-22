@@ -994,6 +994,7 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
         return await reply(response, 404, { error: "Not found" });
       }
       // Messages already written for the person reading them are passed on as they are.
+      if (PLAIN_REFUSALS.has(message)) return await reply(response, 400, { error: message });
       if (PLAIN_MESSAGES.has(message) || /^Live .* must be (changed|edited) /.test(message)) return await reply(response, 409, { error: message });
       if (message === "Connect source first") return await reply(response, 409, { error: "Connect this tool first, from Setup or Connectors." });
       const jira = jiraRefusal(error);
@@ -1020,11 +1021,16 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
   return { brain, orchestrator, server, shutdown };
 }
 
+/** A request that asks for more access than the person may give: the wording says which rule refused it. */
+const PLAIN_REFUSALS = new Set([
+  "Native permission edits may only narrow access",
+  "Admin tier may only narrow access"
+]);
+
 /** Errors whose wording is already meant for the person who asked, passed on unchanged. */
 const PLAIN_MESSAGES = new Set([
   "We couldn't confirm whether Jira created the task. Check Jira before trying again.",
   "Your Jira account can't create issues in that project", "Jira didn't let you mark this task done", "Only Jira tasks can be marked done",
-  "Native permission edits may only narrow access",
   "Jira refused this task. Check the project's required fields in Jira, then try again.",
   "Broppy doesn't read that Slack channel", "Broppy doesn't know that Jira project",
   "Channels with more than 100 people can't send tasks to Jira yet", "Broppy couldn't read who is in that channel",
