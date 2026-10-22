@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { User } from "@brain/types";
-import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
+import { JiraAsUser, JiraRequestError, jiraRefusal, parseComment, parseIssue } from "./service-jira.js";
 
 const maya = { id: "maya", name: "Maya", platformIdentities: { jira: "maya@acme.test" } } as unknown as User;
 const accountId = async (email: string) => email === "maya@acme.test" ? "acct-maya" : undefined;
@@ -151,5 +151,15 @@ describe("request validation", () => {
     }
     expect(parseComment({ key: "DB-16", text: "hi" })).toEqual({ key: "DB-16", text: "hi" });
     expect(() => parseComment({ key: "../x", text: "hi" })).toThrow();
+  });
+});
+
+describe("service route answer for a refused Jira request", () => {
+  it("answers a Jira 4xx with a refusal the app may retry, and unknown outcomes with 502", () => {
+    expect(jiraRefusal(new JiraRequestError(400, ["assignee"]))).toEqual({ status: 400,
+      error: "Jira refused this task. Check the project's required fields in Jira, then try again." });
+    expect(jiraRefusal(new JiraRequestError(403, []))?.status).toBe(400);
+    for (const unknown of [408, 429, 500, 503]) expect(jiraRefusal(new JiraRequestError(unknown, []))?.status).toBe(502);
+    expect(jiraRefusal(new Error("Jira access check failed (500)"))).toBeUndefined();
   });
 });

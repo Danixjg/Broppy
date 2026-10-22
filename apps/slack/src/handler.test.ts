@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { reconcileOperation } from "./actions.js";
-import { NotLinkedError } from "./broppy.js";
+import { JiraRefusedError, NotLinkedError } from "./broppy.js";
 import { handleSlack } from "./handler.js";
 import { SlackDeliveryError, verifySignature } from "./slack.js";
 import { MemoryTaskStore } from "./store.js";
@@ -168,6 +168,24 @@ describe("durable Jira actions", () => {
     ctx.deps.broppy.createIssue = async (email, input) => refused ? undefined : create(email, input);
     const value = buttonValue(await suggestion(ctx)); await click(ctx, value); expect(ctx.calls.created).toHaveLength(0);
     refused = false; await click(ctx, value); expect(ctx.calls.created).toHaveLength(1); expect(ctx.calls.messages).toHaveLength(1);
+  });
+  it("retries once Jira itself refused the request, instead of parking it in reconciliation", async () => {
+    const ctx = setup(); const create = ctx.deps.broppy.createIssue; let refused = true;
+    ctx.deps.broppy.createIssue = async (email, input) => {
+      if (refused) throw new JiraRefusedError("Broppy Jira issue refused (400)");
+      return create(email, input);
+    };
+    const value = buttonValue(await suggestion(ctx)); await click(ctx, value); expect(ctx.calls.created).toHaveLength(0);
+    refused = false; await click(ctx, value); expect(ctx.calls.created).toHaveLength(1); expect(ctx.calls.messages).toHaveLength(1);
+  });
+  it("keeps an unknown Jira outcome in reconciliation instead of retrying into a duplicate", async () => {
+    const ctx = setup();
+    ctx.deps.broppy.createIssue = async () => { throw new Error("Broppy Jira issue failed (502)"); };
+    const value = buttonValue(await suggestion(ctx));
+    await click(ctx, value); expect(ctx.calls.created).toHaveLength(0);
+    await click(ctx, value);
+    expect(ctx.calls.created).toHaveLength(0);
+    expect(ctx.calls.responses.map(r => JSON.stringify(r)).join(" ")).toContain("waiting for reconciliation");
   });
   it("keeps distinct reviewed source records pointing to the same reserved issue", async () => {
     const ctx = setup(); const one = buttonValue(await suggestion(ctx)); const two = buttonValue(await suggestion(ctx, AGREED, "1791195999.1"));

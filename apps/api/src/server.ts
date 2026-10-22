@@ -25,7 +25,7 @@ import { TenantRegistry } from "./tenants.js";
 import { People, PeopleError } from "./people.js";
 import { ServiceActor } from "./service-actor.js";
 import { ActionLimit, AgentActions, parseHistory, understandTurn } from "./agent.js";
-import { JiraAsUser, parseComment, parseIssue } from "./service-jira.js";
+import { JiraAsUser, jiraRefusal, parseComment, parseIssue } from "./service-jira.js";
 import { SupabaseTaskStore } from "../../slack/src/store.js";
 import { LiveConnector, liveConnectorsFromEnv } from "@brain/connectors/live";
 import { MockConnector, loadMockCorpus, type ImportScope } from "@brain/connectors";
@@ -996,8 +996,8 @@ export async function createApiServer(options: ApiServerOptions = {}): Promise<A
       // Messages already written for the person reading them are passed on as they are.
       if (PLAIN_MESSAGES.has(message) || /^Live .* must be (changed|edited) /.test(message)) return await reply(response, 409, { error: message });
       if (message === "Connect source first") return await reply(response, 409, { error: "Connect this tool first, from Setup or Connectors." });
-      const jira = /^Jira request failed \((\d{3})\)$/.exec(message);
-      if (jira) return await reply(response, 502, { error: `Jira refused that (${jira[1]}). Check the project key and that your Jira account can work in it.` });
+      const jira = jiraRefusal(error);
+      if (jira) return await reply(response, jira.status, { error: jira.error });
       // Every other failure is logged, so it can be found. A fault on our side (a bug, a timeout, a database or provider
       // that failed) is said to be ours; anything else is input this API could not use.
       console.error(JSON.stringify({ event: "request_failed", method: request.method, path: new URL(request.url ?? "/", "http://localhost").pathname, error: message.slice(0, 300) }));
