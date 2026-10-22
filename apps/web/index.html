@@ -15,6 +15,12 @@
     <div id="workspaceView" class="workspace-layout">
       <aside class="activity-panel" aria-label="Project activity">
         <div class="panel-heading"><div><p class="eyebrow">INBOX</p><h1>Project activity</h1></div><span id="activityCount" class="count"></span></div>
+        <section id="personalSection" class="activity-section" aria-labelledby="personalTitle" hidden>
+          <div class="section-title"><h2 id="personalTitle">My tasks</h2></div>
+          <p id="personalNote" class="muted" role="status"></p>
+          <div id="personalList" class="stack"></div>
+          <button type="button" id="personalAll" class="text-button" hidden>All tasks</button>
+        </section>
         <section class="activity-section" aria-labelledby="slackTitle"><div class="section-title"><h2 id="slackTitle">Slack threads</h2><span class="source-dot slack"></span></div><div id="slackList" class="stack"></div></section>
         <section class="activity-section" aria-labelledby="jiraTitle"><div class="section-title"><h2 id="jiraTitle">Jira tasks</h2><span class="source-dot jira"></span></div><div id="jiraList" class="stack"></div></section>
         <section class="activity-section" aria-labelledby="suggestionTitle"><div class="section-title"><h2 id="suggestionTitle">From conversation to task</h2></div><div id="suggestion" class="suggestion"></div></section>

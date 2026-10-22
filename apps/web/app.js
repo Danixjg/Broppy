@@ -3,8 +3,8 @@ import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, l
 import { showMoreLabel, visibleItems } from "./lists.js";
 import { chosenProject } from "./projects.js";
 import { linkedTask } from "./links.js";
-import { changedFields, countsText, countText, detailPath, doneTileLabel, dueText, errorText, FALLBACKS, nameText,
-  priorityText, taskQuery } from "./tasks.js";
+import { changedFields, countsText, countText, detailPath, doneTileLabel, dueText, dueUrgency, errorText,
+  FALLBACKS, movesByColumn, nameText, pickDrop, priorityText, taskQuery } from "./tasks.js";
 
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
@@ -125,9 +125,10 @@ function setView(view, { load = true } = {}) {
 // The Tasks view resets with the identity: another persona sees another authorized snapshot, never this one's pages.
 function resetTasks() {
   state.task = emptyTask();
-  for (const id of ["tasksCounts", "tasksList", "tasksBoard", "tasksDetail", "tasksProjects"]) clear($(id));
+  for (const id of ["tasksCounts", "tasksList", "tasksBoard", "tasksDetail", "tasksProjects", "personalList"]) clear($(id));
   $("tasksDetail").hidden = true; $("tasksBoard").hidden = true; $("tasksList").hidden = false;
-  setMessage($("tasksStatus"), ""); setMessage($("tasksCountsText"), "");
+  $("personalSection").hidden = true; $("personalAll").hidden = true;
+  setMessage($("tasksStatus"), ""); setMessage($("tasksCountsText"), ""); setMessage($("personalNote"), "");
   syncTaskControls();
   renderTaskProjects();
 }
@@ -389,6 +390,7 @@ async function loadTasks() {
 // One card row for a list or a board column, from the fields the response carried, and no others.
 function taskCard(card, variant) {
   const button = node("button", "activity-item"); button.type = "button";
+  button.dataset.taskId = card.id;
   button.append(node("span", "item-title", nameText(card.title)));
   const due = card.dueDate ? `Due ${fmtDay(card.dueDate)}` : dueText(card.dueDate);
   const priority = card.priority ? `${card.priority} priority` : priorityText(card.priority);
@@ -397,8 +399,20 @@ function taskCard(card, variant) {
     : [safeText(card.key), safeText(card.projectKey), due, priority].join(" · ")));
   button.append(node("span", "status-badge", nameText(card.status?.name)));
   if (card.mine === true) button.append(node("span", "badge", "Mine"));
-  button.addEventListener("click", () => openTaskDetail(card.id));
+  if (variant === "board") button.append(taskDragHandle(card));
+  button.addEventListener("click", () => openTaskDetail(card.id, { trigger: { element: button, id: card.id } }));
   return button;
+}
+
+// Clicking the handle still opens the drawer: touch and keyboard move through the Move-to menu, not a drag.
+function taskDragHandle(card) {
+  const handle = node("span", "drag-handle", "⠿");
+  handle.draggable = true;
+  handle.title = "Drag to another column";
+  handle.setAttribute("aria-hidden", "true");
+  handle.addEventListener("dragstart", event => startTaskDrag(event, card));
+  handle.addEventListener("dragend", endTaskDrag);
+  return handle;
 }
 
 function renderTaskList(response) {
@@ -448,9 +462,115 @@ function renderTaskBoard(response) {
     for (const card of cards) stack.append(taskCard(card, "board"));
     if (!cards.length) appendText(stack, "p", "empty", "No tasks");
     cell.append(heading, stack);
+    wireTaskColumn(cell, column);
     board.append(cell);
   }
   if (!columns.length) appendText(board, "p", "empty", taskEmptyText());
+}
+
+// -- Board drag: the card's own transitions decide every drop ----
+
+let drag = null;
+
+async function startTaskDrag(event, card) {
+  drag = { id: card.id, revision: "", moves: new Map(), failed: false, loaded: false };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", card.id);
+  const generation = state.identity;
+  try {
+    const choices = await call(`${detailPath(card.id)}/transitions`);
+    if (generation !== state.identity || drag?.id !== card.id) return;
+    drag.revision = safeText(choices.taskRevision);
+    drag.moves = movesByColumn(choices.transitions);
+    drag.loaded = true;
+  } catch {
+    if (generation === state.identity && drag?.id === card.id) {
+      drag.failed = true;
+      drag.loaded = true;
+      setMessage($("tasksStatus"), "Jira's moves are unavailable right now.");
+    }
+  }
+}
+
+function endTaskDrag() {
+  drag = null;
+  for (const cell of document.querySelectorAll("#tasksBoard .drop-target")) cell.classList.remove("drop-target");
+}
+
+function wireTaskColumn(cell, column) {
+  const columnId = typeof column.id === "string" ? column.id : "";
+  const columnName = typeof column.name === "string" && column.name.trim() ? column.name : FALLBACKS.column;
+  cell.addEventListener("dragover", event => {
+    if (!drag?.loaded) return;
+    if (!drag.moves.get(columnId)?.length) {
+      if ($("tasksStatus").textContent !== `No legal move to ${columnName}.`) setMessage($("tasksStatus"), `No legal move to ${columnName}.`);
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    cell.classList.add("drop-target");
+  });
+  cell.addEventListener("dragleave", event => { if (!cell.contains(event.relatedTarget)) cell.classList.remove("drop-target"); });
+  cell.addEventListener("drop", event => {
+    event.preventDefault();
+    cell.classList.remove("drop-target");
+    moveTaskByDrop(columnId, columnName);
+  });
+}
+
+const boardCard = id => [...$("tasksBoard").querySelectorAll("[data-task-id]")].find(item => item.dataset.taskId === id) ?? null;
+
+async function moveTaskByDrop(columnId, columnName) {
+  const moves = drag?.moves.get(columnId) ?? [];
+  const revision = safeText(drag?.revision);
+  const failed = drag?.failed === true;
+  const cardId = drag?.id;
+  endTaskDrag();
+  if (!cardId) return;
+  if (failed) return;
+  const drop = pickDrop(moves);
+  if (drop.kind === "none") { setMessage($("tasksStatus"), `No legal move to ${columnName}.`); return; }
+  if (drop.kind === "pick") {
+    state.task.focusMoves = cardId;
+    await openTaskDetail(cardId, { focus: true });
+    return;
+  }
+  const pending = taskIntent(cardId);
+  if (pending.saving) return;
+  pending.saving = true;
+  const badge = node("span", "badge task-saving", "Saving");
+  boardCard(cardId)?.append(badge);
+  try {
+    const receipt = await call(`${detailPath(cardId)}/transitions`, {
+      method: "POST",
+      headers: { "if-match": revision, "idempotency-key": pending.idempotencyKey },
+      body: JSON.stringify({ clientIntentId: pending.intentId, transitionId: drop.transition.id, fields: {} }) });
+    if (receipt.state === "uncertain") {
+      badge.textContent = "Checking Jira…";
+      setMessage($("tasksStatus"), "Checking Jira…");
+      pollTaskReceipt(receipt.operationId, cardId, $("tasksStatus"));
+      return;
+    }
+    if (receipt.state === "applied") {
+      badge.remove();
+      state.task.pending = undefined;
+      if (state.task.detail?.id === cardId) await openTaskDetail(cardId);
+      await loadTasks();
+      loadPersonalTasks();
+      setMessage($("tasksStatus"), `${safeText(drop.transition.name)} applied.`);
+      return;
+    }
+    badge.remove();
+    setMessage($("tasksStatus"), "The move could not be saved.");
+  } catch (error) {
+    badge.remove();
+    const payload = error.payload ?? {};
+    setMessage($("tasksStatus"), error.status === 412
+      ? "The task changed on Jira since the board loaded. Reload the task to compare."
+      : payload.error ? errorText(payload) : "The move could not be saved.");
+  } finally {
+    pending.saving = false;
+  }
 }
 
 function setTaskView(view) {
@@ -464,7 +584,8 @@ function setTaskView(view) {
 
 // The drawer is fed by the detail route alone: the address is the summary's key split into segments,
 // never workspace state, and never a classifier of why the task is out of reach.
-async function openTaskDetail(docId, { focus = false } = {}) {
+async function openTaskDetail(docId, { focus = false, trigger = null } = {}) {
+  if (trigger) state.task.trigger = trigger;
   const generation = state.identity;
   const path = detailPath(docId);
   if (!path) renderTaskUnavailable();
@@ -490,6 +611,8 @@ async function openTaskDetail(docId, { focus = false } = {}) {
 
 function renderTaskDetail(detail) {
   const box = $("tasksDetail"); clear(box); box.hidden = false;
+  state.task.detail = detail; state.task.discard = false;
+  box.append(taskDrawerClose());
   appendText(box, "p", "eyebrow", ["Jira", safeText(detail.key), nameText(detail.status?.name)].join(" · "));
   const heading = node("h3", "", nameText(detail.title)); heading.tabIndex = -1; box.append(heading);
   appendText(box, "p", "detail-meta", [
@@ -540,15 +663,23 @@ function labeledInput(label, tag) {
   return wrap.querySelector(tag);
 }
 
+const taskDraftValues = form => ({
+  summary: form.querySelector("input[name=summary]")?.value.trim() ?? "",
+  dueDate: form.querySelector("input[name=dueDate]")?.value ?? "",
+  priority: form.querySelector("select[name=priority]")?.value ?? ""
+});
+const taskDraftBase = detail => ({ summary: safeText(detail.title), dueDate: safeText(detail.dueDate), priority: safeText(detail.priority) });
+
+function taskDraftDirty() {
+  const form = $("tasksEditForm");
+  if (!state.task.detail || !form) return false;
+  return Object.keys(changedFields(taskDraftBase(state.task.detail), taskDraftValues(form))).length > 0;
+}
+
 async function saveTaskEdit(detail, form, note) {
   const pending = taskIntent(detail.id);
   if (pending.saving) return;
-  const values = {
-    summary: form.querySelector("input[name=summary]")?.value.trim() ?? "",
-    dueDate: form.querySelector("input[name=dueDate]")?.value ?? "",
-    priority: form.querySelector("select[name=priority]")?.value ?? ""
-  };
-  const fields = changedFields({ summary: detail.title, dueDate: detail.dueDate ?? "", priority: detail.priority ?? "" }, values);
+  const fields = changedFields(taskDraftBase(detail), taskDraftValues(form));
   if (!Object.keys(fields).length) { setMessage(note, "Nothing changed yet."); return; }
   return await runTaskCommand(detail, form, note, { clientIntentId: pending.intentId, fields });
 }
@@ -574,6 +705,7 @@ async function runTaskCommand(detail, form, note, body, transitionId) {
       state.task.pending = undefined;
       await openTaskDetail(detail.id);
       loadTasks();
+      loadPersonalTasks();
       return;
     }
     setMessage(note, "The change could not be saved.");
@@ -602,10 +734,11 @@ function pollTaskReceipt(operationId, docId, note, delay = 5000) {
     try {
       const receipt = await call(`/v1/task-operations/${encodeURIComponent(operationId)}`);
       if (receipt.state === "applied") {
-        setMessage(note, "Jira confirmed the change.");
         state.task.pending = undefined;
-        await openTaskDetail(docId);
-        loadTasks();
+        if (state.task.detail?.id === docId) await openTaskDetail(docId);
+        await loadTasks();
+        loadPersonalTasks();
+        setMessage(note, "Jira confirmed the change.");
         return;
       }
       if (receipt.state === "uncertain") return pollTaskReceipt(operationId, docId, note, delay);
@@ -617,6 +750,8 @@ function pollTaskReceipt(operationId, docId, note, delay = 5000) {
     }
   }, delay);
 }
+
+const optionsReady = select => select && !select.disabled && select.options.length > 0;
 
 async function taskTransitionsForm(detail) {
   const box = $("tasksDetail");
@@ -636,6 +771,10 @@ async function taskTransitionsForm(detail) {
     const choices = await call(`${detailPath(detail.id)}/transitions`);
     setMessage(note, "");
     buildTaskTransitions(form, choices);
+    if (state.task.focusMoves === detail.id) {
+      state.task.focusMoves = undefined;
+      if (optionsReady(select)) select.focus();
+    }
   } catch (error) {
     if (error.status !== 404) setMessage(note, "Jira's moves are unavailable right now.");
     form.hidden = true;
@@ -694,6 +833,61 @@ async function applyTaskTransition(detail, form, note) {
     { clientIntentId: pending.intentId, transitionId, fields }, transitionId);
 }
 
+// -- My tasks: the workspace view's personal widget, fed by the API's own personal view ----
+
+// The viewer's local today as a date-only string, so due comparisons stay calendar-day exact.
+const todayISO = () => new Intl.DateTimeFormat("en-CA").format(new Date());
+
+async function loadPersonalTasks() {
+  const generation = state.identity;
+  try {
+    const response = await call(`/v1/tasks?${taskQuery("personal")}`);
+    if (generation !== state.identity) return;
+    renderPersonalTasks(response);
+  } catch (error) {
+    if (generation !== state.identity) return;
+    renderPersonalTasks({ items: [], error: errorText(error.payload) });
+  }
+}
+
+function renderPersonalTasks(response) {
+  const note = $("personalNote"), list = $("personalList");
+  $("personalSection").hidden = false;
+  clear(list); list.hidden = true; $("personalAll").hidden = true;
+  if (response.error) { setMessage(note, response.error); return; }
+  const cards = Array.isArray(response.items) ? response.items : [];
+  if (!cards.length) { setMessage(note, "No open tasks are assigned to you with a due date today or earlier."); return; }
+  const shown = cards.slice(0, 8);
+  const today = todayISO();
+  for (const card of shown) list.append(personalCard(card, today));
+  list.hidden = false; $("personalAll").hidden = false;
+  const total = response.page?.total;
+  setMessage(note, typeof total === "number" && Number.isFinite(total) && total > shown.length
+    ? `Showing ${shown.length} of ${countText(total)} open tasks assigned to you, due by today.`
+    : `${countText(total)} open task${total === 1 ? "" : "s"} assigned to you, due by today.`);
+}
+
+function personalCard(card, today) {
+  const button = node("button", "activity-item"); button.type = "button";
+  button.dataset.taskId = card.id;
+  button.append(node("span", "item-title", nameText(card.title)));
+  const urgency = dueUrgency(card.dueDate, today);
+  const due = urgency === "overdue" ? `Overdue ${fmtDay(card.dueDate)}`
+    : urgency === "today" ? "Due today"
+    : card.dueDate ? `Due ${fmtDay(card.dueDate)}` : dueText(card.dueDate);
+  button.append(node("span", "item-meta", [safeText(card.key), card.priority ? `${card.priority} priority` : priorityText(card.priority), due].join(" · ")));
+  button.append(node("span", "status-badge", nameText(card.status?.name)));
+  button.addEventListener("click", () => { setView("tasks"); openTaskDetail(card.id, { trigger: { element: button, id: card.id } }); });
+  return button;
+}
+
+function openPersonalTasks() {
+  state.task.filters = { ...emptyTask().filters, mine: true, due: "throughToday" };
+  syncTaskControls();
+  renderTaskProjects();
+  setView("tasks");
+}
+
 
 // Linked items the synced index lets this identity open also open here, in the workspace view.
 function taskLinks(links) {
@@ -715,8 +909,28 @@ function taskLinks(links) {
 // One presentation for hidden, missing and unparseable identities; none of them says which.
 function renderTaskUnavailable() {
   const box = $("tasksDetail"); clear(box); box.hidden = false;
+  state.task.detail = undefined; state.task.discard = false;
+  box.append(taskDrawerClose());
   const heading = node("h3", "", "Task unavailable."); heading.tabIndex = -1; box.append(heading);
   appendText(box, "p", "muted", "Broppy couldn't open it. It may not exist, or this identity may not have access to it.");
+}
+
+function taskDrawerClose() {
+  const close = node("button", "text-button task-detail-close", "Close"); close.type = "button";
+  close.addEventListener("click", closeTaskDetail);
+  return close;
+}
+
+function closeTaskDetail() {
+  const box = $("tasksDetail");
+  clear(box); box.hidden = true;
+  state.task.detail = undefined; state.task.discard = false;
+  const trigger = state.task.trigger;
+  state.task.trigger = undefined;
+  const visible = item => item.offsetParent !== null;
+  const back = trigger?.element?.isConnected && visible(trigger.element) ? trigger.element
+    : trigger?.id ? [...document.querySelectorAll("[data-task-id]")].find(item => item.dataset.taskId === trigger.id && visible(item)) : null;
+  if (back) back.focus({ preventScroll: true });
 }
 // Agreements in this project's threads that could become a Jira task. The API offers them only from threads this
 // person may open, and only when creating the task here is possible; with live sources it links to Jira instead.
@@ -742,6 +956,8 @@ function renderSuggestions() {
     const summaryLabel = node("label", "", "Summary"); const summary = node("input", ""); summary.value = item.summary; summary.maxLength = 200; summary.required = true;
     summaryLabel.append(summary);
     const ownerLabel = node("label", "", "Owner"); const owner = node("select", "");
+    // The wrapping label's text includes the select's own options, so the control states its accessible name itself.
+    owner.setAttribute("aria-label", "Owner");
     const unknown = node("option", "", "Unknown / unassigned"); unknown.value = ""; owner.append(unknown);
     for (const person of state.workspace.owners) { const option = node("option", "", person.name); option.value = person.slackId; owner.append(option); }
     if (item.ownerSlackId && !state.workspace.owners.some(person => person.slackId === item.ownerSlackId)) {
@@ -1034,6 +1250,7 @@ async function loadWorkspace() {
     // A reload after an action leaves the lists as the person had them, unless their project is gone.
     if (state.project !== onScreen) expandedLists.clear();
     renderWorkspace();
+    loadPersonalTasks();
     if (practiceControls()) await loadNativePermissions();
     if (generation !== state.identity) return;
     if (!state.docs.length && state.workspace.capabilities.mode === "live") {
@@ -1536,6 +1753,31 @@ $("projectSelect").addEventListener("change", () => {
 });
 $("tasksListView").addEventListener("click", () => setTaskView("list"));
 $("tasksBoardView").addEventListener("click", () => setTaskView("board"));
+$("personalAll").addEventListener("click", openPersonalTasks);
+document.addEventListener("keydown", event => {
+  const box = $("tasksDetail");
+  if (box.hidden || state.view !== "tasks") return;
+  if (event.key === "Escape") {
+    if (taskDraftDirty() && !state.task.discard) {
+      state.task.discard = true;
+      setMessage($("tasksStatus"), "Close anyway? Unsaved edits would be lost. Press Escape again to close.");
+      return;
+    }
+    closeTaskDetail();
+  } else if (event.key === "Tab") trapDrawerFocus(event, box);
+});
+
+function trapDrawerFocus(event, box) {
+  const focusable = [...box.querySelectorAll("a[href],button,input,select,textarea")]
+    .filter(item => !item.disabled && item.offsetParent !== null);
+  if (!focusable.length) return;
+  const active = document.activeElement;
+  if (!box.contains(active)) { event.preventDefault(); focusable[0].focus(); return; }
+  if ((event.shiftKey && active === focusable[0]) || (!event.shiftKey && active === focusable.at(-1))) {
+    event.preventDefault();
+    (event.shiftKey ? focusable.at(-1) : focusable[0]).focus();
+  }
+}
 $("tasksProjects").addEventListener("change", () => {
   state.task.filters.projectIds = [...$("tasksProjects").selectedOptions].map(option => option.value).filter(Boolean);
   loadTasks();
