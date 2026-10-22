@@ -2,6 +2,13 @@
 // fields, and header text built straight from the response. The browser never recounts, re-buckets or
 // invents a value: counts travel verbatim, and a fallback word only states that a field was absent.
 
+/**
+ * @typedef {{ id: string, name: string, target?: { name?: string, category?: string },
+ *   fields?: Array<{ id: string, name: string, required?: boolean, supported?: boolean,
+ *     allowedValues?: Array<{ id: string, name: string }> }> }} TaskTransition
+ * @typedef {{ kind: "none" } | { kind: "submit", transition: TaskTransition } | { kind: "pick" }} Drop
+ */
+
 export const FALLBACKS = {
   name: "Unnamed",
   dueDate: "No due date",
@@ -23,11 +30,22 @@ export function dueUrgency(dueDate, today) {
   return dueDate < today ? "overdue" : "later";
 }
 
+// A calendar day in short words: "Nov 2". A date nobody can read says so rather than "Invalid Date".
+export function dayText(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date);
+}
+
 // A count that isn't there reads as empty, never as a zero claimed by the page.
 export const countText = value => typeof value === "number" && Number.isFinite(value) ? String(value) : "–";
 
 // Filter state and the task view become exactly one list query. Empty filters stay out of the string:
 // an absent param is the API default, which is the only meaning this side claims.
+/**
+ * @param {string} view
+ * @param {{projectIds?: string[], mine?: boolean, priority?: string, status?: string, due?: string, preset?: string, q?: string}} filters
+ * @returns {URLSearchParams}
+ */
 export function taskQuery(view, filters = {}) {
   const params = new URLSearchParams();
   params.set("view", ["board", "personal"].includes(view) ? view : "list");
@@ -53,6 +71,10 @@ export function detailPath(docId) {
 }
 
 // Jira's status category IS the board column id; a category the columns don't know falls to Unmapped.
+/**
+ * @param {TaskTransition[] | undefined} transitions
+ * @returns {Map<string, TaskTransition[]>}
+ */
 export function movesByColumn(transitions) {
   const byColumn = new Map();
   for (const transition of Array.isArray(transitions) ? transitions : []) {
@@ -65,6 +87,10 @@ export function movesByColumn(transitions) {
   return byColumn;
 }
 
+/**
+ * @param {TaskTransition[] | undefined} moves
+ * @returns {Drop}
+ */
 export function pickDrop(moves) {
   const list = Array.isArray(moves) ? moves : [];
   if (!list.length) return { kind: "none" };
@@ -91,6 +117,11 @@ export function doneTileLabel(summary = {}) {
   return done.historyComplete === true || (done.knownCount ?? 0) > 0 ? "Done this week" : "Not tracked yet";
 }
 
+/**
+ * @param {{[name: string]: string | null | undefined}} current
+ * @param {{[name: string]: string | null | undefined}} values
+ * @returns {{[name: string]: string | null | undefined}}
+ */
 export function changedFields(current = {}, values = {}) {
   const fields = {};
   for (const [name, value] of Object.entries(values)) {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FALLBACKS, changedFields, countsText, detailPath, doneTileLabel, dueText, dueUrgency, errorText, movesByColumn,
+import { FALLBACKS, changedFields, countsText, dayText, detailPath, doneTileLabel, dueText, dueUrgency, errorText, movesByColumn,
   nameText, pickDrop, priorityText, taskQuery } from "./tasks.js";
 
 test("absent card fields state their fallback and present fields pass through unchanged", () => {
@@ -89,6 +89,13 @@ test("personal widget dates name today and overdue days outright", () => {
   assert.equal(dueUrgency("2026-10-23", "2026-10-21"), "later");
   assert.equal(dueUrgency(null, "2026-10-21"), "");
   assert.equal(dueUrgency("   ", "2026-10-21"), "");
+});
+
+test("a calendar day reads in short words and an unreadable date says so", () => {
+  assert.equal(dayText("2026-11-02"), "Nov 2");
+  assert.equal(dayText("2026-10-23"), "Oct 23");
+  assert.equal(dayText("not a date"), "Unknown");
+  assert.equal(dayText(""), "Unknown");
 });
 
 test("board drop destinations come from the card's own transitions", () => {
