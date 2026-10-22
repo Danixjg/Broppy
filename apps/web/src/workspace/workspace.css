@@ -1,0 +1,28 @@
+/* The React workspace surface. The contract classes (activity-item, file-row, source-item, status-badge,
+   agreement, commitment-review, selected-detail, answer-block, citation-list, pending) keep their legacy
+   styling; this file only dresses what the new components add on top of them. */
+
+.workspace-surface .commitment-review input:focus-visible,
+.workspace-surface .commitment-review select:focus-visible,
+.workspace-surface .conclusion-form textarea:focus-visible,
+.workspace-surface .proposal input:focus-visible,
+.workspace-surface .proposal textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.workspace-surface .link-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-surface * {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

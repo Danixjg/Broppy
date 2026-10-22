@@ -12,36 +12,7 @@
   <div id="appShell"></div>
   <p id="authStatus" role="status" class="auth-status" hidden></p>
   <main id="main">
-    <div id="workspaceView" class="workspace-layout">
-      <aside class="activity-panel" aria-label="Project activity">
-        <div class="panel-heading"><div><p class="eyebrow">INBOX</p><h1>Project activity</h1></div><span id="activityCount" class="count"></span></div>
-        <div id="personalWidget"></div>
-        <section class="activity-section" aria-labelledby="slackTitle"><div class="section-title"><h2 id="slackTitle">Slack threads</h2><span class="source-dot slack"></span></div><div id="slackList" class="stack"></div></section>
-        <section class="activity-section" aria-labelledby="jiraTitle"><div class="section-title"><h2 id="jiraTitle">Jira tasks</h2><span class="source-dot jira"></span></div><div id="jiraList" class="stack"></div></section>
-        <section class="activity-section" aria-labelledby="suggestionTitle"><div class="section-title"><h2 id="suggestionTitle">From conversation to task</h2></div><div id="suggestion" class="suggestion"></div></section>
-      </aside>
-      <section class="document-panel" aria-labelledby="docHeading">
-        <div class="breadcrumb"><span id="projectCrumb">All sources</span><span aria-hidden="true">/</span><span>Confluence master</span></div>
-        <div class="doc-topline"><div><p class="eyebrow">SOURCE OF TRUTH</p><h1 id="docHeading">Project</h1></div><div id="masterBadge"></div></div>
-        <p id="workspaceNotice" class="muted" role="status">Loading accessible documents…</p>
-        <div id="masterContent" class="master-content"></div>
-        <div class="section-title"><h2>Key conclusions</h2><button type="button" id="catchUp" class="text-button">Get catch-up summary <span aria-hidden="true">↗</span></button></div>
-        <div id="conclusions" class="conclusions"></div>
-        <div id="catchUpResult" class="answer-block" hidden></div>
-        <div class="section-title documents-heading"><h2>Linked Drive documents</h2><span id="driveCount" class="muted"></span></div>
-        <div id="driveList" class="file-list"></div>
-        <div id="latestExplanation" class="muted"></div>
-        <div id="duplicate" class="duplicate" hidden></div>
-        <div class="section-title all-heading"><h2>Accessible project sources</h2><label class="sort-label">Landing view <select id="landingPreference"><option value="master">Master page</option><option value="activity">Activity</option><option value="files">Files</option></select></label></div>
-        <div id="allSources" class="source-grid"></div>
-        <div id="selectedDetail" class="selected-detail" hidden></div>
-        <div id="workspaceTrace" class="trace-panel" hidden></div>
-      </section>
-      <aside id="chatPanel" class="chat-panel" aria-labelledby="chatTitle">
-        <div class="chat-heading"><div><p class="eyebrow">ASK THE BRAIN</p><h2 id="chatTitle">Project chat</h2></div><button type="button" id="minimizeChat" class="icon-button" aria-label="Minimize chat" aria-expanded="true">−</button></div>
-        <div id="chatBody" class="chat-body"><p class="muted">Ask across sources you can access. Answers include citations.</p><div id="chatHistory" class="chat-history" aria-live="polite"></div><form id="queryForm" class="query-form"><label for="question" class="sr-only">Ask a question</label><textarea id="question" maxlength="500" placeholder="Ask across your sources…" required></textarea><button type="submit" id="askButton">Ask <span aria-hidden="true">↗</span></button></form><p id="queryStatus" role="status" class="muted"></p></div>
-      </aside>
-    </div>
+    <div id="workspaceView"></div>
     <section id="tasksView" class="wide-view" hidden aria-labelledby="tasksHeading"></section>
     <section id="adminView" class="wide-view" hidden aria-labelledby="adminHeading">
       <div class="view-heading"><p class="eyebrow">MAYA · ADMIN SIMULATION</p><h1 id="adminHeading">Source controls</h1><p>Changes update the mock source and sync through the API. Tiers and brain grants can only narrow access.</p></div>

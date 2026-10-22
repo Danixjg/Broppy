@@ -8,9 +8,3 @@ export function workspaceTarget(values) {
   }
   return `/workspace/index.html${params.size ? `?${params}` : ""}`;
 }
-
-export function linkedTask(documents, value) {
-  if (typeof value !== "string" || !value) return undefined;
-  return documents.find(doc => doc.source === "jira" && (doc.docId === value || doc.docId === `jira:${value}` ||
-    doc.title === value || doc.title.replace(/^[A-Z][A-Z0-9]*-\d+\s+/, "") === value));
-}
