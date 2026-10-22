@@ -218,6 +218,8 @@ export function auditSummary(entry) {
     case "jira_comment_added_from_slack": return `Added a comment to Jira issue ${text(data.key)} from Slack`;
     case "commitment_reviewed": return `Reviewed the commitment in ${text(data.fromDocId)}: ${text(data.action)}, revision ${count(data.revision)}`;
     case "task_status_changed": return `Marked ${doc} ${text(data.status)}`;
+    case "task_command": return `Asked Jira to ${data.action === "transition" ? "move" : "edit"} ${doc}`;
+    case "task_command_result": return `${doc}: ${TASK_OUTCOMES[data.outcome] ?? text(data.outcome)}`;
     case "slack_route_changed": return data.project ? `Sent Slack channel ${text(data.channel)}'s tasks to Jira project ${text(data.project)}` : `Stopped sending Slack channel ${text(data.channel)}'s tasks to Jira`;
     case "tier_narrowed": return `Narrowed ${doc} to the ${text(data.tier)} tier`;
     case "native_permission_changed": return `Changed the source permissions of ${doc}`;
@@ -249,3 +251,15 @@ export function auditSummary(entry) {
 export function isRoutineSync(entry) {
   return entry?.type === "document_synced" && entry.data?.contentChanged === false && entry.data?.permissionChanged === false;
 }
+
+const TASK_OUTCOMES = {
+  applied: "Jira accepted the change",
+  uncertain: "Jira's answer is still unknown; it will be checked again",
+  TASK_CHANGED: "Jira refused: the task changed first",
+  FIELD_VALIDATION_FAILED: "Jira refused: a field value was not valid",
+  UNSUPPORTED_REQUIRED_FIELD: "Jira refused: a required field must be set in Jira",
+  IDEMPOTENCY_KEY_REUSED: "Jira refused: this exact change was already sent",
+  OPERATION_IN_PROGRESS: "Jira refused: another change to this task is in flight",
+  TRANSITION_UNAVAILABLE: "Jira refused: that move is not legal right now",
+  FORBIDDEN: "Jira refused: no permission to change this task"
+};

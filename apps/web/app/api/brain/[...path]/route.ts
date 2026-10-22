@@ -37,9 +37,18 @@ async function outgoing(request: NextRequest, context: Context): Promise<{ path:
 }
 
 // A demo API on a protected Vercel preview needs the project's automation bypass secret.
-function demoHeaders(persona: string): Record<string, string> {
+function demoHeaders(request: NextRequest, persona: string): Record<string, string> {
   const headers: Record<string, string> = { "x-demo-user": persona, "content-type": "application/json" };
   if (process.env.DEMO_API_BYPASS) headers["x-vercel-protection-bypass"] = process.env.DEMO_API_BYPASS;
+  writeHeaders(request, headers);
+  return headers;
+}
+
+function writeHeaders(request: NextRequest, headers: Record<string, string>): Record<string, string> {
+  const ifMatch = request.headers.get("if-match");
+  const idempotencyKey = request.headers.get("idempotency-key");
+  if (ifMatch) headers["if-match"] = ifMatch;
+  if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
   return headers;
 }
 
@@ -52,7 +61,7 @@ async function forwardDemo(request: NextRequest, context: Context) {
   if (outbound instanceof Response) return outbound;
   try {
     const response = await fetch(new URL(outbound.path, demoApiUrl()!), { method: request.method, redirect: "error",
-      cache: "no-store", headers: demoHeaders(persona), body: outbound.body,
+      cache: "no-store", headers: demoHeaders(request, persona), body: outbound.body,
       signal: AbortSignal.timeout(60_000) });
     if (response.status === 401) {
       await response.body?.cancel();
@@ -90,7 +99,7 @@ async function forward(request: NextRequest, context: Context) {
   try {
     const response = await fetch(new URL(outbound.path, process.env.BRAIN_API_URL ?? "http://127.0.0.1:3000"), {
       method: request.method, redirect: "error", cache: "no-store",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: outbound.body,
+      headers: writeHeaders(request, { authorization: `Bearer ${token}`, "content-type": "application/json" }), body: outbound.body,
       signal: AbortSignal.timeout(60_000) });
     if (response.status === 401) {
       // The API's own reason (a company not on the list, an expired token) is logged there; the person gets one plain message.

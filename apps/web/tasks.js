@@ -63,6 +63,15 @@ export function doneTileLabel(summary = {}) {
   return done.historyComplete === true || (done.knownCount ?? 0) > 0 ? "Done this week" : "Not tracked yet";
 }
 
+export function changedFields(current = {}, values = {}) {
+  const fields = {};
+  for (const [name, value] of Object.entries(values)) {
+    if (value === current[name]) continue;
+    fields[name] = value === "" ? null : value;
+  }
+  return fields;
+}
+
 // Task routes reject with one envelope, not the legacy error string. Field notes come with it, so one
 // message carries everything the response said about a rejected query.
 export function errorText(payload) {

@@ -27,7 +27,9 @@ import type {
   User
 } from "@brain/types";
 import type { DataGeneration } from "./tasks-lens.js";
-import type { TaskCatalogAccess, TaskDetail } from "./tasks.js";
+import type { TaskCatalogAccess, TaskDetail, OperationReceipt } from "./tasks.js";
+import { CommandOperation, CommandRejection, CommandResult, EditFields, MemoryTaskCommandStore, TaskCommandStore,
+  TransitionChoices, TransitionMeta, commandPayloadHash, demoWorkflow, parseRevision, revisionOf } from "./task-commands.js";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 const reviewQueues = new Map<string, Promise<unknown>>();
@@ -58,6 +60,11 @@ export interface LiveJira {
   createIssue(user: User, input: { project: string; summary: string; description: string; assigneeEmail?: string; dueDate?: string }):
     Promise<{ key: string; url: string; omitted?: Array<"owner" | "due date"> } | undefined>;
   markDone(user: User, key: string): Promise<boolean>;
+  editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>>;
+  legalTransitions(user: User, key: string): Promise<ReadonlyArray<TransitionMeta>>;
+  transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>>;
+  /** Whether a readback of an uncertain edit now shows the desired values (`desiredStateObserved`). */
+  settleUncertainEdit(user: User, key: string, intended: Record<string, unknown>): Promise<boolean>;
 }
 
 export class Brain {
@@ -958,7 +965,8 @@ export class Brain {
       generation: () => this.taskGeneration(),
       checkSynced: (user, docIds) => this.fgaDecisions(user, docIds),
       mineDocIds: user => this.taskMineDocIds(user),
-      refreshPending: this.jobs.get("jira")?.status === "running"
+      refreshPending: this.jobs.get("jira")?.status === "running",
+      writeCapable: !this.liveMode || Boolean(this.liveJira)
     };
   }
 
@@ -1337,6 +1345,201 @@ export class Brain {
     this.connectors.jira.updateMetadata(docId, { status: "done", statusCategory: "done" });
     await this.sync("jira");
     this.audit.append("task_status_changed", actor.id, { ...this.auditDocument(docId), status: "done" });
+  }
+
+  async taskEdit(actor: User, docId: string, getIntent: { ifMatch: string; idempotencyKey: string; intentId: string },
+    fields: EditFields): Promise<CommandResult> {
+    return await this.taskCommand(actor, docId, getIntent, { action: "edit", fields });
+  }
+
+  async taskTransition(actor: User, docId: string, getIntent: { ifMatch: string; idempotencyKey: string; intentId: string },
+    command: { transitionId: string; fields: Record<string, string> }): Promise<CommandResult> {
+    return await this.taskCommand(actor, docId, getIntent, { action: "transition", fields: command.fields, transitionId: command.transitionId });
+  }
+
+  commandStore: TaskCommandStore = new MemoryTaskCommandStore();
+
+  private async taskCommand(actor: User, docId: string, getIntent: { ifMatch: string; idempotencyKey: string; intentId: string },
+    command: { action: "edit"; fields: EditFields } | { action: "transition"; transitionId: string; fields: Record<string, string> }):
+    Promise<CommandResult> {
+    this.assertOrg(actor);
+    if (actor.active === false) return { status: "forbidden" };
+    const detail = await this.taskDetail(actor, docId);
+    if (!detail) return { status: "unavailable" };
+    if (this.liveMode && !this.liveJira) return { status: "forbidden" };
+    const barrier = await this.commandStore.barrierFor(docId);
+    if (barrier) return { status: "refused", rejection: new CommandRejection(409, "OPERATION_IN_PROGRESS", {}, { operationId: barrier.id }) };
+    const reserved = await this.commandStore.reserve({
+      orgId: this.orgId, actorId: actor.id, idempotencyKey: getIntent.idempotencyKey, intentId: getIntent.intentId,
+      payloadHash: commandPayloadHash([command, getIntent.ifMatch]), issueKey: docId });
+    if (reserved.kind === "payload-conflict") {
+      return { status: "refused", rejection: new CommandRejection(409, "IDEMPOTENCY_KEY_REUSED", {}, { operationId: reserved.operation.id }) };
+    }
+    const operation = reserved.operation;
+    if (reserved.kind === "replay") return this.commandReceipt(operation, detail.document);
+    const lease = await this.commandStore.claimLease(docId, operation.id, Date.now());
+    if (lease.kind === "busy") {
+      return { status: "refused", rejection: new CommandRejection(409, "OPERATION_IN_PROGRESS", {}, { operationId: lease.operation.id }) };
+    }
+    try {
+      const checked = this.taskPreflight(detail.document, getIntent, command);
+      if (checked && checked.kind === "refusal") {
+        await this.commandStore.advanceCommand(operation.id, "reserved",
+          { state: "rejected", fieldErrors: checked.fieldErrors, outcomeCode: checked.code });
+        this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: command.action, docId, outcome: checked.code });
+        return { status: "refused", rejection: checked.rejection };
+      }
+      if (command.action === "edit") return await this.runTaskEdit(actor, docId, operation, command.fields);
+      if (checked?.kind !== "legal") throw new Error("A transition command always preflights to legal or refused.");
+      return await this.runTaskTransition(actor, docId, operation, command, checked.meta);
+    } finally {
+      await this.commandStore.releaseLease(docId, operation.id);
+    }
+  }
+
+  private taskPreflight(document: SourceDocument, getIntent: { ifMatch: string },
+    command: { action: "edit"; fields: EditFields } | { action: "transition"; transitionId: string; fields: Record<string, string> }):
+    { kind: "refusal"; code: string; fieldErrors: Record<string, string>; rejection: CommandRejection } |
+    { kind: "legal"; meta: TransitionMeta } | undefined {
+    if (parseRevision(getIntent.ifMatch) !== document.version) {
+      return { kind: "refusal", code: "TASK_CHANGED", fieldErrors: {}, rejection:
+        new CommandRejection(412, "TASK_CHANGED", {}, { currentRevision: revisionOf(document.version) }) };
+    }
+    if (command.action === "edit") return undefined;
+    const legal = this.legalTransitions(document);
+    const meta = legal.find(item => item.id === command.transitionId);
+    if (!meta) return { kind: "refusal", code: "TRANSITION_UNAVAILABLE", fieldErrors: { transitionId: "Use one of the task's currently legal transitions." }, rejection:
+      new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
+    const missing = meta.fields.filter(field => field.required && !(command.fields[field.id] ?? "").trim());
+    if (missing.length) {
+      const unsupported = missing.filter(field => !field.supported);
+      if (unsupported.length) {
+        const fieldErrors = Object.fromEntries(unsupported.map(field => [field.id, "Set this field in Jira; Broppy cannot carry it yet."]));
+        return { kind: "refusal", code: "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, rejection: new CommandRejection(422, "UNSUPPORTED_REQUIRED_FIELD", fieldErrors, { url: document.url }) };
+      }
+      const fieldErrors = Object.fromEntries(missing.map(field => [field.id, "This field is required before Jira accepts the change."]));
+      return { kind: "refusal", code: "FIELD_VALIDATION_FAILED", fieldErrors, rejection: new CommandRejection(422, "FIELD_VALIDATION_FAILED", fieldErrors) };
+    }
+    return { kind: "legal", meta };
+  }
+
+  private legalTransitions(document: SourceDocument): ReadonlyArray<TransitionMeta> {
+    return demoWorkflow(document.metadata.status);
+  }
+
+  private async runTaskEdit(actor: User, docId: string, operation: CommandOperation, fields: EditFields): Promise<CommandResult> {
+    await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing" });
+    this.audit.append("task_command", actor.id, { operationId: operation.id, action: "edit", ...this.auditDocument(docId) });
+    try {
+      const accepted = this.liveMode
+        ? await this.liveJira!.editFields(actor, docId.slice("jira:".length), fields)
+        : this.demoApplyEdit(docId, fields);
+      await this.sync("jira");
+      this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: "edit", docId, outcome: "applied" });
+      const applied = { state: "applied", outcome: "providerReceipt" } as const;
+      await this.commandStore.advanceCommand(operation.id, "executing", applied);
+      return { status: "applied", operation: { ...operation, ...applied }, fields: accepted,
+        document: this.index.documents.get(docId) };
+    } catch (error) {
+      return await this.taskCommandFailure(actor, docId, operation, "edit", error, { ...fields });
+    }
+  }
+
+  private async runTaskTransition(actor: User, docId: string, operation: CommandOperation,
+    command: { action: "transition"; transitionId: string; fields: Record<string, string> }, meta: TransitionMeta):
+    Promise<CommandResult> {
+    await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing" });
+    this.audit.append("task_command", actor.id, { operationId: operation.id, action: "transition", ...this.auditDocument(docId) });
+    try {
+      const accepted = this.liveMode
+        ? await this.liveJira!.transitionIssue(actor, docId.slice("jira:".length), command)
+        : this.demoApplyTransition(docId, meta, command.fields);
+      await this.sync("jira");
+      this.audit.append("task_command_result", actor.id, { operationId: operation.id, action: "transition", docId, outcome: "applied" });
+      const applied = { state: "applied", outcome: "providerReceipt" } as const;
+      await this.commandStore.advanceCommand(operation.id, "executing", applied);
+      return { status: "applied", operation: { ...operation, ...applied }, fields: accepted,
+        document: this.index.documents.get(docId) };
+    } catch (error) {
+      return await this.taskCommandFailure(actor, docId, operation, "transition", error,
+        { transitionId: command.transitionId, ...command.fields });
+    }
+  }
+
+  private async taskCommandFailure(actor: User, docId: string, operation: CommandOperation, action: "edit" | "transition",
+    error: unknown, intended?: Record<string, unknown>): Promise<CommandResult> {
+    const rejection = error instanceof CommandRejection ? error : undefined;
+    const next = rejection
+      ? { state: "rejected", fieldErrors: rejection.fieldErrors } as const
+      : { state: "uncertain", intendedFields: intended } as const;
+    await this.commandStore.advanceCommand(operation.id, "executing", next);
+    this.audit.append("task_command_result", actor.id, { operationId: operation.id, action, docId,
+      outcome: rejection ? rejection.code : "uncertain" });
+    return rejection
+      ? { status: "rejected", operation: { ...operation, ...next, outcomeCode: rejection.code }, fieldErrors: rejection.fieldErrors }
+      : { status: "uncertain", operation: { ...operation, ...next } };
+  }
+
+  private commandReceipt(operation: CommandOperation, document?: SourceDocument): CommandResult {
+    if (operation.state === "uncertain") return { status: "uncertain", operation };
+    if (operation.state === "rejected") return { status: "rejected", operation, fieldErrors: operation.fieldErrors ?? {} };
+    return { status: "applied", operation, fields: {}, document };
+  }
+
+  private demoApplyEdit(docId: string, fields: EditFields): Record<string, unknown> {
+    if (typeof fields.assignee === "string" && !this.users.some(user =>
+      user.platformIdentities?.jira === fields.assignee && user.active !== false)) {
+      throw new CommandRejection(422, "FIELD_VALIDATION_FAILED", { assignee: "Nobody with that Jira identity is active in this workspace." });
+    }
+    const metadata: Record<string, string> = {};
+    const accepted: Record<string, unknown> = {};
+    if (fields.assignee !== undefined) { metadata.assignee = fields.assignee ?? ""; accepted.assignee = fields.assignee; }
+    if (fields.summary !== undefined) accepted.summary = fields.summary;
+    if (fields.dueDate !== undefined) { metadata.dueDate = fields.dueDate ?? ""; accepted.dueDate = fields.dueDate; }
+    if (fields.priority !== undefined) { metadata.priority = fields.priority ?? ""; accepted.priority = fields.priority; }
+    if (fields.labels !== undefined) { metadata.labels = fields.labels.join(","); accepted.labels = [...fields.labels]; }
+    this.connectors.jira.updateDocument(docId, { ...(fields.summary !== undefined ? { title: fields.summary } : {}), metadata });
+    return accepted;
+  }
+
+  private demoApplyTransition(docId: string, meta: TransitionMeta, fields: Record<string, string>): Record<string, unknown> {
+    this.connectors.jira.updateMetadata(docId, { status: meta.target.name, statusCategory: meta.target.category });
+    return { status: meta.target, ...fields };
+  }
+
+  async taskOperationReceipt(actor: User, operationId: string): Promise<OperationReceipt> {
+    const operation = await this.commandStore.getCommand(operationId);
+    if (!operation || operation.orgId !== this.orgId || (actor.id !== operation.actorId && actor.role !== "admin")) {
+      return { status: "unavailable" };
+    }
+    const detail = await this.taskDetail(actor, operation.issueKey);
+    const receipt = { ...this.commandReceipt(operation, detail?.document), taskUnavailable: !detail } as OperationReceipt;
+    return receipt;
+  }
+
+  async settleUncertain(actor: User, operationId: string): Promise<OperationReceipt> {
+    const operation = await this.commandStore.getCommand(operationId);
+    if (!operation || operation.orgId !== this.orgId || (actor.id !== operation.actorId && actor.role !== "admin")) {
+      return { status: "unavailable" };
+    }
+    if (operation.state === "uncertain") {
+      const proof = this.liveMode
+        ? await this.liveJira!.settleUncertainEdit(actor, operation.issueKey.slice("jira:".length), operation.intendedFields ?? {})
+        : false;
+      if (proof) await this.commandStore.resolveUncertain(operationId, "desiredStateObserved");
+      const settled = (await this.commandStore.getCommand(operationId)) ?? operation;
+      return { ...this.commandReceipt(settled), taskUnavailable: !(await this.taskDetail(actor, operation.issueKey)) } as OperationReceipt;
+    }
+    return { ...this.commandReceipt(operation), taskUnavailable: !(await this.taskDetail(actor, operation.issueKey)) } as OperationReceipt;
+  }
+
+  async taskTransitionChoices(actor: User, docId: string): Promise<TransitionChoices> {
+    const detail = await this.taskDetail(actor, docId);
+    if (!detail) return { status: "unavailable" };
+    const transitions = this.liveMode
+      ? await this.liveJira!.legalTransitions(actor, docId.slice("jira:".length))
+      : demoWorkflow(detail.document.metadata.status);
+    return { status: "found", revision: revisionOf(detail.document.version), transitions: [...transitions] };
   }
 
   async narrowTier(actor: User, docId: string, tier: Tier): Promise<void> {

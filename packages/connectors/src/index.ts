@@ -196,9 +196,15 @@ export class MockConnector implements Connector {
 
   /** Changes fields such as an issue's status, as a new version of the item. */
   updateMetadata(id: string, fields: Record<string, string>): void {
+    this.updateDocument(id, { metadata: fields });
+  }
+
+  updateDocument(id: string, patch: { metadata?: Record<string, string>; title?: string; description?: string }): void {
     const doc = this.require(id);
-    this.docs.set(id, { ...doc, metadata: { ...doc.metadata, ...fields }, version: doc.version + 1,
-      updatedAt: new Date().toISOString() });
+    this.docs.set(id, { ...doc, ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      metadata: { ...doc.metadata, ...(patch.metadata ?? {}) },
+      version: doc.version + 1, updatedAt: new Date().toISOString() });
     this.emit(id, "content");
   }
 

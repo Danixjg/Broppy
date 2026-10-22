@@ -122,6 +122,37 @@ try {
   const toggledKeys = await page.evaluate(() => [...document.querySelectorAll("#tasksList .item-meta")].map(item => item.textContent.split(" · ")[0]));
   assert.deepEqual(toggledKeys, listKeys, "Back on the list, the same issue identities are shown");
   await page.waitForFunction(() => document.querySelectorAll("#tasksProjects option").length > 1);
+  const edited = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/v1/tasks/jira/PAY-101"));
+  await page.fill("#tasksEditForm input[name=summary]", "Cutover rehearsal");
+  await page.click("#tasksEditForm button[type=submit]");
+  assert.equal((await edited).status(), 200);
+  await page.waitForFunction(() => document.querySelector("#tasksDetail h3")?.textContent === "Cutover rehearsal");
+  await page.waitForFunction(() => [...document.querySelectorAll("#tasksList .item-title")].some(item => item.textContent === "Cutover rehearsal"));
+  const redated = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/v1/tasks/jira/PAY-101"));
+  await page.fill("#tasksEditForm input[name=dueDate]", "2026-11-02");
+  await page.click("#tasksEditForm button[type=submit]");
+  assert.equal((await redated).status(), 200);
+  await page.waitForFunction(() => (document.querySelector("#tasksDetail .detail-meta")?.textContent ?? "").includes("Nov 2"));
+  await page.locator("#tasksList .activity-item").filter({ hasText: "SETL-27" }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll("#taskTransitionsForm select[name=transition] option").length > 1);
+  await page.selectOption("#taskTransitionsForm select[name=transition]", "21");
+  const moved = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/transitions"));
+  await page.click("#taskTransitionsForm button[type=submit]");
+  assert.equal((await moved).status(), 200);
+  await page.waitForFunction(() => (document.querySelector("#tasksDetail .eyebrow")?.textContent ?? "").includes("in progress"));
+  await page.waitForFunction(() => [...document.querySelectorAll("#tasksList .status-badge")].some(item => item.textContent === "in progress"));
+  await page.locator("#tasksList .activity-item").filter({ hasText: "DB-12" }).first().click();
+  await page.waitForFunction(() => document.querySelector("#tasksEditForm input[name=summary]")?.value === "DB-12 Ledger database migration");
+  await page.evaluate(async () => {
+    const detail = await (await fetch("/api/brain/v1/tasks/jira/DB-12", { headers: { "x-demo-user": "maya" } })).json();
+    await fetch("/api/brain/v1/tasks/jira/DB-12", { method: "PUT", headers: {
+      "x-demo-user": "maya", "content-type": "application/json", "if-match": detail.revision, "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({ clientIntentId: crypto.randomUUID(), fields: { priority: "High" } }) });
+  });
+  await page.fill("#tasksEditForm input[name=summary]", "Moved by hand meanwhile");
+  await page.click("#tasksEditForm button[type=submit]");
+  await page.waitForFunction(() => (document.querySelector("#tasksDetail .task-edit-note")?.textContent ?? "").includes("changed on Jira"));
+  assert.equal(await page.locator("#tasksEditForm input[name=summary]").inputValue(), "Moved by hand meanwhile", "A conflict keeps the draft");
   const mayaPayloads = await page.evaluate(async () => ({
     list: await (await fetch("/api/brain/v1/tasks?view=list", { headers: { "x-demo-user": "maya" } })).json(),
     board: await (await fetch("/api/brain/v1/tasks?view=board", { headers: { "x-demo-user": "maya" } })).json(),
@@ -135,7 +166,7 @@ try {
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ view: "tasks", task: "jira:PAY-101" })}`);
   await page.waitForFunction(() => document.getElementById("workspaceMode")?.textContent === "Demo workspace");
   await page.waitForFunction(() => document.getElementById("tasksDetail")?.hidden === false);
-  assert.equal(await page.locator("#tasksDetail h3").textContent(), "PAY-101 Payment cutover", "A Tasks deep link opens the task from the detail route");
+  assert.equal(await page.locator("#tasksDetail h3").textContent(), "Cutover rehearsal", "A Tasks deep link opens the task from the detail route");
   assert.equal(await page.locator('[data-view="tasks"]').getAttribute("aria-current"), "page", "The Tasks deep link opens on the Tasks view");
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ view: "tasks", task: "jira:NOPE-999" })}`);
   await page.waitForFunction(() => document.getElementById("workspaceMode")?.textContent === "Demo workspace");
@@ -166,7 +197,7 @@ try {
     await mkdir(artifacts, { recursive: true });
     await page.screenshot({ path: `${artifacts}/workspace.png`, fullPage: true });
   }
-  console.log("Workspace browser checks passed. Review, reload, creation, identity changes, Slack navigation and chat scope, the read-only Tasks view, persona isolation and identical task refusals use the running API.");
+  console.log("Workspace browser checks passed. Review, reload, creation, identity changes, Slack navigation and chat scope, the read-only Tasks view, task edits and moves, persona isolation and identical task refusals use the running API.");
 } catch (error) {
   console.error(output.join(""));
   throw error;

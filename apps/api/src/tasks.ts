@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AccessDecision, SourceDocument, User } from "@brain/types";
+import { CommandRejection, type CommandIntent, CommandResult, type EditFields, type TransitionMeta, type TransitionChoices,
+  commandEnvelope, parseCommandIdentity, parseEditFields, parseTransitionCommand, revisionOf } from "./task-commands.js";
 import { categoryOf, columnize, filterRows, pageOf, presetRows, priorityRank, sortRows, summarize,
   type DataGeneration, type JiraStatusCategory, type TaskQuery, type TaskRow, type TaskSnapshot } from "./tasks-lens.js";
 
@@ -16,6 +18,8 @@ export interface TaskCatalogAccess {
   /** Doc ids of issues Broppy created for this person's reviewed commitments. */
   readonly mineDocIds: (user: User) => Promise<readonly string[]>;
   readonly refreshPending: boolean;
+  /** Whether task writes exist for this company at all: demo always, live only through its shared Jira grant. */
+  readonly writeCapable: boolean;
 }
 
 /** The detail's return shape: the fresh document, whether it is a task Broppy created for this person,
@@ -339,16 +343,18 @@ async function projectsRoute(input: GetTaskRoutesInput, now: Date): Promise<Rout
   return { status: 200, body: { projects } };
 }
 
-async function detailRoute(user: User, docId: string, detail: DetailPort, liveMode: boolean): Promise<Routed> {
+async function detailRoute(user: User, docId: string, detail: DetailPort, catalog: TaskCatalogAccess): Promise<Routed> {
   const shot = await detail.get(user, docId);
   if (!shot) return taskUnavailable();
-  const row = toRow(shot.document, new Set(shot.mine ? [shot.document.docId] : []), liveMode);
+  const row = toRow(shot.document, new Set(shot.mine ? [shot.document.docId] : []), catalog.liveMode);
   return {
     status: 200,
     body: {
       ...toCard(row),
+      revision: revisionOf(shot.document.version),
       description: shot.document.content,
-      links: shot.links.map(link => ({ id: link.id, title: link.title }))
+      links: shot.links.map(link => ({ id: link.id, title: link.title })),
+      capabilities: { edit: catalog.writeCapable }
     }
   };
 }
@@ -369,7 +375,7 @@ const UNAVAILABLE: Routed = {
   body: { error: { code: "TASK_UNAVAILABLE", message: "Task unavailable.", retryable: false } }
 };
 
-function taskUnavailable(): Routed {
+export function taskUnavailable(): Routed {
   return UNAVAILABLE;
 }
 
@@ -385,7 +391,7 @@ async function routeBody(input: GetTaskRoutesInput, now: Date): Promise<Routed> 
   const { url, user, list: catalog, detail } = input;
   try {
     const detailMatch = ISSUE_ID_PATH.exec(url.pathname);
-    if (detailMatch) return await detailRoute(user, `jira:${detailMatch[1]}`, detail, catalog.liveMode);
+    if (detailMatch) return await detailRoute(user, `jira:${detailMatch[1]}`, detail, catalog);
     if (url.pathname === "/v1/tasks/resolve") return await resolveRoute(url, user, detail);
     if (url.pathname === "/v1/tasks/projects") return await projectsRoute(input, now);
     if (url.pathname === "/v1/tasks") return await listRoute(input, now);
@@ -407,3 +413,123 @@ async function routeBody(input: GetTaskRoutesInput, now: Date): Promise<Routed> 
     throw error;
   }
 }
+
+export interface TaskCommandPort {
+  readonly taskEdit: (actor: User, docId: string, intent: CommandIntent, fields: EditFields) => Promise<CommandResult>;
+  readonly taskTransition: (actor: User, docId: string, intent: CommandIntent, command: { transitionId: string; fields: Record<string, string> }) => Promise<CommandResult>;
+  readonly taskTransitionChoices: (actor: User, docId: string) => Promise<TransitionChoices>;
+  readonly taskOperationReceipt: (actor: User, operationId: string) => Promise<OperationReceipt>;
+  readonly settleUncertain: (actor: User, operationId: string) => Promise<OperationReceipt>;
+}
+
+/** An operation receipt plus the fresh task document the viewer's own access allows; the task part drops when
+ * that access is gone, leaving the receipt itself readable. */
+export type OperationReceipt =
+  Extract<CommandResult, { status: "applied" | "rejected" | "uncertain" | "unavailable" }>
+  & { readonly document?: SourceDocument; readonly taskUnavailable?: boolean };
+
+const COMMAND_WRITE = /^\/v1\/tasks\/jira\/([A-Z][A-Z0-9]{1,9}-\d+)$/;
+const COMMAND_TRANSITIONS = /^\/v1\/tasks\/jira\/([A-Z][A-Z0-9]{1,9}-\d+)\/transitions$/;
+const COMMAND_RECEIPT = /^\/v1\/task-operations\/([A-Za-z0-9-]{1,64})(\/check)?$/;
+const POLL_AFTER_MS = 5_000;
+const INVALID_BODY = (message: string): Routed => ({ status: 400, body: { error: { code: "INVALID_BODY", message, retryable: false } } });
+
+export interface TaskCommandRouteInput {
+  readonly method: "PUT" | "POST" | "GET";
+  readonly url: URL;
+  readonly user: User;
+  readonly body?: unknown;
+  readonly headers: Record<string, string | undefined>;
+  readonly list: TaskCatalogAccess;
+  readonly commands: TaskCommandPort;
+}
+
+export async function taskCommandRoutes(input: TaskCommandRouteInput): Promise<Routed | undefined> {
+  const { method, url, user, list, commands } = input;
+  const transitions = COMMAND_TRANSITIONS.exec(url.pathname);
+  if (transitions) {
+    const docId = `jira:${transitions[1]}`;
+    if (method === "GET") {
+      const choices = await commands.taskTransitionChoices(user, docId);
+      return choices.status === "unavailable" ? taskUnavailable()
+        : { status: 200, body: { taskRevision: choices.revision, transitions: choices.transitions } };
+    }
+    if (method === "POST") return await submitCommand(input, raw => parseTransitionCommand(raw),
+      (user2, docId, intent, command) => commands.taskTransition(user2, docId, intent, command));
+    return undefined;
+  }
+  const issue = COMMAND_WRITE.exec(url.pathname);
+  if (issue && method === "PUT") {
+    return await submitCommand(input, raw => parseEditFields(raw),
+      (user2, docId, intent, fields) => commands.taskEdit(user2, docId, intent, fields));
+  }
+  const receipt = COMMAND_RECEIPT.exec(url.pathname);
+  if (receipt && (method === "GET" || method === "POST")) {
+    return { status: 200, body: receiptBody(await (method === "GET"
+      ? commands.taskOperationReceipt(user, receipt[1])
+      : commands.settleUncertain(user, receipt[1])), list.liveMode) };
+  }
+  return undefined;
+}
+
+async function submitCommand<T>(input: TaskCommandRouteInput, parse: (raw: Record<string, unknown>) => T,
+  run: (user: User, docId: string, intent: CommandIntent, command: T) => Promise<CommandResult>): Promise<Routed> {
+  const { url, user, list } = input;
+  if (!input.body || typeof input.body !== "object" || Array.isArray(input.body)) return INVALID_BODY("The request body must be a JSON object.");
+  try {
+    const intent = parseCommandIdentity(url, input.headers["if-match"], input.headers["idempotency-key"], input.body as Record<string, unknown>);
+    const command = parse(input.body as Record<string, unknown>);
+    const docId = `jira:${(COMMAND_TRANSITIONS.exec(url.pathname) ?? COMMAND_WRITE.exec(url.pathname))![1]}`;
+    return commandRouted(await run(user, docId, intent, command), list);
+  } catch (rejection) {
+    if (!(rejection instanceof CommandRejection)) throw rejection;
+    return { status: rejection.status, body: commandEnvelope(rejection) };
+  }
+}
+
+function commandRouted(result: CommandResult, list: TaskCatalogAccess): Routed {
+  switch (result.status) {
+    case "unavailable": return taskUnavailable();
+    case "forbidden": return { status: 403, body: { error: { code: "FORBIDDEN", message: "Your Jira access does not allow this change.", retryable: false } } };
+    case "refused": return { status: result.rejection.status,
+      body: { ...commandEnvelope(result.rejection),
+        ...(result.rejection.extra.operationId !== undefined ? { operationId: result.rejection.extra.operationId } : {}),
+        ...("transitions" in result.rejection.extra ? { transitions: result.rejection.extra.transitions } : {}),
+        ...(result.rejection.extra.currentRevision !== undefined ? { currentRevision: result.rejection.extra.currentRevision } : {}) } };
+    case "uncertain": return { status: 202, body: { operationId: result.operation.id, state: "uncertain", pollAfterMs: POLL_AFTER_MS } };
+    case "rejected": return rejectedReceipt(result);
+    case "applied": {
+      const document = result.document;
+      return { status: 200, body: {
+        operationId: result.operation.id, state: "applied", outcome: result.operation.outcome,
+        ...(document ? { task: taskWithRevision(document, list.liveMode) } : { taskUnavailable: true }),
+        invalidate: ["task", "taskQueries", "personalTasks", "workspaceLinkedTask"], requiresSnapshotReload: true } };
+    }
+  }
+}
+
+const REJECTED_STATUS: Record<string, number> = {
+  TASK_CHANGED: 412, TRANSITION_UNAVAILABLE: 409, FIELD_VALIDATION_FAILED: 422, UNSUPPORTED_REQUIRED_FIELD: 422,
+  FORBIDDEN: 403, JIRA_UNAVAILABLE: 503
+};
+
+function rejectedReceipt(result: Extract<CommandResult, { status: "rejected" }>): Routed {
+  const code = result.operation.outcomeCode ?? "FIELD_VALIDATION_FAILED";
+  const status = REJECTED_STATUS[code] ?? 422;
+  return { status, body: { ...commandEnvelope(new CommandRejection(status, code, result.fieldErrors)),
+    operationId: result.operation.id, state: "rejected" } };
+}
+
+function receiptBody(result: OperationReceipt, liveMode: boolean): unknown {
+  if (result.status === "unavailable") return UNAVAILABLE.body;
+  const document = result.document;
+  return {
+    operationId: result.operation.id, state: result.operation.state,
+    ...(result.operation.outcome ? { outcome: result.operation.outcome } : {}),
+    ...(result.operation.fieldErrors && Object.keys(result.operation.fieldErrors).length ? { fieldErrors: result.operation.fieldErrors } : {}),
+    ...(document && result.taskUnavailable !== true
+      ? { task: taskWithRevision(document, liveMode) } : { taskUnavailable: true })
+  };
+}
+const taskWithRevision = (document: SourceDocument, liveMode: boolean) =>
+  ({ ...toCard(toRow(document, new Set<string>(), liveMode)), revision: revisionOf(document.version) });

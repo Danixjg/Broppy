@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FALLBACKS, countsText, detailPath, doneTileLabel, dueText, errorText, nameText,
+import { FALLBACKS, changedFields, countsText, detailPath, doneTileLabel, dueText, errorText, nameText,
   priorityText, taskQuery } from "./tasks.js";
 
 test("absent card fields state their fallback and present fields pass through unchanged", () => {
@@ -62,6 +62,15 @@ test("counts text reads the response and the untracked done tile says so", () =>
   assert.equal(doneTileLabel({ ...summary, doneThisWeek: { knownCount: 2, historyComplete: true } }), "Done this week");
   assert.match(countsText({ ...summary, doneThisWeek: { knownCount: 2, historyComplete: true } }), /2 done this week$/);
   assert.match(countsText({ open: 0, dueThisWeek: 0, overdue: 0, doneThisWeek: { knownCount: 3, historyComplete: false } }), /3 done this week · not tracked yet/);
+});
+
+test("only changed fields ride a save; cleared inputs ride as null", () => {
+  const detail = { summary: "Ledger database migration", dueDate: "2026-10-23", priority: "Medium" };
+  assert.deepEqual(changedFields(detail, { summary: detail.summary, dueDate: detail.dueDate, priority: "Low" }),
+    { priority: "Low" });
+  assert.deepEqual(changedFields(detail, { summary: "Renamed", dueDate: "", priority: detail.priority }),
+    { summary: "Renamed", dueDate: null });
+  assert.deepEqual(changedFields(detail, { summary: detail.summary }), {}, "an unchanged form saves nothing");
 });
 
 test("task route errors read as one plain message", () => {

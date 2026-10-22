@@ -136,6 +136,10 @@ describe("tasks with live sources and a connected Jira", () => {
       canCreate: async () => true,
       createIssue: async (user, input) => { created.push({ user: user.id, input }); return { key: "DB-77", url: "https://acme.atlassian.net/browse/DB-77" }; },
       markDone: async (_user, key) => { closed.push(key); return true; },
+      editFields: async (_user, key, fields) => ({ ...fields }),
+      legalTransitions: async () => [],
+      transitionIssue: async (_user, _key, command) => ({ ...command.fields }),
+      settleUncertainEdit: async () => false,
       ...overrides
     };
     return { jira, created, closed };
