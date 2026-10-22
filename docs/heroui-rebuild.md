@@ -49,3 +49,26 @@ Rules that hold for every unit:
 - No narrator comments. The assertion or the prop name carries the meaning.
 - Each unit ends green: `pnpm test`, `pnpm typecheck`, `pnpm --filter @brain/web build:workspace`, and the browser
   check.
+
+## Where the rebuild stands
+
+Done and green: the theme and its generator, the shell, the Tasks view, the workspace view, and the admin, compliance
+and sync-health views. `apps/web/app.js` is down to 104 lines and holds only auth, the identity, the view switching and
+the seams.
+
+Still to do, in order:
+
+1. The connectors, people and setup pages.
+2. Browser journeys for the admin, compliance and sync-health views. The contract proves the shell, the workspace view
+   and the Tasks view today; these three are not asserted yet, and the repo's rule is that a change to permissions
+   covers the allowed and the denied case.
+3. The Next app pages: landing, sign-in, sign-up, invited, support, privacy and legal. HeroUI's stylesheet needs
+   Tailwind v4's PostCSS plugin inside Next, so that is the first task of the unit.
+4. The cleanup, which is where the last of the old paint goes: delete the legacy stylesheet and the leftover legacy
+   modules (`answer.js`, `permissions.js`, `links.js`), move what the React surfaces still import from the web app root
+   into `src/lib`, and take the last 104 lines of `app.js` (auth, identity, view switching) into React so the legacy
+   controller can go entirely.
+
+The ported surfaces keep their legacy contract classes on purpose, so the browser journeys keep passing while the
+legacy stylesheet still exists. When the stylesheet goes, those classes become plain names and the journeys must keep
+reading them.
