@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BroppyClient, NotLinkedError } from "./broppy.js";
+import { BroppyClient, JiraRefusedError, NotLinkedError } from "./broppy.js";
 
 describe("BroppyClient", () => {
   it("sends the service secret and the Slack email, never a demo header", async () => {
@@ -34,6 +34,13 @@ describe("BroppyClient", () => {
     expect(await client.createIssue("m@x.test", { project: "DB", summary: "s", description: "d" })).toEqual({ key: "DB-9", url: "https://j/DB-9" });
     expect(await client.comment("m@x.test", "DB-9", "t")).toBe(false);
     expect(seen).toEqual(["https://api.test/v1/service/jira/issue", "https://api.test/v1/service/jira/comment"]);
+  });
+  it("classifies an API refusal as retryable, and anything else as an unknown outcome", async () => {
+    const client = new BroppyClient("https://api.test", "s".repeat(32), async () => new Response(JSON.stringify({ error: "Jira refused this task" }), { status: 400 }));
+    await expect(client.createIssue("m@x.test", { project: "DB", summary: "s", description: "d" })).rejects.toBeInstanceOf(JiraRefusedError);
+    const unknown = new BroppyClient("https://api.test", "s".repeat(32), async () => new Response("{}", { status: 502 }));
+    await expect(unknown.createIssue("m@x.test", { project: "DB", summary: "s", description: "d" }))
+      .rejects.toThrow("Broppy Jira issue failed (502)");
   });
   it("resolves active actors and reads a minimal issue observation through authorized service routes", async () => {
     const seen: any[] = [];
