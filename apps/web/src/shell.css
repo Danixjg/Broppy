@@ -1,0 +1,20 @@
+/* The shell's own states, on top of HeroUI's tokens. The legacy stylesheet still dresses the
+   views that have not moved into React yet; this file only covers the chrome React owns. */
+[data-view].active {
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+}
+
+.live-dot {
+  width: .45rem;
+  height: .45rem;
+  border-radius: 999px;
+  background: var(--success);
+  display: inline-block;
+}
+
+.environment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}

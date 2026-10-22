@@ -11,6 +11,7 @@
     "rust:check": "cargo fmt -p brain-core --check && cargo clippy --locked --workspace --all-targets --features node -- -D warnings",
     "rust:smoke": "pnpm rust:build && tsx scripts/smoke-rust.ts",
     "dataset": "pnpm rust:build && tsx data/generate.ts",
+    "theme:heroui": "node tools/heroui-theme.mjs",
     "bench": "pnpm rust:build && tsx --expose-gc apps/api/src/bench.ts",
     "doctor:sso": "pnpm rust:build && tsx --env-file=.env.local apps/api/src/doctor.ts",
     "llm:usage": "pnpm rust:build && tsx --env-file=.env.local apps/api/src/llm-usage.ts",

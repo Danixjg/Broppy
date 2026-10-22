@@ -4,6 +4,7 @@ import { Shell } from "./shell";
 import "./theme.css";
 import "../styles.css";
 import "./ui.css";
+import "./shell.css";
 
 const mount = document.getElementById("appShell");
 if (!mount) throw new Error("Workspace shell mount is missing.");

@@ -520,7 +520,7 @@ h3 {
 /* --muted-foreground comes from src/theme.css. connectors.html loads this file on its own, hence the fallbacks. */
 .sort-label {
   font-size:.72rem;
-  color:var(--muted-foreground, #61717f)
+  color:var(--muted, #61717f)
 }
 .sort-label select {
   width:auto;
@@ -1021,7 +1021,7 @@ td button {
   font-size:.8rem
 }
 .empty {
-  color:var(--muted-foreground, #61717f);
+  color:var(--muted, #61717f);
   font-size:.8rem;
   font-style:italic
 }
@@ -1215,7 +1215,7 @@ td button {
   font-size:.85rem;
 }
 .architecture-grid p {
-  color:var(--muted-foreground, #61717f);
+  color:var(--muted, #61717f);
   font-size:.75rem;
   line-height:1.45;
   margin:.3rem 0 0;
@@ -1254,7 +1254,7 @@ td button {
   font-size:.78rem;
 }
 .trace-time {
-  color:var(--muted-foreground, #61717f);
+  color:var(--muted, #61717f);
   font-size:.7rem;
 }
 .commitment-review { display:grid; gap:.55rem; margin:.75rem 0; }
