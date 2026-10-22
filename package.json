@@ -19,7 +19,7 @@
     "llm:calibrate": "pnpm rust:build && tsx --env-file=.env.local apps/api/src/llm-calibrate.ts",
     "scenarios": "pnpm rust:build && vitest run apps/api/src/worked-examples.test.ts --update",
     "scenarios:model": "pnpm rust:build && WORKED_EXAMPLES=model node --env-file=.env.local node_modules/vitest/vitest.mjs run apps/api/src/worked-examples.test.ts",
-    "test": "pnpm rust:build && pnpm rust:test && vitest run --pool=forks && node --test apps/web/*.nodecheck.js",
+    "test": "pnpm rust:build && pnpm rust:test && vitest run --pool=forks && node --test \"apps/web/**/*.nodecheck.js\"",
     "typecheck": "tsc --noEmit && pnpm --filter @brain/web typecheck"
   },
   "devDependencies": {

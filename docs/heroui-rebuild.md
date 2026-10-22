@@ -1,7 +1,8 @@
 # HeroUI rebuild of the Broppy web UI
 
 Branch: `feat/heroui-ui` (from `main` after WP-C #79 and WP-D #81 landed).
-Status: foundation in progress.
+Status: foundation and shell in place; the Tasks view now runs on React and HeroUI, with the legacy
+controller out of that surface. The workspace view is next.
 
 ## Why
 

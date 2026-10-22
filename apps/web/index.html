@@ -15,12 +15,7 @@
     <div id="workspaceView" class="workspace-layout">
       <aside class="activity-panel" aria-label="Project activity">
         <div class="panel-heading"><div><p class="eyebrow">INBOX</p><h1>Project activity</h1></div><span id="activityCount" class="count"></span></div>
-        <section id="personalSection" class="activity-section" aria-labelledby="personalTitle" hidden>
-          <div class="section-title"><h2 id="personalTitle">My tasks</h2></div>
-          <p id="personalNote" class="muted" role="status"></p>
-          <div id="personalList" class="stack"></div>
-          <button type="button" id="personalAll" class="text-button" hidden>All tasks</button>
-        </section>
+        <div id="personalWidget"></div>
         <section class="activity-section" aria-labelledby="slackTitle"><div class="section-title"><h2 id="slackTitle">Slack threads</h2><span class="source-dot slack"></span></div><div id="slackList" class="stack"></div></section>
         <section class="activity-section" aria-labelledby="jiraTitle"><div class="section-title"><h2 id="jiraTitle">Jira tasks</h2><span class="source-dot jira"></span></div><div id="jiraList" class="stack"></div></section>
         <section class="activity-section" aria-labelledby="suggestionTitle"><div class="section-title"><h2 id="suggestionTitle">From conversation to task</h2></div><div id="suggestion" class="suggestion"></div></section>
@@ -47,24 +42,7 @@
         <div id="chatBody" class="chat-body"><p class="muted">Ask across sources you can access. Answers include citations.</p><div id="chatHistory" class="chat-history" aria-live="polite"></div><form id="queryForm" class="query-form"><label for="question" class="sr-only">Ask a question</label><textarea id="question" maxlength="500" placeholder="Ask across your sources…" required></textarea><button type="submit" id="askButton">Ask <span aria-hidden="true">↗</span></button></form><p id="queryStatus" role="status" class="muted"></p></div>
       </aside>
     </div>
-    <section id="tasksView" class="wide-view" hidden aria-labelledby="tasksHeading">
-      <div class="view-heading"><p class="eyebrow">JIRA TASKS</p><h1 id="tasksHeading">Tasks</h1><p>Everything Jira reports that this identity can see, read-only. Counts and board columns come from the API's one authorized snapshot; Broppy doesn't recount, re-bucket or estimate them.</p></div>
-      <p id="tasksCountsText" class="sr-only" role="status"></p>
-      <div id="tasksCounts" class="health-grid"></div>
-      <div class="toolbar"><div role="group" aria-label="List or board"><button type="button" id="tasksListView" class="secondary-button" aria-pressed="true">List</button><button type="button" id="tasksBoardView" class="secondary-button" aria-pressed="false">Board</button></div><button type="button" id="tasksClear" class="text-button">Clear filters</button><span id="tasksStatus" role="status" class="muted"></span></div>
-      <form id="tasksFilterForm" class="audit-search"><div class="task-filter-row">
-        <label>Projects<select id="tasksProjects" multiple size="4"></select></label>
-        <label class="audit-toggle"><input id="tasksMine" type="checkbox">Mine only</label>
-        <label>Priority<select id="tasksPriority"><option value="">All priorities</option><option>Highest</option><option>High</option><option>Medium</option><option>Low</option><option>Lowest</option></select></label>
-        <label>Status<select id="tasksStatusFilter"><option value="">All statuses</option></select></label>
-        <label>Due<select id="tasksDue"><option value="any">Any due date</option><option value="today">Due today</option><option value="throughToday">Through today</option><option value="thisWeek">Due this week</option><option value="overdue">Overdue</option><option value="none">No due date</option></select></label>
-        <label>Show<select id="tasksPreset"><option value="">All tasks</option><option value="open">Open</option><option value="dueThisWeek">Due this week</option><option value="overdue">Overdue</option><option value="doneThisWeek">Done</option></select></label>
-        <label>Search<input id="tasksSearch" type="search" maxlength="200" placeholder="Words in a key, title or project" autocomplete="off"></label>
-      </div></form>
-      <div id="tasksList"></div>
-      <div id="tasksBoard" class="health-grid" hidden></div>
-      <div id="tasksDetail" class="selected-detail" hidden></div>
-    </section>
+    <section id="tasksView" class="wide-view" hidden aria-labelledby="tasksHeading"></section>
     <section id="adminView" class="wide-view" hidden aria-labelledby="adminHeading">
       <div class="view-heading"><p class="eyebrow">MAYA · ADMIN SIMULATION</p><h1 id="adminHeading">Source controls</h1><p>Changes update the mock source and sync through the API. Tiers and brain grants can only narrow access.</p></div>
       <div class="admin-grid"><form id="contentForm" class="surface"><h2>Edit source content</h2><label for="adminDoc">Accessible document</label><select id="adminDoc" required></select><label for="adminContent">Replacement content</label><textarea id="adminContent" required maxlength="50000" placeholder="Enter the full replacement content"></textarea><button type="submit">Apply content change</button></form>

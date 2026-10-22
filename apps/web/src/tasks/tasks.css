@@ -1,0 +1,66 @@
+/* The React tasks surface. The contract classes (activity-item, surface, badge, empty, status-badge,
+   drag-handle, drop-target, task-saving, task-detail-close) keep their legacy styling; this file only
+   dresses what the new components add on top of them. */
+.tasks-surface .task-field {
+  display: grid;
+  gap: .3rem;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tasks-surface .task-filter-row {
+  align-items: start;
+}
+
+.tasks-surface {
+  color: var(--foreground);
+}
+
+.tasks-surface .task-select {
+  width: 100%;
+  padding: .5rem .6rem;
+  font-family: inherit;
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--field-foreground, var(--foreground));
+  background: var(--field-background, var(--surface));
+  border: 1px solid var(--field-border, var(--border));
+  border-radius: var(--field-radius, .75rem);
+}
+
+.tasks-surface .task-select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.tasks-surface .task-edit,
+.tasks-surface .task-transitions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--separator);
+}
+
+.tasks-surface .task-edit .button,
+.tasks-surface .task-transitions .button {
+  justify-self: start;
+}
+
+.tasks-surface .linked-items {
+  margin-top: 1rem;
+}
+
+.tasks-surface .linked-items .text-button {
+  min-height: 1.5rem;
+  padding: .2rem 0;
+  text-align: left;
+}
+
+#personalAll {
+  min-height: 1.75rem;
+  padding: .35rem 0;
+}
+
+.tasks-surface .demo-note {
+  margin: .5rem 0;
+}
