@@ -1,0 +1,20 @@
+/* The React sync health surface. The contract classes (health-grid, surface, toolbar, architecture) keep
+   their legacy styling; this file only dresses what the new components add. */
+
+.operations-surface .health-grid .surface {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .3rem;
+}
+
+.operations-surface .health-grid .surface p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .operations-surface * {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

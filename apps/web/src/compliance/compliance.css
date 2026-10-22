@@ -1,0 +1,21 @@
+/* The React compliance console. The contract classes (audit-search, toolbar, audit-summary, audit-toggle,
+   table-wrap, proof-panel, trace-panel) keep their legacy styling; this file only dresses what the new
+   components add. */
+
+.compliance-surface td .button {
+  height: auto;
+  min-height: 0;
+}
+
+.compliance-surface .proof-panel h2:focus-visible,
+.compliance-surface .trace-panel h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compliance-surface * {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

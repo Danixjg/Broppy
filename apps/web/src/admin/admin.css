@@ -1,0 +1,18 @@
+/* The React admin surface. The contract classes (admin-grid, surface, preview-result, danger-button,
+   secondary-button) keep their legacy styling; this file only dresses what the new components add. */
+
+.admin-surface .surface .button {
+  justify-self: start;
+}
+
+.admin-surface .preview-result:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-surface * {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
