@@ -278,43 +278,61 @@ export function WorkspaceView() {
   };
 
   const createTask = async (item: { id: string; revision: number; threadDocId: string; sentence: string }) => {
+    const identity = identityRef.current;
     shellStatus("Creating the Jira task…");
     try {
       const result = await createTaskApi({
         threadDocId: item.threadDocId, sentence: item.sentence, proposalId: item.id, revision: item.revision
       });
+      if (identity !== identityRef.current) return;
       await load();
+      if (identity !== identityRef.current) return;
       shellStatus([`Created ${safeText(result.title)}.`, ...omittedNotes(result.omitted)].join(" "));
       const created = payloadRef.current?.documents.find(doc => doc.docId === result.docId);
       if (created) openDoc(created);
     } catch (error) {
+      if (identity !== identityRef.current) return;
       shellStatus(messageOf(error, "The Jira task could not be created."));
     }
   };
 
   const markDone = async (doc: WorkspaceDocument) => {
+    const identity = identityRef.current;
     setBusyDoc(doc.docId);
     shellStatus("Marking the task done…");
     try {
       await markDoneApi(doc.docId);
+      if (identity !== identityRef.current) return;
       await load();
+      if (identity !== identityRef.current) return;
       shellStatus(`${doc.title} is done.`);
     } catch (error) {
+      if (identity !== identityRef.current) return;
       shellStatus(messageOf(error, "The task could not be marked done."));
     } finally {
-      setBusyDoc(null);
+      if (identity === identityRef.current) setBusyDoc(null);
     }
   };
 
-  const appendConclusion = async (value: string) => {
-    if (!master) return;
+  // One conclusion save at a time, from a base that has not moved under it: the second submit waits, the first
+  // failing submit keeps the draft it was given.
+  const [conclusionBusy, setConclusionBusy] = useState(false);
+  const appendConclusion = async (form: HTMLFormElement) => {
+    if (!master || conclusionBusy) return;
+    const value = new FormData(form).get("conclusion");
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) return;
+    setConclusionBusy(true);
     shellStatus("Saving conclusion…");
     try {
-      await post("/v1/admin/content", { docId: master.docId, content: `${master.content.trim()}\n${value}` });
+      await post("/v1/admin/content", { docId: master.docId, content: `${master.content.trim()}\n${text}` });
       await load();
+      form.reset();
       shellStatus("Conclusion saved to Confluence master.");
     } catch (error) {
       shellStatus(messageOf(error, "The conclusion could not be saved."));
+    } finally {
+      setConclusionBusy(false);
     }
   };
 
@@ -339,6 +357,9 @@ export function WorkspaceView() {
       historyRef.current = [];
       setQuestion("");
       setQueryStatus("");
+      // A switch happens while the answer may still be in flight; its guard drops it, leaving this persona's own.
+      setAsking(false);
+      setBusyDoc(null);
       setCatchUpState(null);
       setTraceState(null);
       setPreviewMerge(null);
@@ -551,15 +572,11 @@ export function WorkspaceView() {
           {role === "admin" && master?.content ? (
             <form className="conclusion-form" onSubmit={event => {
               event.preventDefault();
-              const value = new FormData(event.currentTarget).get("conclusion");
-              const text = typeof value === "string" ? value.trim() : "";
-              if (!text) return;
-              event.currentTarget.reset();
-              void appendConclusion(text);
+              void appendConclusion(event.currentTarget);
             }}>
               <label htmlFor="newConclusion">Append conclusion to master</label>
               <textarea id="newConclusion" name="conclusion" required maxLength={1000} placeholder="Write a conclusion grounded in the project sources" />
-              <button type="submit">Append conclusion</button>
+              <button type="submit" disabled={conclusionBusy}>Append conclusion</button>
             </form>
           ) : null}
         </div>

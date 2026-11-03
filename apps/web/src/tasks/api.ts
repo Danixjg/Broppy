@@ -107,8 +107,15 @@ export async function call<T>(path: string, options: CommandOptions = {}): Promi
     throw new ApiError(response.status, null, "API returned an invalid response");
   }
   if (!response.ok) {
-    if (response.status === 401) document.dispatchEvent(new CustomEvent(SESSION_LOST));
-    const envelope = payload as { error?: unknown } | null;
+    const envelope = payload as { error?: unknown; code?: unknown } | null;
+    if (response.status === 401) {
+      // The proxy says why: a session nobody can use (signed_out), or one the API does not accept (account_rejected),
+      // which the page must not end, because signing back in would return to the same refused session.
+      document.dispatchEvent(new CustomEvent(SESSION_LOST, { detail: {
+        code: typeof envelope?.code === "string" ? envelope.code : "",
+        message: typeof envelope?.error === "string" ? envelope.error : "Request failed"
+      } }));
+    }
     const message = typeof envelope?.error === "string" ? envelope.error : "Request failed";
     throw new ApiError(response.status, payload, message);
   }

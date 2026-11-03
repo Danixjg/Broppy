@@ -99,9 +99,13 @@ document.addEventListener(WORKSPACE_DATA, event => {
 // A task write changes the corpus, so the workspace surface reads it again.
 document.addEventListener(TASKS_CHANGED, () => { document.dispatchEvent(new CustomEvent(WORKSPACE_RELOAD)); });
 $("user").addEventListener("change", resetIdentity);
-document.addEventListener(SESSION_LOST, () => {
+document.addEventListener(SESSION_LOST, event => {
   // The header's sign-in controls stay app.js's domain, so the React surfaces announce the loss here.
-  if (state.authMode !== "auth0" || !state.signedIn) return;
+  const detail = event instanceof CustomEvent ? event.detail : undefined;
+  if (state.authMode !== "auth0") return;
+  // The proxy's own reason: the account is refused but the session is real, so the controls stay as they are.
+  if (detail?.code === "account_rejected") { updateAuthUi(detail.message ?? ""); return; }
+  if (!state.signedIn) return;
   state.signedIn = false;
   state.me = null;
   updateAuthUi("Your session ended. Log in again.");

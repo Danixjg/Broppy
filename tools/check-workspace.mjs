@@ -70,8 +70,18 @@ try {
   card = page.locator(`[data-proposal-id="${pending.id}"]`);
   assert.equal(await card.getByLabel("Summary", { exact: true }).inputValue(), summary, "Saved review survives page reload");
   const created = page.waitForResponse(response => response.url().endsWith("/v1/tasks") && response.request().method() === "POST");
+  // The creation is left in flight past the identity switch, so its landing writes nothing anyone else reads.
+  await page.route("**/api/brain/v1/tasks", (route, request) => {
+    if (!request.url().split("?")[0].endsWith("/v1/tasks") || request.method() !== "POST") { route.continue().catch(() => undefined); return; }
+    setTimeout(() => { route.continue().catch(() => undefined); }, 1200);
+  });
   await card.getByRole("button", { name: /Create Jira task/ }).click();
+  await page.selectOption("#user", "alex");
   const response = await created;
+  assert.equal(!(await page.locator("#globalStatus").textContent())?.includes("Created"), true, "A task created for a switched-away persona does not announce itself later");
+  await page.unroute("**/api/brain/v1/tasks");
+  await page.selectOption("#user", "ravi");
+  await page.waitForFunction(() => (document.getElementById("workspaceNotice")?.textContent ?? "").includes("accessible sources"), undefined, { timeout: 8000 });
   assert.equal(response.status(), 201);
   const result = await response.json();
   const docId = result.docId || result.task?.docId;
@@ -298,7 +308,15 @@ try {
   await page.selectOption("#user", "alex");
   await page.waitForFunction(() => document.getElementById("catchUpResult")?.hidden === true, undefined, { timeout: 4000 });
   await page.unroute("**/api/brain/v1/catch-up");
+  // A persona's own answer, still in flight, never blocks the composer of the one who is viewing now.
+  await page.route("**/api/brain/v1/query", route => setTimeout(() => { route.continue().catch(() => undefined); }, 400));
+  await page.locator("#question").fill("Question the old persona asked");
+  await page.locator("#askButton").click();
+  await page.waitForFunction(() => document.getElementById("askButton")?.disabled === true, undefined, { timeout: 4000 });
   await page.selectOption("#user", "maya");
+  await page.waitForFunction(() => document.getElementById("askButton")?.disabled === false, undefined, { timeout: 4000 });
+  await page.waitForFunction(() => document.querySelectorAll("#chatHistory .pending").length === 0, undefined, { timeout: 4000 });
+  await page.unroute("**/api/brain/v1/query");
   await page.waitForFunction(() => document.getElementById("adminTab")?.hidden === false);
   // A rejected session leaves nothing on the page: the API read fails, so the page keeps nothing it showed.
   const lostPage = await browser.newPage();
