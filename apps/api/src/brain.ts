@@ -29,7 +29,7 @@ import type {
 import type { DataGeneration } from "./tasks-lens.js";
 import type { TaskCatalogAccess, TaskDetail, OperationReceipt } from "./tasks.js";
 import { CommandOperation, CommandRejection, CommandResult, EditFields, MemoryTaskCommandStore, TaskCommandStore,
-  TransitionChoices, TransitionMeta, commandPayloadHash, demoWorkflow, parseRevision, revisionOf } from "./task-commands.js";
+  TransitionChoices, TransitionMeta, UncertainIntent, commandPayloadHash, demoWorkflow, parseRevision, revisionOf } from "./task-commands.js";
 
 const sources: Source[] = ["slack", "jira", "confluence", "drive"];
 const reviewQueues = new Map<string, Promise<unknown>>();
@@ -63,8 +63,8 @@ export interface LiveJira {
   editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>>;
   legalTransitions(user: User, key: string): Promise<ReadonlyArray<TransitionMeta>>;
   transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>>;
-  /** Whether a readback of an uncertain edit now shows the desired values (`desiredStateObserved`). */
-  settleUncertainEdit(user: User, key: string, intended: Record<string, unknown>): Promise<boolean>;
+  /** Whether a readback of an uncertain write now shows the desired fields and status (`desiredStateObserved`). */
+  settleUncertainEdit(user: User, key: string, intended: UncertainIntent): Promise<boolean>;
 }
 
 export class Brain {
@@ -1382,7 +1382,7 @@ export class Brain {
       return { status: "refused", rejection: new CommandRejection(409, "OPERATION_IN_PROGRESS", {}, { operationId: lease.operation.id }) };
     }
     try {
-      const checked = this.taskPreflight(detail.document, getIntent, command);
+      const checked = await this.taskPreflight(actor, detail.document, getIntent, command);
       if (checked && checked.kind === "refusal") {
         await this.commandStore.advanceCommand(operation.id, "reserved",
           { state: "rejected", fieldErrors: checked.fieldErrors, outcomeCode: checked.code });
@@ -1397,16 +1397,25 @@ export class Brain {
     }
   }
 
-  private taskPreflight(document: SourceDocument, getIntent: { ifMatch: string },
+  private async taskPreflight(actor: User, document: SourceDocument, getIntent: { ifMatch: string },
     command: { action: "edit"; fields: EditFields } | { action: "transition"; transitionId: string; fields: Record<string, string> }):
-    { kind: "refusal"; code: string; fieldErrors: Record<string, string>; rejection: CommandRejection } |
-    { kind: "legal"; meta: TransitionMeta } | undefined {
+    Promise<{ kind: "refusal"; code: string; fieldErrors: Record<string, string>; rejection: CommandRejection } |
+    { kind: "legal"; meta: TransitionMeta } | undefined> {
     if (parseRevision(getIntent.ifMatch) !== document.version) {
       return { kind: "refusal", code: "TASK_CHANGED", fieldErrors: {}, rejection:
         new CommandRejection(412, "TASK_CHANGED", {}, { currentRevision: revisionOf(document.version) }) };
     }
     if (command.action === "edit") return undefined;
-    const legal = this.legalTransitions(document);
+    let legal: ReadonlyArray<TransitionMeta>;
+    try {
+      legal = this.liveMode
+        ? await this.liveJira!.legalTransitions(actor, document.docId.slice("jira:".length))
+        : demoWorkflow(document.metadata.status);
+    } catch {
+      const fieldErrors = { transitionId: "Jira's moves are unavailable right now." };
+      return { kind: "refusal", code: "TRANSITION_UNAVAILABLE", fieldErrors,
+        rejection: new CommandRejection(409, "TRANSITION_UNAVAILABLE", fieldErrors, { transitions: [] }) };
+    }
     const meta = legal.find(item => item.id === command.transitionId);
     if (!meta) return { kind: "refusal", code: "TRANSITION_UNAVAILABLE", fieldErrors: { transitionId: "Use one of the task's currently legal transitions." }, rejection:
       new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
@@ -1423,10 +1432,6 @@ export class Brain {
     return { kind: "legal", meta };
   }
 
-  private legalTransitions(document: SourceDocument): ReadonlyArray<TransitionMeta> {
-    return demoWorkflow(document.metadata.status);
-  }
-
   private async runTaskEdit(actor: User, docId: string, operation: CommandOperation, fields: EditFields): Promise<CommandResult> {
     await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing" });
     this.audit.append("task_command", actor.id, { operationId: operation.id, action: "edit", ...this.auditDocument(docId) });
@@ -1441,7 +1446,7 @@ export class Brain {
       return { status: "applied", operation: { ...operation, ...applied }, fields: accepted,
         document: this.index.documents.get(docId) };
     } catch (error) {
-      return await this.taskCommandFailure(actor, docId, operation, "edit", error, { ...fields });
+      return await this.taskCommandFailure(actor, docId, operation, "edit", error, { fields: { ...fields } });
     }
   }
 
@@ -1462,16 +1467,16 @@ export class Brain {
         document: this.index.documents.get(docId) };
     } catch (error) {
       return await this.taskCommandFailure(actor, docId, operation, "transition", error,
-        { transitionId: command.transitionId, ...command.fields });
+        { fields: {}, status: meta.target });
     }
   }
 
   private async taskCommandFailure(actor: User, docId: string, operation: CommandOperation, action: "edit" | "transition",
-    error: unknown, intended?: Record<string, unknown>): Promise<CommandResult> {
+    error: unknown, intended?: { fields: Record<string, unknown>; status?: TransitionMeta["target"] }): Promise<CommandResult> {
     const rejection = error instanceof CommandRejection ? error : undefined;
     const next = rejection
       ? { state: "rejected", fieldErrors: rejection.fieldErrors } as const
-      : { state: "uncertain", intendedFields: intended } as const;
+      : { state: "uncertain", intendedFields: intended?.fields, intendedStatus: intended?.status } as const;
     await this.commandStore.advanceCommand(operation.id, "executing", next);
     this.audit.append("task_command_result", actor.id, { operationId: operation.id, action, docId,
       outcome: rejection ? rejection.code : "uncertain" });
@@ -1524,7 +1529,10 @@ export class Brain {
     }
     if (operation.state === "uncertain") {
       const proof = this.liveMode
-        ? await this.liveJira!.settleUncertainEdit(actor, operation.issueKey.slice("jira:".length), operation.intendedFields ?? {})
+        ? await this.liveJira!.settleUncertainEdit(actor, operation.issueKey.slice("jira:".length), {
+            fields: operation.intendedFields ?? {},
+            ...(operation.intendedStatus ? { status: operation.intendedStatus } : {})
+          })
         : false;
       if (proof) await this.commandStore.resolveUncertain(operationId, "desiredStateObserved");
       const settled = (await this.commandStore.getCommand(operationId)) ?? operation;

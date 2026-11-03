@@ -18,6 +18,7 @@ export interface CommandOperation {
   outcomeCode?: string;
   fieldErrors?: Record<string, string>;
   intendedFields?: Record<string, unknown>;
+  intendedStatus?: TransitionMeta["target"];
 }
 
 export interface CommandReservation {
@@ -222,6 +223,12 @@ export const parseRevision = (raw: string): number | undefined => {
 
 export interface TransitionFieldMeta { readonly id: string; readonly name: string; readonly type: string; readonly required: boolean; readonly supported: boolean; readonly allowedValues?: ReadonlyArray<{ readonly id: string; readonly name: string }> }
 export interface TransitionMeta { readonly id: string; readonly name: string; readonly target: { readonly name: string; readonly category: "new" | "indeterminate" | "done" }; readonly fields: ReadonlyArray<TransitionFieldMeta> }
+
+/** What an uncertain write asked for: the fields it set and, for a transition, the status it aimed at. */
+export interface UncertainIntent {
+  readonly fields: Record<string, unknown>;
+  readonly status?: TransitionMeta["target"];
+}
 
 /** The exact status spellings the mock corpus carries; a done task has no legal moves in the demo workflow. */
 export type DemoStatus = "open" | "in progress" | "in review" | "blocked" | "Released" | "released";

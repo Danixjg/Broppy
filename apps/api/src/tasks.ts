@@ -340,7 +340,10 @@ async function projectsRoute(input: GetTaskRoutesInput, now: Date): Promise<Rout
   const snapshot = await assembleSnapshot(input.list, input.user, now);
   const projects = [...new Set(snapshot.rows.map(row => row.projectKey).filter(Boolean))]
     .sort().map(key => ({ key, name: key }));
-  return { status: 200, body: { projects } };
+  const priorities = [...new Set(snapshot.rows.map(row => row.priority)
+    .filter((name): name is string => typeof name === "string" && name !== ""))]
+    .sort((a, b) => (priorityRank(b) ?? -1) - (priorityRank(a) ?? -1) || a.localeCompare(b));
+  return { status: 200, body: { projects, priorities } };
 }
 
 async function detailRoute(user: User, docId: string, detail: DetailPort, catalog: TaskCatalogAccess): Promise<Routed> {

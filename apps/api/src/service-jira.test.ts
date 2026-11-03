@@ -143,6 +143,59 @@ describe("JiraAsUser for the workspace", () => {
   });
 });
 
+describe("settling an uncertain write from Jira", () => {
+  it("does not call Jira when there is nothing to verify", async () => {
+    let calls = 0;
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () => {
+      calls++; return Response.json({});
+    });
+    expect(await jira.settleUncertainEdit(maya, "DB-9", { fields: {} })).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("proves a cleared due date against Jira's duedate field", async () => {
+    const urls: string[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async url => {
+      urls.push(String(url));
+      return Response.json({ fields: { duedate: null } });
+    });
+    expect(await jira.settleUncertainEdit(maya, "DB-9", { fields: { dueDate: null } })).toBe(true);
+    expect(urls[0]).toContain("fields=summary,duedate,priority,labels,assignee,status");
+  });
+
+  it("requires the readback to show the status the transition aimed at", async () => {
+    let fields: Record<string, unknown> = { status: { name: "in progress", statusCategory: { key: "indeterminate" } } };
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () => Response.json({ fields }));
+    const wanted = { fields: {}, status: { name: "open", category: "new" } as const };
+    expect(await jira.settleUncertainEdit(maya, "DB-9", wanted)).toBe(false);
+    fields = { status: { name: "open", statusCategory: { key: "new" } } };
+    expect(await jira.settleUncertainEdit(maya, "DB-9", wanted)).toBe(true);
+  });
+
+  it("compares labels as a set rather than by their order", async () => {
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () =>
+      Response.json({ fields: { labels: ["a", "b"] } }));
+    expect(await jira.settleUncertainEdit(maya, "DB-9", { fields: { labels: ["b", "a"] } })).toBe(true);
+    expect(await jira.settleUncertainEdit(maya, "DB-9", { fields: { labels: ["a", "c"] } })).toBe(false);
+  });
+});
+
+describe("transition permission", () => {
+  it("requires TRANSITION_ISSUES, not merely EDIT_ISSUES, before moving an issue", async () => {
+    let posts = 0;
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async (url, init) => {
+      if (String(url).includes("user/permission/search")) {
+        return Response.json(String(url).includes("TRANSITION_ISSUES") ? [] : [{ accountId: "acct-maya" }]);
+      }
+      if ((init as any)?.method === "POST") posts++;
+      return new Response(null, { status: 204 });
+    });
+    await expect(jira.transitionIssue(maya, "DB-9", { transitionId: "31", fields: {} }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(posts).toBe(0);
+  });
+});
+
 describe("request validation", () => {
   it("accepts what the Slack app sends and rejects the rest", () => {
     expect(parseIssue({ project: "DB", summary: "s", description: "d", dueDate: "2026-10-16" })).toMatchObject({ project: "DB" });

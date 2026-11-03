@@ -342,8 +342,9 @@ describe("the task workbench routes", () => {
     expect(hiddenProject.status).toBe(400);
     const davidSeesSecurity = (await demo.call("/v1/tasks?projectIds=SEC&priorityIds=Highest", "david")).body as ListBody;
     expect(davidSeesSecurity.items.map(item => item.key)).toEqual(["SEC-44"]);
-    const projects = (await demo.call("/v1/tasks/projects", "maya")).body as { projects: Array<{ key: string }> };
+    const projects = (await demo.call("/v1/tasks/projects", "maya")).body as { projects: Array<{ key: string }>; priorities: string[] };
     expect(projects.projects.map(project => project.key)).toEqual(["DB", "PAY", "REL", "SETL"]);
+    expect(projects.priorities).toEqual(["High", "Medium", "Low", "Critical"]);
   });
 
   it("answers hidden, missing, malformed and unresolved with the same 404 bytes (FT17, C12)", async () => {
