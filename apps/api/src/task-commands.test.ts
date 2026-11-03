@@ -407,6 +407,36 @@ describe("the live-shaped Jira writer", () => {
     expect(dispatched).toEqual([{ key: "DB-12", command: { action: "transition", transitionId: "41", fields: {} } }]);
   });
 
+  it("refuses a fieldless move that would leave the status as it is, and carries one that sets a field", async () => {
+    const fixture = loadMockCorpus();
+    const dispatched: unknown[] = [];
+    let legal: TransitionMeta[] =
+      [{ id: "91", name: "Stay put", target: { name: "in progress", category: "indeterminate" }, fields: [] }];
+    const jira: LiveJira = {
+      canCreate: async () => true,
+      createIssue: async () => undefined,
+      markDone: async () => true,
+      editFields: async (_user, _key, fields) => ({ ...fields }),
+      legalTransitions: async () => legal,
+      transitionIssue: async (...call: unknown[]) => { dispatched.push(call); return {}; },
+      settleUncertainEdit: async () => false
+    };
+    const brain = new Brain(undefined, { users: fixture.users, connectors: fixture.connectors });
+    brain.liveJira = jira;
+    const { call } = await serverFor(brain);
+    const revision = await currentRevision(call, "DB-12");
+    const refused = await put(call, "DB-12", "maya", { transitionId: "91", fields: {} }, { revision });
+    expect(refused.status).toBe(409);
+    expect((refused.body as { error: { code: string } }).error.code).toBe("TRANSITION_NO_EFFECT");
+    expect(dispatched).toEqual([]);
+
+    legal = [{ id: "91", name: "Stay put", target: { name: "in progress", category: "indeterminate" },
+      fields: [{ id: "resolutionId", name: "Resolution", type: "option", required: true, supported: true }] }];
+    const carried = await put(call, "DB-12", "maya", { transitionId: "91", fields: { resolutionId: "1" } }, { revision, id: "i2", key: "k2" });
+    expect((carried.body as { state: string }).state).toBe("applied");
+    expect(dispatched).toHaveLength(1);
+  });
+
   it("records the status a lost transition aimed at and settles only when the readback proves it", async () => {
     const fixture = loadMockCorpus();
     const readbacks: Array<{ fields: Record<string, unknown>; status?: TransitionMeta["target"] }> = [];

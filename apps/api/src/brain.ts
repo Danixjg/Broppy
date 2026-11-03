@@ -1419,6 +1419,13 @@ export class Brain {
     const meta = legal.find(item => item.id === command.transitionId);
     if (!meta) return { kind: "refusal", code: "TRANSITION_UNAVAILABLE", fieldErrors: { transitionId: "Use one of the task's currently legal transitions." }, rejection:
       new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
+    // A move that leaves the status as it was and sets nothing leaves nothing to verify afterwards, so the
+    // command would either read as applied without proof or block the task forever. Jira itself is the place.
+    if (meta.target.name === `${document.metadata.status ?? ""}`.trim() && Object.keys(command.fields).length === 0) {
+      const message = "That move would leave the status as it is, so Broppy records it in Jira instead. Do it in Jira.";
+      return { kind: "refusal", code: "TRANSITION_NO_EFFECT", fieldErrors: { transitionId: message },
+        rejection: new CommandRejection(409, "TRANSITION_NO_EFFECT", { transitionId: message }, { transitions: legal }) };
+    }
     const missing = meta.fields.filter(field => field.required && !(command.fields[field.id] ?? "").trim());
     if (missing.length) {
       const unsupported = missing.filter(field => !field.supported);

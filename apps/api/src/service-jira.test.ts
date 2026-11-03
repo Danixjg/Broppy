@@ -160,7 +160,7 @@ describe("settling an uncertain write from Jira", () => {
       return Response.json({ fields: { duedate: null } });
     });
     expect(await jira.settleUncertainEdit(maya, "DB-9", { fields: { dueDate: null } })).toBe(true);
-    expect(urls[0]).toContain("fields=summary,duedate,priority,labels,assignee,status");
+    expect(urls[0]).toContain("fields=summary,duedate,priority,labels,assignee,status,resolution");
   });
 
   it("requires the readback to show the status the transition aimed at", async () => {
@@ -174,8 +174,10 @@ describe("settling an uncertain write from Jira", () => {
 
   it("requires the readback to show the resolution a done move asked for", async () => {
     let resolution: Record<string, unknown> | undefined;
-    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () =>
-      Response.json({ fields: { status: { name: "released", statusCategory: { key: "done" } }, resolution } }));
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async url => {
+      expect(String(url)).toContain("fields=summary,duedate,priority,labels,assignee,status,resolution");
+      return Response.json({ fields: { status: { name: "released", statusCategory: { key: "done" } }, resolution } });
+    });
     const done = { fields: { resolutionId: "1" }, status: { name: "released", category: "done" } as const };
     expect(await jira.settleUncertainEdit(maya, "DB-9", done)).toBe(false);
     resolution = { id: "2", name: "Won't do" };

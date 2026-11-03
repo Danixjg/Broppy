@@ -227,7 +227,7 @@ export class JiraAsUser {
     if (!intended.status && wanted.length === 0) return false;
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
     if (!authorization || !site) return false;
-    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,duedate,priority,labels,assignee,status`, {
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,duedate,priority,labels,assignee,status,resolution`, {
       headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
     if (!response.ok) return false;
     const payload = await response.json() as { fields?: Record<string, any> };
