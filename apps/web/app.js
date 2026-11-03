@@ -1,5 +1,5 @@
 import { demoRole, setCurrentIdentity } from "./src/lib/identity";
-import { IDENTITY_CHANGED, TASKS_CHANGED, WORKSPACE_DATA, WORKSPACE_RELOAD } from "./src/tasks/events";
+import { IDENTITY_CHANGED, SESSION_LOST, TASKS_CHANGED, WORKSPACE_DATA, WORKSPACE_RELOAD } from "./src/tasks/events";
 
 // The controller keeps what React has not taken over: sign-in, the identity, the view switch, and the seams
 // the React surfaces listen to. The workspace, tasks, admin, compliance and sync health surfaces are React's
@@ -99,6 +99,14 @@ document.addEventListener(WORKSPACE_DATA, event => {
 // A task write changes the corpus, so the workspace surface reads it again.
 document.addEventListener(TASKS_CHANGED, () => { document.dispatchEvent(new CustomEvent(WORKSPACE_RELOAD)); });
 $("user").addEventListener("change", resetIdentity);
+document.addEventListener(SESSION_LOST, () => {
+  // The header's sign-in controls stay app.js's domain, so the React surfaces announce the loss here.
+  if (state.authMode !== "auth0" || !state.signedIn) return;
+  state.signedIn = false;
+  state.me = null;
+  updateAuthUi("Your session ended. Log in again.");
+  resetIdentity();
+});
 $("loginButton").addEventListener("click", () => location.assign(`/auth/login?${new URLSearchParams({ returnTo: location.pathname + location.search })}`));
 $("logoutButton").addEventListener("click", () => location.assign(state.authMode === "demo" ? "/demo/exit" : "/auth/logout"));
 initAuth();

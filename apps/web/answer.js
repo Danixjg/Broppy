@@ -62,6 +62,20 @@ export function leftOutNote(check) {
   return `${lines}: ${removed.length === 1 ? "it" : "they"} ${phrases[0]}.`;
 }
 
+// The API's fixed reply when no source answers the question, in its own words.
+const NO_RESULT_REPLY = "No accessible information was found for this query.";
+// What an empty or no-result answer says where the answer's words would be.
+const NOT_READ = "Broppy hasn't read any of your tools yet, so it has nothing to answer from. Connect a tool, or choose what Broppy reads, in Setup.";
+const NOT_FOUND = "Hmm, I couldn't find anything on that. If you expected an answer, the file may be out of date or not in Broppy yet. Check with your admin or manager.";
+/** The text the answer surface renders: API fixed replies as home words, and an empty answer said so. */
+export function displayAnswer(result, sources, nothingRead) {
+  const answer = typeof result?.text === "string" ? result.text : "";
+  const listed = Array.isArray(sources) ? sources : [];
+  if (nothingRead && !listed.length) return NOT_READ;
+  if (answer === NO_RESULT_REPLY) return NOT_FOUND;
+  return answer || "No answer returned.";
+}
+
 // Answers show a Jira issue's status inside the quoted text: after the key when the text starts with it, "DB-12
 // (in progress) tracks…", and in front of it otherwise, "DB-15 (blocked): Replica…". The document has neither.
 const JIRA_STATUS = /^([A-Z][A-Z0-9]+-\d+) \([^)]*\)(:?) /;

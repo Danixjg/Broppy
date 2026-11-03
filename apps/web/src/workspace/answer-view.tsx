@@ -1,9 +1,7 @@
 import { Button } from "@heroui/react";
-import { answerLines, isDemoAddress, leftOutNote, numberSources } from "../../answer.js";
+import { answerLines, displayAnswer, isDemoAddress, leftOutNote, numberSources } from "../../answer.js";
 import { formatDate, quotesOf, safeText, safeUrl, scopeText } from "../lib/workspace.js";
 import type { AnswerResult, Citation, WorkspaceDocument } from "./api";
-
-const NO_RESULT_TEXT = "No accessible information was found for this query.";
 
 type AnswerLine = { text: string; refs: number[]; kind?: string; support?: string[] };
 
@@ -16,14 +14,10 @@ export function AnswerView({ result, question, documents, nothingRead, onOpenSou
   onTrace: (traceId: string) => void;
 }) {
   const sources = numberSources(result.citations ?? []);
-  const lines = answerLines(safeText(result.text), sources, result.check) as AnswerLine[];
+  const text = displayAnswer(result, sources, nothingRead);
+  const lines = answerLines(text, sources, result.check) as AnswerLine[];
   const note = leftOutNote(result.check);
   const scope = scopeText(result.scope);
-  const text = nothingRead && !sources.length
-    ? "Broppy hasn't read any of your tools yet, so it has nothing to answer from. Connect a tool, or choose what Broppy reads, in Setup."
-    : safeText(result.text) === NO_RESULT_TEXT
-      ? "Hmm, I couldn't find anything on that. If you expected an answer, the file may be out of date or not in Broppy yet. Check with your admin or manager."
-      : safeText(result.text) || "No answer returned.";
   return (
     <>
       {question ? <p>{question}</p> : null}

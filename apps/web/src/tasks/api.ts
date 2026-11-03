@@ -1,5 +1,6 @@
 // The one client the tasks surface talks to the API with. Every call carries the identity the page
 // is showing: the demo persona when the page is in the demo, the session otherwise.
+import { SESSION_LOST } from "./events";
 
 const API = "/api/brain";
 
@@ -106,6 +107,7 @@ export async function call<T>(path: string, options: CommandOptions = {}): Promi
     throw new ApiError(response.status, null, "API returned an invalid response");
   }
   if (!response.ok) {
+    if (response.status === 401) document.dispatchEvent(new CustomEvent(SESSION_LOST));
     const envelope = payload as { error?: unknown } | null;
     const message = typeof envelope?.error === "string" ? envelope.error : "Request failed";
     throw new ApiError(response.status, payload, message);

@@ -145,9 +145,15 @@ export function WorkspaceView() {
       }
     } catch (error) {
       if (request !== loadRef.current || identity !== identityRef.current) return;
+      const ended = error instanceof ApiError && error.status === 401;
+      if (ended) {
+        // The session no longer authorizes anything this page held; stop showing what an earlier identity read.
+        payloadRef.current = null;
+        setPayload(null);
+      }
       setNotice({
-        text: error instanceof ApiError && error.status === 401 ? "Log in to view your accessible documents." : messageOf(error, "The workspace could not be loaded."),
-        retry: !(error instanceof ApiError && error.status === 401)
+        text: ended ? "Log in to view your accessible documents." : messageOf(error, "The workspace could not be loaded."),
+        retry: !ended
       });
     }
   };
@@ -200,11 +206,13 @@ export function WorkspaceView() {
     const trimmed = text.trim();
     if (!trimmed) return;
     const id = ++turnIdRef.current;
+    const identity = identityRef.current;
     setAsking(true);
     setQueryStatus("Checking permissions and source versions…");
     setTurns(current => [...current, { id, question: trimmed }]);
     try {
       const result = await askApi(trimmed, historyRef.current, projectRef.current ?? undefined);
+      if (identity !== identityRef.current) return;
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, result } : turn));
       historyRef.current = [...historyRef.current,
         { role: "user", text: trimmed },
@@ -215,10 +223,11 @@ export function WorkspaceView() {
         : !payloadRef.current?.documents.length ? "Broppy hasn't read anything yet, so there's nothing to answer from." : "");
       setQuestion("");
     } catch (error) {
+      if (identity !== identityRef.current) return;
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, error: messageOf(error, "The question could not be answered.") } : turn));
       setQueryStatus("Query failed.");
     } finally {
-      setAsking(false);
+      if (identity === identityRef.current) setAsking(false);
     }
   };
 
@@ -232,22 +241,28 @@ export function WorkspaceView() {
       document.dispatchEvent(new CustomEvent<TraceRequest>(SHOW_TRACE, { detail: { traceId } }));
       return;
     }
+    const identity = identityRef.current;
     setTraceState({ traceId, entries: [] });
     try {
       const result = await traceApi(traceId);
+      if (identity !== identityRef.current) return;
       setTraceState({ traceId: result.traceId, entries: result.entries });
     } catch (error) {
+      if (identity !== identityRef.current) return;
       setTraceState({ traceId, entries: [], error: error instanceof ApiError && error.status === 404 ? "Trace endpoint is not available yet." : messageOf(error, "The trace could not be loaded.") });
     }
   };
 
   const runCatchUp = async () => {
     if (nothingRead) { setCatchUpState({ kind: "empty" }); return; }
+    const identity = identityRef.current;
     setCatchUpState({ kind: "pending" });
     try {
       const result = await catchUpApi(projectRef.current ?? undefined);
+      if (identity !== identityRef.current) return;
       setCatchUpState({ kind: "result", result });
     } catch (error) {
+      if (identity !== identityRef.current) return;
       setCatchUpState({ kind: "error", text: messageOf(error, "The catch-up could not be prepared.") });
     }
   };
@@ -312,8 +327,10 @@ export function WorkspaceView() {
       deepLinkRef.current = false;
       roleRef.current = identity?.role ?? "member";
       setRole(roleRef.current);
+      payloadRef.current = null;
       projectRef.current = null;
       selectedRef.current = null;
+      setPayload(null);
       setProject(null);
       setSelected(null);
       setSearch("");
@@ -341,7 +358,12 @@ export function WorkspaceView() {
     const onOpenDoc = (event: Event) => {
       const requested = (event as CustomEvent<OpenTaskDetail>).detail;
       const doc = payloadRef.current?.documents.find(item => item.docId === requested?.id);
-      if (doc) openDoc(doc, [], true);
+      if (!doc) return;
+      // A link opened from another pane must switch to the one that has the document.
+      if (document.getElementById("workspaceView")?.hidden) {
+        document.querySelector<HTMLElement>('[data-view="workspace"]')?.click();
+      }
+      openDoc(doc, [], true);
     };
     document.addEventListener(OPEN_DOC, onOpenDoc);
     return () => document.removeEventListener(OPEN_DOC, onOpenDoc);

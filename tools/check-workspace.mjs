@@ -79,7 +79,14 @@ try {
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ doc: docId, project: pending.project })}`);
   await page.waitForFunction(() => document.getElementById("selectedDetail")?.hidden === false);
   assert.equal(await page.locator("#projectSelect").inputValue(), pending.project, "Issue deep link selects its project");
+  // The previous identity's documents are not on screen while the next one loads.
+  await page.route("**/api/brain/v1/workspace", route => setTimeout(() => { route.continue().catch(() => undefined); }, 400));
   await page.selectOption("#user", "alex");
+  await page.waitForFunction(() => document.getElementById("workspaceNotice")?.textContent === "Loading accessible documents…", undefined, { timeout: 4000 });
+  assert.equal(await page.evaluate(() =>
+    document.querySelectorAll("#slackList .activity-item, #jiraList .activity-item, #driveList .file-row").length), 0,
+    "Switching identities clears the previous persona's workspace at once");
+  await page.unroute("**/api/brain/v1/workspace");
   await page.waitForFunction(() => document.getElementById("globalStatus")?.textContent === "The linked project is unavailable to this identity.");
   assert.equal(await page.locator("#selectedDetail").isVisible(), false, "Switching identities hides an inaccessible issue");
   await page.selectOption("#user", "maya");
@@ -93,6 +100,12 @@ try {
   await page.locator("#askButton").click();
   assert.equal((await queried).postDataJSON().project, pending.project, "Project chat sends its selected scope");
   await page.waitForFunction(() => document.getElementById("askButton")?.disabled === false);
+  await page.locator("#question").fill("what is the zebra offsite plan");
+  await page.locator("#askButton").click();
+  await page.waitForFunction(() => document.getElementById("askButton")?.disabled === false);
+  const noResult = await page.locator("#chatHistory .message.answer").last().textContent();
+  assert(noResult.startsWith("Hmm, I couldn't find anything on that."),
+    "An answer nobody can ground says so, not the API's internal wording");
   const unscopedRequest = page.waitForRequest(request => request.url().endsWith("/v1/query") && request.method() === "POST");
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ ask: "What is the latest status?" })}`);
   const unscoped = await unscopedRequest;
@@ -237,12 +250,18 @@ try {
   const mayaOptions = await page.evaluate(() => [...document.querySelectorAll("#tasksProjects option")].map(item => item.value).filter(Boolean));
   assert.deepEqual(mayaOptions, ["DB", "PAY", "REL", "SETL"], "The project filter is derived from the loaded authorized responses");
   const priorityOptions = await page.evaluate(() => [...document.querySelectorAll("#tasksPriority option")].map(item => item.value).filter(Boolean));
-  assert.deepEqual(priorityOptions, ["High", "Medium", "Low", "Critical"], "The priority filter is derived from the authorized snapshot");
+  assert.deepEqual(priorityOptions, ["Highest", "High", "Medium", "Low", "Lowest", "Critical"], "The priority filter offers the site's priority vocabulary plus what the snapshot adds");
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ view: "tasks", task: "jira:PAY-101" })}`);
   await page.waitForFunction(() => document.getElementById("workspaceMode")?.textContent === "Demo workspace");
   await page.waitForFunction(() => document.getElementById("tasksDetail")?.hidden === false);
   assert.equal(await page.locator("#tasksDetail h3").textContent(), "Cutover rehearsal", "A Tasks deep link opens the task from the detail route");
   assert.equal(await page.locator('[data-view="tasks"]').getAttribute("aria-current"), "page", "The Tasks deep link opens on the Tasks view");
+  const linked = page.locator("#tasksDetail .linked-items button").first();
+  const linkedTitle = (await linked.textContent()) ?? "";
+  await linked.click();
+  await page.waitForFunction(() => document.getElementById("workspaceView")?.hidden === false);
+  assert.equal(await page.locator('[data-view="workspace"]').getAttribute("aria-current"), "page", "Opening a linked source switches to the Workspace view");
+  assert.equal(await page.locator("#workspaceView #selectedDetail h3").textContent(), linkedTitle, "The linked source is selected on the Workspace view");
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ view: "tasks", task: "jira:NOPE-999" })}`);
   await page.waitForFunction(() => document.getElementById("workspaceMode")?.textContent === "Demo workspace");
   await page.waitForFunction(() => document.getElementById("tasksDetail")?.hidden === false);
@@ -273,6 +292,26 @@ try {
   await page.selectOption("#user", "maya");
   await adminIdentityReady;
   await page.waitForFunction(() => document.getElementById("adminTab")?.hidden === false);
+  // A catch-up prepared for one persona must never reappear after the identity switches away.
+  await page.route("**/api/brain/v1/catch-up", route => setTimeout(() => { route.continue().catch(() => undefined); }, 400));
+  await page.click("#catchUp");
+  await page.selectOption("#user", "alex");
+  await page.waitForFunction(() => document.getElementById("catchUpResult")?.hidden === true, undefined, { timeout: 4000 });
+  await page.unroute("**/api/brain/v1/catch-up");
+  await page.selectOption("#user", "maya");
+  await page.waitForFunction(() => document.getElementById("adminTab")?.hidden === false);
+  // A rejected session leaves nothing on the page: the API read fails, so the page keeps nothing it showed.
+  const lostPage = await browser.newPage();
+  await lostPage.goto(`${origin}/demo`);
+  await lostPage.waitForFunction(() => (document.getElementById("workspaceNotice")?.textContent ?? "").includes("accessible sources"));
+  await lostPage.route("**/api/brain/v1/workspace", route => route.fulfill({ status: 401, body: "{}", contentType: "application/json" }));
+  await lostPage.evaluate(() => document.dispatchEvent(new CustomEvent("broppy:tasks-changed")));
+  await lostPage.waitForFunction(() => document.getElementById("workspaceNotice")?.textContent === "Log in to view your accessible documents.", undefined, { timeout: 5000 });
+  assert.equal(await lostPage.evaluate(() =>
+    document.querySelectorAll("#slackList .activity-item, #jiraList .activity-item, #driveList .file-row").length), 0,
+    "A rejected session clears the documents the page had shown");
+  await lostPage.unroute("**/api/brain/v1/workspace");
+  await lostPage.close();
   await page.click('[data-view="admin"]');
   await page.waitForFunction(() => document.getElementById("adminView")?.hidden === false);
   assert.equal(await page.locator("#adminHeading").textContent(), "Source controls", "An admin opens the source controls");

@@ -5,6 +5,7 @@ export const WORKSPACE_LOADED = "broppy:workspace-loaded";
 export const WORKSPACE_DATA = "broppy:workspace-data";
 export const WORKSPACE_RELOAD = "broppy:workspace-reload";
 export const IDENTITY_CHANGED = "broppy:identity-changed";
+export const SESSION_LOST = "broppy:session-lost";
 export const TASKS_CHANGED = "broppy:tasks-changed";
 export const OPEN_TASK = "broppy:open-task";
 export const SHOW_ALL_TASKS = "broppy:show-all-tasks";
