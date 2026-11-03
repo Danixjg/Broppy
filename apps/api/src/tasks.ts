@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AccessDecision, SourceDocument, User } from "@brain/types";
 import { CommandRejection, type CommandIntent, CommandResult, type EditFields, type TransitionMeta, type TransitionChoices,
   commandEnvelope, parseCommandIdentity, parseEditFields, parseTransitionCommand, revisionOf } from "./task-commands.js";
-import { categoryOf, columnize, filterRows, pageOf, presetRows, priorityRank, sortRows, summarize,
+import { categoryOf, columnize, filterRows, pageOf, presetRows, priorityRank, sortRows, STANDARD_PRIORITIES, summarize,
   type DataGeneration, type JiraStatusCategory, type TaskQuery, type TaskRow, type TaskSnapshot } from "./tasks-lens.js";
 
 /** The ONLY data surface the list path sees: the synced corpus and the synced permission index, as one frozen view.
@@ -167,7 +167,7 @@ function rejectUnknownFacets(query: TaskQuery, snapshot: TaskSnapshot): void {
   const known = {
     projectIds: new Set(snapshot.rows.map(row => row.projectKey)),
     statusIds: new Set(snapshot.rows.map(row => row.status).filter(name => name !== "")),
-    priorityIds: new Set(snapshot.rows.map(row => row.priority).filter((name): name is string => name !== null))
+    priorityIds: new Set([...STANDARD_PRIORITIES, ...snapshot.rows.map(row => row.priority).filter((name): name is string => name !== null)])
   };
   for (const [facet, values] of [["projectIds", query.projectIds], ["statusIds", query.statusIds],
     ["priorityIds", query.priorityIds]] as const) {
@@ -340,8 +340,8 @@ async function projectsRoute(input: GetTaskRoutesInput, now: Date): Promise<Rout
   const snapshot = await assembleSnapshot(input.list, input.user, now);
   const projects = [...new Set(snapshot.rows.map(row => row.projectKey).filter(Boolean))]
     .sort().map(key => ({ key, name: key }));
-  const priorities = [...new Set(snapshot.rows.map(row => row.priority)
-    .filter((name): name is string => typeof name === "string" && name !== ""))]
+  const priorities = [...new Set([...STANDARD_PRIORITIES, ...snapshot.rows.map(row => row.priority)
+    .filter((name): name is string => typeof name === "string" && name !== "")])]
     .sort((a, b) => (priorityRank(b) ?? -1) - (priorityRank(a) ?? -1) || a.localeCompare(b));
   return { status: 200, body: { projects, priorities } };
 }

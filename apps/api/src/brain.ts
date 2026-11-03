@@ -1467,7 +1467,7 @@ export class Brain {
         document: this.index.documents.get(docId) };
     } catch (error) {
       return await this.taskCommandFailure(actor, docId, operation, "transition", error,
-        { fields: {}, status: meta.target });
+        { fields: { ...command.fields }, status: meta.target });
     }
   }
 

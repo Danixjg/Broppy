@@ -172,6 +172,18 @@ describe("settling an uncertain write from Jira", () => {
     expect(await jira.settleUncertainEdit(maya, "DB-9", wanted)).toBe(true);
   });
 
+  it("requires the readback to show the resolution a done move asked for", async () => {
+    let resolution: Record<string, unknown> | undefined;
+    const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () =>
+      Response.json({ fields: { status: { name: "released", statusCategory: { key: "done" } }, resolution } }));
+    const done = { fields: { resolutionId: "1" }, status: { name: "released", category: "done" } as const };
+    expect(await jira.settleUncertainEdit(maya, "DB-9", done)).toBe(false);
+    resolution = { id: "2", name: "Won't do" };
+    expect(await jira.settleUncertainEdit(maya, "DB-9", done)).toBe(false);
+    resolution = { id: "1", name: "Done" };
+    expect(await jira.settleUncertainEdit(maya, "DB-9", done)).toBe(true);
+  });
+
   it("compares labels as a set rather than by their order", async () => {
     const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () =>
       Response.json({ fields: { labels: ["a", "b"] } }));

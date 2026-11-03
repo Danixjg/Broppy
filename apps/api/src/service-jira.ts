@@ -241,6 +241,7 @@ export class JiraAsUser {
       if (name === "assignee") return !value ? cleared("assignee") : fields.assignee?.accountId === value;
       if (name === "dueDate") return fields.duedate === value;
       if (name === "priority") return fields.priority?.name === value || fields.priority?.id === value;
+      if (name === "resolutionId") return fields.resolution?.id === value;
       if (name === "labels") return Array.isArray(value) &&
         JSON.stringify([...(fields.labels ?? [])].sort()) === JSON.stringify([...value].sort());
       return fields[name] === value;

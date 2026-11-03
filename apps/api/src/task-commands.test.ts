@@ -432,7 +432,7 @@ describe("the live-shaped Jira writer", () => {
 
     const first = (await call(`/v1/task-operations/${operationId}/check`, "maya", "POST")).body as { state: string };
     expect(first.state).toBe("uncertain");
-    expect(readbacks).toEqual([{ fields: {}, status: { name: "open", category: "new" } }]);
+    expect(readbacks).toEqual([{ fields: { resolutionId: "1" }, status: { name: "open", category: "new" } }]);
 
     proof = true;
     const settled = (await call(`/v1/task-operations/${operationId}/check`, "maya", "POST")).body as { state: string; outcome?: string };

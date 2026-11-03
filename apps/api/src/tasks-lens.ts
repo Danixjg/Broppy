@@ -85,6 +85,11 @@ export function priorityRank(priority: string | null): number | null {
   return priority && PRIORITY_RANKS[priority] !== undefined ? PRIORITY_RANKS[priority] : null;
 }
 
+/** The priorities any standard Jira site offers, in rank order. Sites can rename or add their own;
+ * the added ones appear in whatever the corpus holds, so the two lists together are the offered set. */
+export const STANDARD_PRIORITIES: readonly string[] =
+  Object.keys(PRIORITY_RANKS).sort((a, b) => PRIORITY_RANKS[b] - PRIORITY_RANKS[a]);
+
 export function statusCategoryOf(metadata: { readonly [key: string]: string | undefined }): JiraStatusCategory | undefined {
   return CATEGORIES.includes(metadata.statusCategory as JiraStatusCategory) ? metadata.statusCategory as JiraStatusCategory : undefined;
 }
