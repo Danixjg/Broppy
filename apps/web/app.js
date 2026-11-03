@@ -6,7 +6,7 @@ import { IDENTITY_CHANGED, SESSION_LOST, TASKS_CHANGED, WORKSPACE_DATA, WORKSPAC
 // now, and they read the identity from the module that holds it.
 const API = "/api/brain";
 const $ = id => document.getElementById(id);
-const state = { view: "workspace", authMode: "loading", signedIn: false, me: null, docsMode: "" };
+const state = { view: "workspace", authMode: "loading", signedIn: false, me: null, docsMode: "", accessRevoked: false };
 
 async function loadMe() {
   const response = await fetch(`${API}/v1/me`, { headers: { "content-type": "application/json" }, cache: "no-store" });
@@ -16,8 +16,9 @@ async function loadMe() {
     const error = new Error(typeof payload.error === "string" ? payload.error : "Request failed");
     error.status = response.status;
     if (response.status === 401) {
-      // The proxy marks an API rejection of a live session; anything else means the session is gone.
-      if (payload.code !== "account_rejected") state.signedIn = false;
+      // These responses retain an SSO session that must be logged out before trying again.
+      if (!["account_rejected", "token_unavailable"].includes(payload.code)) state.signedIn = false;
+      state.accessRevoked = true;
       state.me = null; updateAuthUi(error.message); resetIdentity();
     }
     throw error;
@@ -41,7 +42,8 @@ function setView(view) {
   }
 }
 function resetIdentity() {
-  const identity = { role: role(), mode: state.authMode, signedIn: state.signedIn };
+  const identity = { role: role(), mode: state.authMode, signedIn: state.signedIn,
+    canLoad: state.authMode === "demo" || Boolean(state.signedIn && state.me) };
   setCurrentIdentity(identity);
   $("globalStatus").textContent = "";
   $("adminTab").hidden = !practiceControls();
@@ -80,6 +82,7 @@ async function initAuth() {
     state.signedIn = true;
     state.me = await loadMe();
     if (!state.me || typeof state.me.id !== "string" || typeof state.me.name !== "string" || !Array.isArray(state.me.groups) || !["member", "admin", "compliance"].includes(state.me.role)) throw new Error("The API returned an invalid identity.");
+    state.accessRevoked = false;
     updateAuthUi(); resetIdentity();
   } catch (error) {
     if (state.authMode === "auth0") { state.me = null; }
@@ -103,11 +106,19 @@ document.addEventListener(SESSION_LOST, event => {
   // The header's sign-in controls stay app.js's domain, so the React surfaces announce the loss here.
   const detail = event instanceof CustomEvent ? event.detail : undefined;
   if (state.authMode !== "auth0") return;
-  // The proxy's own reason: the account is refused but the session is real, so the controls stay as they are.
-  if (detail?.code === "account_rejected") { updateAuthUi(detail.message ?? ""); return; }
+  // The SSO session still exists, but its access cannot be used. Clear cached content and retain Log out.
+  if (["account_rejected", "token_unavailable"].includes(detail?.code)) {
+    state.me = null;
+    state.docsMode = "";
+    updateAuthUi(detail.message ?? "");
+    if (!state.accessRevoked) { state.accessRevoked = true; resetIdentity(); }
+    return;
+  }
   if (!state.signedIn) return;
   state.signedIn = false;
   state.me = null;
+  state.docsMode = "";
+  state.accessRevoked = true;
   updateAuthUi("Your session ended. Log in again.");
   resetIdentity();
 });

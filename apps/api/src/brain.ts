@@ -62,6 +62,8 @@ export interface LiveJira {
   markDone(user: User, key: string): Promise<boolean>;
   editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>>;
   legalTransitions(user: User, key: string): Promise<ReadonlyArray<TransitionMeta>>;
+  /** Fresh Jira status before dispatch; an unavailable status must not be used as proof later. */
+  currentTransitionStatus?(user: User, key: string): Promise<string | undefined>;
   transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>>;
   /** Whether a readback of an uncertain write now shows the desired fields and status (`desiredStateObserved`). */
   settleUncertainEdit(user: User, key: string, intended: UncertainIntent): Promise<boolean>;
@@ -1391,7 +1393,14 @@ export class Brain {
       }
       if (command.action === "edit") return await this.runTaskEdit(actor, docId, operation, command.fields);
       if (checked?.kind !== "legal") throw new Error("A transition command always preflights to legal or refused.");
-      return await this.runTaskTransition(actor, docId, operation, command, checked.meta);
+      let previousStatus = `${detail.document.metadata.status ?? ""}`.trim();
+      if (this.liveMode) {
+        // The indexed status can lag Jira. If a fresh read fails, retain uncertainty rather than trusting it.
+        try { previousStatus = (await this.liveJira?.currentTransitionStatus?.(actor, docId.slice("jira:".length)))?.trim() ?? ""; }
+        catch { previousStatus = ""; }
+      }
+      const requiresProviderReceipt = !previousStatus || previousStatus.toLowerCase() === checked.meta.target.name.trim().toLowerCase();
+      return await this.runTaskTransition(actor, docId, operation, command, checked.meta, requiresProviderReceipt);
     } finally {
       await this.commandStore.releaseLease(docId, operation.id);
     }
@@ -1421,8 +1430,8 @@ export class Brain {
       new CommandRejection(409, "TRANSITION_UNAVAILABLE", { transitionId: "Use one of the task's currently legal transitions." }, { transitions: legal }) };
     // A move that leaves the status as it was and sets nothing leaves nothing to verify afterwards, so the
     // command would either read as applied without proof or block the task forever. Jira itself is the place.
-    if (meta.target.name === `${document.metadata.status ?? ""}`.trim() && Object.keys(command.fields).length === 0) {
-      const message = "That move would leave the status as it is, so Broppy records it in Jira instead. Do it in Jira.";
+    if (meta.target.name.trim().toLowerCase() === `${document.metadata.status ?? ""}`.trim().toLowerCase() && Object.keys(command.fields).length === 0) {
+      const message = "That move would leave the status as it is and cannot be verified here. Do it in Jira instead.";
       return { kind: "refusal", code: "TRANSITION_NO_EFFECT", fieldErrors: { transitionId: message },
         rejection: new CommandRejection(409, "TRANSITION_NO_EFFECT", { transitionId: message }, { transitions: legal }) };
     }
@@ -1458,9 +1467,11 @@ export class Brain {
   }
 
   private async runTaskTransition(actor: User, docId: string, operation: CommandOperation,
-    command: { action: "transition"; transitionId: string; fields: Record<string, string> }, meta: TransitionMeta):
+    command: { action: "transition"; transitionId: string; fields: Record<string, string> }, meta: TransitionMeta,
+    requiresProviderReceipt: boolean):
     Promise<CommandResult> {
-    await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing" });
+    await this.commandStore.advanceCommand(operation.id, "reserved", { state: "executing", requiresProviderReceipt,
+      intendedFields: { ...command.fields }, intendedStatus: meta.target });
     this.audit.append("task_command", actor.id, { operationId: operation.id, action: "transition", ...this.auditDocument(docId) });
     try {
       const accepted = this.liveMode
@@ -1535,7 +1546,7 @@ export class Brain {
       return { status: "unavailable" };
     }
     if (operation.state === "uncertain") {
-      const proof = this.liveMode
+      const proof = this.liveMode && !operation.requiresProviderReceipt
         ? await this.liveJira!.settleUncertainEdit(actor, operation.issueKey.slice("jira:".length), {
             fields: operation.intendedFields ?? {},
             ...(operation.intendedStatus ? { status: operation.intendedStatus } : {})

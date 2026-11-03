@@ -14,6 +14,6 @@ export const SHOW_TRACE = "broppy:show-trace";
 export const SEARCH_AUDIT = "broppy:search-audit";
 
 export type OpenTaskDetail = { id: string; element?: HTMLElement };
-export type WorkspaceIdentity = { role: "member" | "admin" | "compliance"; mode: string; signedIn: boolean };
+export type WorkspaceIdentity = { role: "member" | "admin" | "compliance"; mode: string; signedIn: boolean; canLoad?: boolean };
 export type TraceRequest = { traceId: string };
 export type AuditSearch = { question: string };

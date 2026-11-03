@@ -222,6 +222,19 @@ export class JiraAsUser {
     return await this.writeOutcome(response, { ...command.fields });
   }
 
+  /** A fresh pre-write status, checked under the same access rules as the transition. */
+  async currentTransitionStatus(user: User, key: string): Promise<string | undefined> {
+    if (!await this.mayTransition(user, key)) return undefined;
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return undefined;
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`, {
+      headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!response.ok) return undefined;
+    const payload = await response.json() as { fields?: { status?: { name?: unknown } } };
+    const name = payload.fields?.status?.name;
+    return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  }
+
   async settleUncertainEdit(user: User, key: string, intended: UncertainIntent): Promise<boolean> {
     const wanted = Object.entries(intended.fields ?? {});
     if (!intended.status && wanted.length === 0) return false;

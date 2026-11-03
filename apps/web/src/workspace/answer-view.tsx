@@ -42,6 +42,7 @@ export function AnswerView({ result, question, documents, nothingRead, onOpenSou
       </div>
       {note ? <p className="checker-note">{note}</p> : null}
       {scope ? <p className="muted">{scope}</p> : null}
+      {result.importNotice ? <p className="muted">{result.importNotice}</p> : null}
       <CitationList sources={sources as Citation[]} lines={lines} documents={documents} onOpenSource={onOpenSource} />
       {result.traceId ? (
         <Button type="button" className="text-button" variant="ghost"

@@ -144,6 +144,19 @@ describe("JiraAsUser for the workspace", () => {
 });
 
 describe("settling an uncertain write from Jira", () => {
+  it("reads the current Jira status only after checking the viewer's transition access", async () => {
+    const requests: string[] = [];
+    const jira = new JiraAsUser({ authorization: async () => "Bearer t", siteFor: async () => site }, accountId, async url => {
+      requests.push(String(url));
+      return String(url).includes("user/permission/search")
+        ? Response.json([{ accountId: "acct-maya" }])
+        : Response.json({ fields: { status: { name: "Done" } } });
+    });
+    expect(await jira.currentTransitionStatus(maya, "DB-9")).toBe("Done");
+    expect(requests.filter(url => url.includes("user/permission/search"))).toHaveLength(2);
+    expect(requests.at(-1)).toContain("/issue/DB-9?fields=status");
+  });
+
   it("does not call Jira when there is nothing to verify", async () => {
     let calls = 0;
     const jira = new JiraAsUser({ authorization: async () => "Bearer shared", siteFor: async () => site }, accountId, async () => {

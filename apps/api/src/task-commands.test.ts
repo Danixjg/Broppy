@@ -448,6 +448,7 @@ describe("the live-shaped Jira writer", () => {
       editFields: async (_user, _key, fields) => ({ ...fields }),
       legalTransitions: async () => [{ id: "41", name: "Back to open", target: { name: "open", category: "new" },
         fields: [{ id: "resolutionId", name: "Resolution", type: "option", required: true, supported: true }] }],
+      currentTransitionStatus: async () => "in progress",
       transitionIssue: async () => { throw new Error("connection lost mid-transition"); },
       settleUncertainEdit: async (_user, _key, intended) => { readbacks.push(intended); return proof; }
     };

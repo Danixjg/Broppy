@@ -4,6 +4,7 @@ import { isDemoAddress, looksLikeAuditQuestion, quotedRanges } from "../../answe
 import { chosenProject, documentStatus, formatDate, linkedTask, omittedNotes, safeText, safeUrl,
   searchMatches, sentencesOf, showMoreLabel, sourceName, taskIsDone, visibleItems } from "../lib/workspace.js";
 import { traceDetails } from "../lib/trace.js";
+import { currentIdentity } from "../lib/identity";
 import { PersonalWidget } from "../tasks/personal-widget";
 import { IDENTITY_CHANGED, OPEN_DOC, SEARCH_AUDIT, SHOW_TRACE, WORKSPACE_DATA, WORKSPACE_LOADED, WORKSPACE_RELOAD,
   type AuditSearch, type OpenTaskDetail, type TraceRequest, type WorkspaceIdentity } from "../tasks/events";
@@ -43,12 +44,13 @@ const storeValue = (key: string, value: string) => {
 };
 
 export function WorkspaceView() {
+  const initialIdentity = useRef(currentIdentity());
   const [payload, setPayload] = useState<WorkspacePayload | null>(null);
   const [project, setProject] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Selection | null>(null);
   const [notice, setNotice] = useState<Notice>({ text: "Loading accessible documents…" });
-  const [role, setRole] = useState<"member" | "admin" | "compliance">("member");
+  const [role, setRole] = useState(initialIdentity.current.role);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [landing, setLanding] = useState(() => {
     const stored = readStored("brain-landing");
@@ -67,7 +69,7 @@ export function WorkspaceView() {
   const payloadRef = useRef<WorkspacePayload | null>(null);
   const projectRef = useRef<string | null>(null);
   const selectedRef = useRef<Selection | null>(null);
-  const roleRef = useRef<"member" | "admin" | "compliance">("member");
+  const roleRef = useRef(role);
   const historyRef = useRef<ChatTurn[]>([]);
   const identityRef = useRef(0);
   const loadRef = useRef(0);
@@ -104,6 +106,10 @@ export function WorkspaceView() {
   const sourceDocs = filtered();
 
   const load = async () => {
+    if (currentIdentity().canLoad === false) {
+      setNotice({ text: currentIdentity().signedIn ? "Your workspace is unavailable. See the sign-in message above." : "Log in to view your accessible documents." });
+      return;
+    }
     const request = ++loadRef.current;
     const identity = identityRef.current;
     setNotice({ text: "Loading accessible documents…" });
@@ -363,9 +369,13 @@ export function WorkspaceView() {
       setCatchUpState(null);
       setTraceState(null);
       setPreviewMerge(null);
-      void load();
+      if (identity?.canLoad === false) {
+        setNotice({ text: identity.signedIn ? "Your workspace is unavailable. See the sign-in message above." : "Log in to view your accessible documents." });
+      } else void load();
     };
     document.addEventListener(IDENTITY_CHANGED, onIdentity);
+    // Authentication can complete between the first render and subscribing to its event.
+    if (currentIdentity() !== initialIdentity.current) onIdentity(new CustomEvent(IDENTITY_CHANGED, { detail: currentIdentity() }));
     return () => document.removeEventListener(IDENTITY_CHANGED, onIdentity);
   }, []);
 
@@ -570,7 +580,7 @@ export function WorkspaceView() {
             ? sentencesOf(master.content).map(text => <div className="conclusion" key={text}>{text}</div>)
             : <p className="empty">{master ? "Conclusions will appear with authorized master content." : "Conclusions appear on a project's master page."}</p>}
           {role === "admin" && master?.content ? (
-            <form className="conclusion-form" onSubmit={event => {
+            <form key={`${project}:${master.docId}`} className="conclusion-form" onSubmit={event => {
               event.preventDefault();
               void appendConclusion(event.currentTarget);
             }}>
@@ -588,12 +598,17 @@ export function WorkspaceView() {
             <>
               <strong>Audit trail, last 7 days</strong>
               <ul>{catchUpState.result.lines.map(line => <li key={line}>{line}</li>)}</ul>
+              {catchUpState.result.importNotice ? <p className="muted">{catchUpState.result.importNotice}</p> : null}
             </>
           ) : null}
           {catchUpState?.kind === "result" && catchUpState.result.kind === "question" ? (
-            <AnswerView result={{ ...catchUpState.result.answer, traceId: catchUpState.result.traceId } as AnswerResult}
-              question={`Asked: ${safeText(catchUpState.result.question)}`} documents={documents} nothingRead={nothingRead}
-              onOpenSource={openCitation} onTrace={traceId => void loadTrace(traceId)} />
+            <>
+              <AnswerView result={{ ...catchUpState.result.answer, traceId: catchUpState.result.traceId } as AnswerResult}
+                question={`Asked: ${safeText(catchUpState.result.question)}`} documents={documents} nothingRead={nothingRead}
+                onOpenSource={openCitation} onTrace={traceId => void loadTrace(traceId)} />
+              {catchUpState.result.importNotice && catchUpState.result.importNotice !== catchUpState.result.answer.importNotice
+                ? <p className="muted">{catchUpState.result.importNotice}</p> : null}
+            </>
           ) : null}
         </div>
         <div className="section-title documents-heading"><h2>Linked Drive documents</h2><span id="driveCount" className="muted">{driveDocs.length} accessible</span></div>
@@ -730,6 +745,8 @@ export function WorkspaceView() {
                         ? <TicketProposal result={turn.result} onCreated={() => void load()} />
                         : <AnswerView result={turn.result} documents={documents} nothingRead={nothingRead}
                           onOpenSource={openCitation} onTrace={traceId => void loadTrace(traceId)} />}
+                      {turn.result.kind === "action" && turn.result.proposal && turn.result.importNotice
+                        ? <p className="muted">{turn.result.importNotice}</p> : null}
                       {role === "compliance" && looksLikeAuditQuestion(turn.question) ? (
                         <div className="audit-hint">
                           <p>This looks like a question for the audit log, which records who asked and opened what.</p>
@@ -885,6 +902,8 @@ function TicketProposal({ result, onCreated }: { result: QueryResponse; onCreate
   const [description, setDescription] = useState(safeText(proposal.description));
   const [dueDate, setDueDate] = useState(safeText(proposal.dueDate));
   const [status, setStatus] = useState("");
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
   const [cancelled, setCancelled] = useState(false);
   const [created, setCreated] = useState<{ key: string; url?: string } | null>(null);
   if (cancelled) return <p className="muted">Cancelled. Nothing was created.</p>;
@@ -900,12 +919,16 @@ function TicketProposal({ result, onCreated }: { result: QueryResponse; onCreate
       <p>{safeText(result.text)}</p>
       <form className="proposal" onSubmit={event => {
         event.preventDefault();
+        if (creatingRef.current) return;
+        creatingRef.current = true;
+        setCreating(true);
         setStatus("Creating the ticket…");
         void post<{ key: string; url: string }>("/v1/actions/jira-issue", {
           proposalId: proposal.id, project: project.trim().toUpperCase(), summary: summary.trim(), description,
           ...(dueDate ? { dueDate } : {})
         }).then(created => { setCreated(created); onCreated(); })
-          .catch(error => { setStatus(messageOf(error, "The ticket could not be created.")); });
+          .catch(error => { setStatus(messageOf(error, "The ticket could not be created.")); })
+          .finally(() => { creatingRef.current = false; setCreating(false); });
       }}>
         <label className="proposal-field"><span>Project key (required)</span>
           <input value={project} maxLength={10} required placeholder="For example DB" pattern="[A-Za-z][A-Za-z0-9]{0,9}"
@@ -921,8 +944,8 @@ function TicketProposal({ result, onCreated }: { result: QueryResponse; onCreate
           <input type="date" value={dueDate} onChange={event => setDueDate(event.target.value)} />
         </label>
         <div className="proposal-actions">
-          <button type="submit">Confirm and create</button>
-          <button type="button" className="text-button" onClick={() => setCancelled(true)}>Cancel</button>
+          <button type="submit" disabled={creating}>Confirm and create</button>
+          <button type="button" className="text-button" disabled={creating} onClick={() => { if (!creatingRef.current) setCancelled(true); }}>Cancel</button>
           <p className="muted" role="status">{status}</p>
         </div>
       </form>

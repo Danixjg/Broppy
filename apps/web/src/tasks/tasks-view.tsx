@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge, Button, FieldError, Input, Label, Surface, TextField } from "@heroui/react";
 import { isDemoAddress } from "../../answer.js";
+import { currentIdentity } from "../lib/identity";
 import { changedFields, countText, countsText, dayText, detailPath, doneTileLabel, dueText, errorText,
   mergeColumns, movesByColumn, nameText, pickDrop, priorityOptions, priorityText, taskQuery } from "../lib/tasks.js";
 import { ApiError, call, type CommandReceipt, type TaskCard, type TaskColumn, type TaskDetail, type TaskListResponse,
   type TaskSummary, type TransitionChoices, type TaskTransition } from "./api";
-import { OPEN_DOC, OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail } from "./events";
+import { IDENTITY_CHANGED, OPEN_DOC, OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail } from "./events";
 
 type View = "list" | "board";
 type Filters = { projectIds: string[]; mine: boolean; priority: string; status: string; due: string; q: string; preset: string };
@@ -90,18 +91,23 @@ export function TasksView() {
     : filtered ? "No tasks match these filters." : "No Jira tasks here yet.";
 
   const loadProjects = async () => {
+    if (currentIdentity().canLoad === false) return;
+    const identity = identityRef.current;
     try {
       const result = await call<{ projects: { key: string; name: string }[]; priorities?: string[] }>("/v1/tasks/projects");
+      if (identity !== identityRef.current) return;
       setProjects((result.projects ?? []).filter(item => item && typeof item.key === "string" && item.key)
         .map(item => ({ key: item.key, name: typeof item.name === "string" && item.name ? item.name : item.key })));
       const listed = (result.priorities ?? []).filter(name => typeof name === "string" && name.trim() !== "");
       setPriorities(listed.length ? listed : DEFAULT_PRIORITIES);
     } catch {
+      if (identity !== identityRef.current) return;
       setProjects([]);
     }
   };
 
   const load = async (nextView: View, nextFilters: Filters, cursor?: string) => {
+    if (currentIdentity().canLoad === false) return;
     if (cursor) {
       if (cursorRef.current) return;
       cursorRef.current = cursor;
@@ -323,7 +329,9 @@ export function TasksView() {
         command.note("The task changed on Jira since you loaded it. Your draft is kept; reload the task to compare.");
         return;
       }
-      if (error instanceof ApiError && error.status === 409 && Array.isArray((payload as { transitions?: unknown } | null)?.transitions)) {
+      if (error instanceof ApiError && error.status === 409 &&
+        (payload as { error?: { code?: string } } | null)?.error?.code === "TRANSITION_UNAVAILABLE" &&
+        Array.isArray((payload as { transitions?: unknown } | null)?.transitions)) {
         command.note("Jira's workflow changed; the moves below are refreshed.");
         await loadTransitions(command.docId);
         return;
@@ -503,8 +511,6 @@ export function TasksView() {
   useEffect(() => () => clearTimeout(searchTimer.current), []);
 
   useEffect(() => {
-    const user = document.getElementById("user");
-    if (!user) return;
     const onIdentity = () => {
       identityRef.current += 1;
       loadRef.current += 1;
@@ -522,6 +528,7 @@ export function TasksView() {
       setLoaded(false);
       setCards([]);
       setColumns([]);
+      setWorkspace({ mode: "", documents: 0, documentIds: [] });
       setPage({ nextCursor: null, hasMore: false });
       setStatus("");
       setDetail(null);
@@ -533,8 +540,8 @@ export function TasksView() {
       setDiscardArmed(null);
       setFocusMoves(null);
     };
-    user.addEventListener("change", onIdentity);
-    return () => user.removeEventListener("change", onIdentity);
+    document.addEventListener(IDENTITY_CHANGED, onIdentity);
+    return () => document.removeEventListener(IDENTITY_CHANGED, onIdentity);
   }, []);
 
   useEffect(() => {
