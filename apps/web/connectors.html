@@ -20,6 +20,18 @@
     <button id="onboard" class="btn" type="button" hidden>Load the demo company's tools</button>
   </section>
 
+  <section class="section card" id="connection-limits" aria-labelledby="connection-limits-title">
+    <h2 id="connection-limits-title">What the shared connection means for task writes</h2>
+    <p class="muted">Broppy writes tasks and task moves with this company's own Jira connection. Before Broppy sends anything, it checks the acting person's own Jira rights (they can see the issue and may transition or edit it), and every write names the person it was made for in Broppy's audit.</p>
+    <details class="hint">
+      <summary>What the connection cannot check</summary>
+      <ul class="checklist">
+        <li>Jira's own workflow rules run when Jira receives the request, and they are read against that connection's account. A rule such as "only the assignee may move this" is not enforced for other people; someone could move an issue their own Jira account would not allow.</li>
+        <li>Connect only an account whose Jira rights match what you expect working through Broppy to mean.</li>
+      </ul>
+    </details>
+  </section>
+
   <section class="section card" id="slack-bot" aria-labelledby="slack-bot-title">
     <h2 id="slack-bot-title">Slack bot</h2>
     <p class="muted">Lets your team ask Broppy in Slack with <code>/broppy</code>. Adding it connects Slack for reading too.</p>
