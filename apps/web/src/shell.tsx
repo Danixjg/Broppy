@@ -25,19 +25,19 @@ export function Shell() {
 
   return (
     <>
-      <header className="flex min-h-16 items-center gap-4 border-b border-border bg-surface px-5 text-foreground">
-        <div className="flex items-center gap-2">
+      <header className="topbar flex min-h-16 items-center gap-4 border-b border-border bg-surface px-5 text-foreground">
+        <div className="brand flex items-center gap-2">
           <span className="flex size-9 items-center justify-center rounded-xl bg-accent text-accent-foreground" aria-hidden="true">
             <BookOpenText size={19} strokeWidth={1.8} />
           </span>
           <span className="text-base font-semibold tracking-tight">Broppy<small id="brandContext" className="block text-[0.62rem] font-normal tracking-[0.1em] text-muted">Knowledge workspace</small></span>
         </div>
-        <span className="h-8 w-px bg-border" aria-hidden="true" />
-        <label className="flex items-center gap-2 text-xs text-muted">
+        <span className="header-divider h-8 w-px bg-border" aria-hidden="true" />
+        <label className="project-switch flex items-center gap-2 text-xs text-muted">
           Project
           <select id="projectSelect" className="max-w-64 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm font-semibold text-foreground" />
         </label>
-        <label className="flex max-w-xl flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-muted focus-within:border-accent">
+        <label className="search-box flex max-w-xl flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-muted focus-within:border-accent">
           <Search size={17} strokeWidth={1.8} aria-hidden="true" />
           <span className="sr-only">Search accessible documents</span>
           <input id="search" type="search" placeholder="Search documents, threads, tasks…" autoComplete="off"
@@ -48,7 +48,7 @@ export function Shell() {
           <span className="live-dot" />
           <span id="workspaceMode">Loading workspace</span>
         </Badge>
-        <label id="demoIdentity" className="flex items-center gap-2 text-xs text-muted">
+        <label id="demoIdentity" className="identity flex items-center gap-2 text-xs text-muted">
           Viewing as
           <select id="user" className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm font-semibold text-foreground">
             <option value="ravi">Ravi</option><option value="maya">Maya</option><option value="alex">Alex</option>

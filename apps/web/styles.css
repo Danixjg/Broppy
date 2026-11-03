@@ -73,65 +73,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .skip-link:focus {
   top:.5rem
 }
-.topbar {
-  min-height:72px;
-  background:#172d43;
-  color:#fff;
-  display:flex;
-  align-items:center;
-  gap:clamp(.7rem,2vw,2rem);
-  padding:.8rem clamp(1rem,2vw,2rem)
-}
-.brand {
-  display:flex;
-  align-items:center;
-  gap:.65rem;
-  font-size:1.05rem;
-  font-weight:750;
-  letter-spacing:-.03em;
-  white-space:nowrap
-}
-.brand small {
-  display:block;
-  color:#afc1d0;
-  font-size:.67rem;
-  font-weight:500;
-  letter-spacing:.05em;
-  text-transform:uppercase
-}
-.brand-mark {
-  display:grid;
-  place-items:center;
-  width:2rem;
-  height:2rem;
-  background:#d8a34b;
-  color:#172d43;
-  border-radius:.45rem;
-  font-size:1.4rem
-}
-.project-switch,.identity {
-  font-size:.68rem;
-  color:#aebfcd;
-  text-transform:uppercase;
-  letter-spacing:.06em;
-  white-space:nowrap
-}
-.project-switch select,.identity select {
-  display:block;
-  border:0;
-  background:transparent;
-  color:white;
-  font-size:.88rem;
-  font-weight:650;
-  padding:.15rem 1.2rem .15rem 0;
-  max-width:13rem
-}
-.project-switch option,.identity option {
-  color:#223247
-}
-.identity {
-  margin-left:auto
-}
 .auth-identity {
   display:flex;
   align-items:center;
@@ -152,28 +93,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   background:#fff6e6;
   color:#60491f;
   font-size:.82rem
-}
-.search-box {
-  max-width:30rem;
-  flex:1;
-  display:flex;
-  align-items:center;
-  gap:.5rem;
-  background:#29435a;
-  padding:.45rem .75rem;
-  border-radius:.45rem;
-  color:#b8cedd
-}
-.search-box input {
-  background:transparent;
-  border:0;
-  color:#fff;
-  width:100%;
-  min-width:5rem;
-  outline:none
-}
-.search-box input::placeholder {
-  color:#bed0dc
 }
 .view-nav {
   min-height:47px;
@@ -1086,20 +1005,6 @@ td button {
   }
 }
 @media(max-width:700px) {
-  .topbar {
-    flex-wrap:wrap
-  }
-  .brand {
-    width:100%
-  }
-  .search-box {
-    order:3;
-    min-width:100%;
-    max-width:none
-  }
-  .identity {
-    margin-left:auto
-  }
   .workspace-layout,.workspace-layout.chat-collapsed {
     display:block
   }

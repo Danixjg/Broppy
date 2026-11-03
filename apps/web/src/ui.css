@@ -20,14 +20,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .brand { font-size: 1.05rem; letter-spacing: -.035em; line-height: 1.15; }
 .brand small { margin-top: .25rem; color: var(--muted-foreground); font-size: .62rem; letter-spacing: .1em; }
-.brand-mark {
-  width: 2.45rem;
-  height: 2.45rem;
-  border-radius: .8rem;
-  color: #fff;
-  background: #1c6954;
-  box-shadow: 0 5px 15px #1c695425;
-}
 .header-divider { width: 1px; height: 2rem; background: var(--border); flex: none; }
 .project-switch, .identity { color: var(--muted-foreground); font-size: .62rem; letter-spacing: .09em; }
 .project-switch select, .identity select {
@@ -72,7 +64,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-weight: 700; font-size: .69rem;
 }
 .live-dot { width: .38rem; height: .38rem; border-radius: 50%; background: #2c9d62; }
-.auth-identity { color: #f4f8fb; }
+.auth-identity { color: var(--foreground); }
 .auth-identity button { color: #243e50; border: 1px solid #d8e2e7; background: #fff; }
 .view-nav {
   min-height: 55px; gap: 1rem; align-items: center;
@@ -188,7 +180,7 @@ form button[type=submit]:hover, #applyTier:hover, #previewAccess:hover, #refresh
   .chat-panel { height: auto; }
 }
 @media (max-width: 760px) {
-  .topbar { gap: .7rem; padding: .75rem 1rem; }
+  .topbar { gap: .7rem; padding: .75rem 1rem; flex-wrap: wrap; }
   .brand { width: auto; margin-right: auto; }
   .project-switch { order: 2; }
   .identity, .auth-identity { order: 2; }
