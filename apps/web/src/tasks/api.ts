@@ -26,7 +26,7 @@ export type TaskCard = {
   mine: boolean;
 };
 
-export type TaskColumn = { id: string; name: string; total: number; items: TaskCard[] };
+export type TaskColumn = { id: string; name: string; total: number; items: TaskCard[]; nextCursor: string | null };
 
 export type TaskSummary = {
   open?: number;

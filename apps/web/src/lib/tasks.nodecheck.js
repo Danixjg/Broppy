@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FALLBACKS, changedFields, countsText, dayText, detailPath, doneTileLabel, dueText, dueUrgency, errorText, movesByColumn,
-  nameText, pickDrop, priorityText, taskQuery } from "./tasks.js";
+import { FALLBACKS, changedFields, countsText, dayText, detailPath, doneTileLabel, dueText, dueUrgency, errorText,
+  mergeColumns, movesByColumn, nameText, pickDrop, priorityOptions, priorityText, taskQuery } from "./tasks.js";
 
 test("absent card fields state their fallback and present fields pass through unchanged", () => {
   assert.equal(nameText(""), FALLBACKS.name);
@@ -41,15 +41,17 @@ test("filter state and view round-trip through the one query string", () => {
   const filters = { projectIds: ["DB", "PAY"], mine: true, priority: "High", status: "In Progress",
     due: "thisWeek", preset: "overdue", q: "quota review" };
   const params = taskQuery("board", filters);
-  assert.equal(params.toString(), "view=board&projectIds=DB%2CPAY&priorityIds=High&statusIds=In+Progress&due=thisWeek&summaryPreset=overdue&mine=true&q=quota+review");
+  const zone = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  assert.equal(params.toString(), `view=board&projectIds=DB%2CPAY&priorityIds=High&statusIds=In+Progress&due=thisWeek&summaryPreset=overdue&mine=true&q=quota+review&timezone=${zone}`);
   const recovered = roundTrip(params);
   assert.deepEqual(recovered, { view: "board", ...filters });
   assert.equal(taskQuery("board", recovered).toString(), params.toString());
+  assert.equal(taskQuery("list", { timezone: "Europe/Berlin" }).get("timezone"), "Europe/Berlin");
 
   const quiet = taskQuery("list", {});
-  assert.equal([...quiet.keys()].join(), "view");
+  assert.equal([...quiet.keys()].join(), "view,timezone");
   assert.equal(taskQuery("nonsense", {}).get("view"), "list");
-  assert.equal(taskQuery("personal", {}).toString(), "view=personal", "the personal widget asks the API's own personal view");
+  assert.equal(taskQuery("personal", {}).get("view"), "personal", "the personal widget asks the API's own personal view");
 });
 
 test("counts text reads the response and the untracked done tile says so", () => {
@@ -96,6 +98,39 @@ test("a calendar day reads in short words and an unreadable date says so", () =>
   assert.equal(dayText("2026-10-23"), "Oct 23");
   assert.equal(dayText("not a date"), "Unknown");
   assert.equal(dayText(""), "Unknown");
+});
+
+test("a date-only value keeps its calendar day outside UTC", () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    assert.equal(dayText("2026-11-02"), "Nov 2");
+    assert.equal(dayText("2026-01-01"), "Jan 1");
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
+test("priority choices come from the snapshot and keep a custom current value", () => {
+  assert.deepEqual(priorityOptions(["High", "Low"], ""), ["High", "Low"]);
+  assert.deepEqual(priorityOptions(["High", "Low"], "Critical"), ["Critical", "High", "Low"]);
+  assert.deepEqual(priorityOptions(["High", "Low"], "High"), ["High", "Low"]);
+  assert.deepEqual(priorityOptions(undefined, "Critical"), ["Critical"]);
+  assert.deepEqual(priorityOptions([" ", ""], ""), []);
+});
+
+test("a board cursor page appends to its own column and leaves the others alone", () => {
+  const columns = [
+    { id: "todo", name: "To do", total: 2, items: [{ id: "a" }], nextCursor: "t1" },
+    { id: "done", name: "Done", total: 1, items: [{ id: "b" }], nextCursor: null }
+  ];
+  const merged = mergeColumns(columns, [{ id: "todo", name: "To do", total: 2, items: [{ id: "c" }], nextCursor: null }]);
+  assert.deepEqual(merged[0].items.map(item => item.id), ["a", "c"]);
+  assert.equal(merged[0].nextCursor, null);
+  assert.equal(merged[1], columns[1], "an untouched column keeps its identity");
+  assert.deepEqual(mergeColumns(columns, []), columns);
+  assert.deepEqual(mergeColumns(undefined, undefined), []);
 });
 
 test("board drop destinations come from the card's own transitions", () => {

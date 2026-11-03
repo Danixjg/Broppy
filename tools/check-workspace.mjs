@@ -99,7 +99,9 @@ try {
   assert.equal(unscoped.postDataJSON().project, undefined, "An unscoped Slack question searches the accessible workspace");
   await page.waitForFunction(() => document.getElementById("askButton")?.disabled === false);
   await page.selectOption("#user", "maya");
+  const listed = page.waitForRequest(request => request.url().includes("/v1/tasks?") && request.method() === "GET");
   await page.click('[data-view="tasks"]');
+  assert((await listed).url().includes("timezone="), "The Tasks query carries the viewer's timezone");
   await page.waitForFunction(() => document.querySelectorAll("#tasksList .activity-item").length > 0);
   const listKeys = await page.evaluate(() => [...document.querySelectorAll("#tasksList .item-meta")].map(item => item.textContent.split(" · ")[0]));
   assert(listKeys.includes("PAY-101"), "The Tasks list shows the synced Jira issues this identity may read");
@@ -219,6 +221,11 @@ try {
   await page.click("#tasksEditForm button[type=submit]");
   await page.waitForFunction(() => (document.querySelector("#tasksDetail .task-edit-note")?.textContent ?? "").includes("changed on Jira"));
   assert.equal(await page.locator("#tasksEditForm input[name=summary]").inputValue(), "Moved by hand meanwhile", "A conflict keeps the draft");
+  await page.locator("#tasksList .activity-item").filter({ hasText: "SETL-27" }).first().click();
+  await page.waitForFunction(() => (document.getElementById("tasksStatus")?.textContent ?? "").includes("Unsaved edits would be lost"));
+  assert((await page.locator("#tasksDetail .eyebrow").textContent()).includes("DB-12"), "A dirty draft keeps its task selected when another is chosen");
+  await page.locator("#tasksList .activity-item").filter({ hasText: "SETL-27" }).first().click();
+  await page.waitForFunction(() => (document.querySelector("#tasksDetail .eyebrow")?.textContent ?? "").includes("SETL-27"));
   const mayaPayloads = await page.evaluate(async () => ({
     list: await (await fetch("/api/brain/v1/tasks?view=list", { headers: { "x-demo-user": "maya" } })).json(),
     board: await (await fetch("/api/brain/v1/tasks?view=board", { headers: { "x-demo-user": "maya" } })).json(),
@@ -229,6 +236,8 @@ try {
   assert(!mayaSerialized.includes("SEC-44") && !mayaSerialized.includes("OPS-3"), "Cards and counts never expose hidden issues");
   const mayaOptions = await page.evaluate(() => [...document.querySelectorAll("#tasksProjects option")].map(item => item.value).filter(Boolean));
   assert.deepEqual(mayaOptions, ["DB", "PAY", "REL", "SETL"], "The project filter is derived from the loaded authorized responses");
+  const priorityOptions = await page.evaluate(() => [...document.querySelectorAll("#tasksPriority option")].map(item => item.value).filter(Boolean));
+  assert.deepEqual(priorityOptions, ["High", "Medium", "Low", "Critical"], "The priority filter is derived from the authorized snapshot");
   await page.goto(`${origin}/workspace/index.html?${new URLSearchParams({ view: "tasks", task: "jira:PAY-101" })}`);
   await page.waitForFunction(() => document.getElementById("workspaceMode")?.textContent === "Demo workspace");
   await page.waitForFunction(() => document.getElementById("tasksDetail")?.hidden === false);
