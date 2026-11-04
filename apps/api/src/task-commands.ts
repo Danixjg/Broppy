@@ -18,6 +18,9 @@ export interface CommandOperation {
   outcomeCode?: string;
   fieldErrors?: Record<string, string>;
   intendedFields?: Record<string, unknown>;
+  intendedStatus?: TransitionMeta["target"];
+  /** A self-transition's readback cannot prove that its workflow actions ran. */
+  requiresProviderReceipt?: boolean;
 }
 
 export interface CommandReservation {
@@ -126,6 +129,7 @@ const COMMAND_MESSAGES: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used with different content.",
   TASK_CHANGED: "The task changed since you loaded it.",
   TRANSITION_UNAVAILABLE: "That transition is not available for this task right now.",
+  TRANSITION_NO_EFFECT: "This move cannot be verified in Broppy. Do it in Jira instead.",
   FIELD_VALIDATION_FAILED: "The task's required fields were not all supplied.",
   FORBIDDEN: "Your Jira access does not allow this change.",
   OPERATION_IN_PROGRESS: "There is already a change in flight for this task.",
@@ -222,6 +226,12 @@ export const parseRevision = (raw: string): number | undefined => {
 
 export interface TransitionFieldMeta { readonly id: string; readonly name: string; readonly type: string; readonly required: boolean; readonly supported: boolean; readonly allowedValues?: ReadonlyArray<{ readonly id: string; readonly name: string }> }
 export interface TransitionMeta { readonly id: string; readonly name: string; readonly target: { readonly name: string; readonly category: "new" | "indeterminate" | "done" }; readonly fields: ReadonlyArray<TransitionFieldMeta> }
+
+/** What an uncertain write asked for: the fields it set and, for a transition, the status it aimed at. */
+export interface UncertainIntent {
+  readonly fields: Record<string, unknown>;
+  readonly status?: TransitionMeta["target"];
+}
 
 /** The exact status spellings the mock corpus carries; a done task has no legal moves in the demo workflow. */
 export type DemoStatus = "open" | "in progress" | "in review" | "blocked" | "Released" | "released";

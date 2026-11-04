@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@heroui/react";
 import { countText, dayText, dueText, dueUrgency, errorText, nameText, priorityText, taskQuery } from "../lib/tasks.js";
+import { currentIdentity } from "../lib/identity";
 import { ApiError, call, type TaskCard, type TaskListResponse } from "./api";
-import { OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail } from "./events";
+import { IDENTITY_CHANGED, OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail, type WorkspaceIdentity } from "./events";
 
 const today = () => new Intl.DateTimeFormat("en-CA").format(new Date());
 const SHOWN = 8;
@@ -15,6 +16,7 @@ export function PersonalWidget() {
   const loadRef = useRef(0);
 
   const load = async () => {
+    if (currentIdentity().canLoad === false) return;
     const request = ++loadRef.current;
     const identity = identityRef.current;
     try {
@@ -44,15 +46,20 @@ export function PersonalWidget() {
   useEffect(() => {
     void load();
     const onReload = () => { void load(); };
-    const user = document.getElementById("user");
-    const onIdentity = () => { identityRef.current += 1; void load(); };
+    const onIdentity = (event: Event) => {
+      identityRef.current += 1;
+      setCards([]);
+      setNote("");
+      setLoaded(false);
+      if ((event as CustomEvent<WorkspaceIdentity>).detail?.canLoad !== false) void load();
+    };
     document.addEventListener(WORKSPACE_LOADED, onReload);
     document.addEventListener(TASKS_CHANGED, onReload);
-    user?.addEventListener("change", onIdentity);
+    document.addEventListener(IDENTITY_CHANGED, onIdentity);
     return () => {
       document.removeEventListener(WORKSPACE_LOADED, onReload);
       document.removeEventListener(TASKS_CHANGED, onReload);
-      user?.removeEventListener("change", onIdentity);
+      document.removeEventListener(IDENTITY_CHANGED, onIdentity);
     };
   }, []);
 

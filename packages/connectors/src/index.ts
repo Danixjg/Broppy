@@ -171,7 +171,7 @@ export class MockConnector implements Connector {
     const doc = this.require(id);
     const native = doc.permissions.native;
     if (!native || (permissions.native && !nativeSubset(permissions.native, native))) {
-      throw new Error("Native permissions may only narrow access");
+      throw new Error("Native permission edits may only narrow access");
     }
     this.docs.set(id, {
       ...doc,

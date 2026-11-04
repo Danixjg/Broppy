@@ -1,5 +1,6 @@
 // The one client the tasks surface talks to the API with. Every call carries the identity the page
 // is showing: the demo persona when the page is in the demo, the session otherwise.
+import { SESSION_LOST } from "./events";
 
 const API = "/api/brain";
 
@@ -26,7 +27,7 @@ export type TaskCard = {
   mine: boolean;
 };
 
-export type TaskColumn = { id: string; name: string; total: number; items: TaskCard[] };
+export type TaskColumn = { id: string; name: string; total: number; items: TaskCard[]; nextCursor: string | null };
 
 export type TaskSummary = {
   open?: number;
@@ -106,7 +107,15 @@ export async function call<T>(path: string, options: CommandOptions = {}): Promi
     throw new ApiError(response.status, null, "API returned an invalid response");
   }
   if (!response.ok) {
-    const envelope = payload as { error?: unknown } | null;
+    const envelope = payload as { error?: unknown; code?: unknown } | null;
+    if (response.status === 401) {
+      // The proxy says why: a session nobody can use (signed_out), or one the API does not accept (account_rejected),
+      // which the page must not end, because signing back in would return to the same refused session.
+      document.dispatchEvent(new CustomEvent(SESSION_LOST, { detail: {
+        code: typeof envelope?.code === "string" ? envelope.code : "",
+        message: typeof envelope?.error === "string" ? envelope.error : "Request failed"
+      } }));
+    }
     const message = typeof envelope?.error === "string" ? envelope.error : "Request failed";
     throw new ApiError(response.status, payload, message);
   }

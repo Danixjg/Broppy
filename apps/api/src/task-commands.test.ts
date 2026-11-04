@@ -4,7 +4,7 @@ import { loadMockCorpus } from "@brain/connectors";
 import { Brain, type LiveJira } from "./brain.js";
 import { createApiServer } from "./server.js";
 import { CommandRejection, MemoryTaskCommandStore, parseEditFields, parseTransitionCommand,
-  type EditFields } from "./task-commands.js";
+  type EditFields, type TransitionMeta } from "./task-commands.js";
 import type { SourceOAuth } from "./source-oauth.js";
 
 process.env.ALLOW_DEMO_AUTH = "true";
@@ -377,6 +377,98 @@ describe("the live-shaped Jira writer", () => {
     const events = brain.audit.entries.map(entry => entry.type);
     expect(events).toContain("task_command");
     expect(events).toContain("task_command_result");
+  });
+
+  it("preflights a live transition against Jira's fresh move list, not the demo workflow", async () => {
+    const fixture = loadMockCorpus();
+    let legal: TransitionMeta[] = [];
+    const dispatched: Array<{ key: string; command: { transitionId: string; fields: Record<string, string> } }> = [];
+    const jira: LiveJira = {
+      canCreate: async () => true,
+      createIssue: async () => undefined,
+      markDone: async () => true,
+      editFields: async (_user, _key, fields) => ({ ...fields }),
+      legalTransitions: async () => legal,
+      transitionIssue: async (_user, key, command) => { dispatched.push({ key, command }); return { ...command.fields }; },
+      settleUncertainEdit: async () => false
+    };
+    const brain = new Brain(undefined, { users: fixture.users, connectors: fixture.connectors });
+    brain.liveJira = jira;
+    const { call } = await serverFor(brain);
+    const revision = await currentRevision(call, "DB-12");
+    const refused = await put(call, "DB-12", "maya", { transitionId: "41", fields: {} }, { revision });
+    expect(refused.status).toBe(409);
+    expect((refused.body as { transitions: unknown[] }).transitions).toEqual([]);
+    expect(dispatched).toEqual([]);
+
+    legal = [{ id: "41", name: "Back to open", target: { name: "open", category: "new" }, fields: [] }];
+    const applied = await put(call, "DB-12", "maya", { transitionId: "41", fields: {} }, { revision, id: "i2", key: "k2" });
+    expect((applied.body as { state: string }).state).toBe("applied");
+    expect(dispatched).toEqual([{ key: "DB-12", command: { action: "transition", transitionId: "41", fields: {} } }]);
+  });
+
+  it("refuses a fieldless move that would leave the status as it is, and carries one that sets a field", async () => {
+    const fixture = loadMockCorpus();
+    const dispatched: unknown[] = [];
+    let legal: TransitionMeta[] =
+      [{ id: "91", name: "Stay put", target: { name: "in progress", category: "indeterminate" }, fields: [] }];
+    const jira: LiveJira = {
+      canCreate: async () => true,
+      createIssue: async () => undefined,
+      markDone: async () => true,
+      editFields: async (_user, _key, fields) => ({ ...fields }),
+      legalTransitions: async () => legal,
+      transitionIssue: async (...call: unknown[]) => { dispatched.push(call); return {}; },
+      settleUncertainEdit: async () => false
+    };
+    const brain = new Brain(undefined, { users: fixture.users, connectors: fixture.connectors });
+    brain.liveJira = jira;
+    const { call } = await serverFor(brain);
+    const revision = await currentRevision(call, "DB-12");
+    const refused = await put(call, "DB-12", "maya", { transitionId: "91", fields: {} }, { revision });
+    expect(refused.status).toBe(409);
+    expect((refused.body as { error: { code: string } }).error.code).toBe("TRANSITION_NO_EFFECT");
+    expect(dispatched).toEqual([]);
+
+    legal = [{ id: "91", name: "Stay put", target: { name: "in progress", category: "indeterminate" },
+      fields: [{ id: "resolutionId", name: "Resolution", type: "option", required: true, supported: true }] }];
+    const carried = await put(call, "DB-12", "maya", { transitionId: "91", fields: { resolutionId: "1" } }, { revision, id: "i2", key: "k2" });
+    expect((carried.body as { state: string }).state).toBe("applied");
+    expect(dispatched).toHaveLength(1);
+  });
+
+  it("records the status a lost transition aimed at and settles only when the readback proves it", async () => {
+    const fixture = loadMockCorpus();
+    const readbacks: Array<{ fields: Record<string, unknown>; status?: TransitionMeta["target"] }> = [];
+    let proof = false;
+    const jira: LiveJira = {
+      canCreate: async () => true,
+      createIssue: async () => undefined,
+      markDone: async () => true,
+      editFields: async (_user, _key, fields) => ({ ...fields }),
+      legalTransitions: async () => [{ id: "41", name: "Back to open", target: { name: "open", category: "new" },
+        fields: [{ id: "resolutionId", name: "Resolution", type: "option", required: true, supported: true }] }],
+      currentTransitionStatus: async () => "in progress",
+      transitionIssue: async () => { throw new Error("connection lost mid-transition"); },
+      settleUncertainEdit: async (_user, _key, intended) => { readbacks.push(intended); return proof; }
+    };
+    const brain = new Brain(undefined, { users: fixture.users, connectors: fixture.connectors });
+    brain.liveJira = jira;
+    const { call } = await serverFor(brain);
+    const revision = await currentRevision(call, "DB-12");
+    const lost = await put(call, "DB-12", "maya", { transitionId: "41", fields: { resolutionId: "1" } }, { revision });
+    expect(lost.status).toBe(202);
+    const operationId = (lost.body as { operationId: string }).operationId;
+    expect((await brain.commandStore.getCommand(operationId))?.intendedStatus).toEqual({ name: "open", category: "new" });
+
+    const first = (await call(`/v1/task-operations/${operationId}/check`, "maya", "POST")).body as { state: string };
+    expect(first.state).toBe("uncertain");
+    expect(readbacks).toEqual([{ fields: { resolutionId: "1" }, status: { name: "open", category: "new" } }]);
+
+    proof = true;
+    const settled = (await call(`/v1/task-operations/${operationId}/check`, "maya", "POST")).body as { state: string; outcome?: string };
+    expect(settled.state).toBe("applied");
+    expect(settled.outcome).toBe("desiredStateObserved");
   });
 
   it("settles an uncertain live edit from a readback without a second dispatch", async () => {

@@ -23,6 +23,14 @@ export const nameText = value => (word(value) ? value.trim() : FALLBACKS.name);
 export const dueText = value => (word(value) ? value.trim() : FALLBACKS.dueDate);
 export const priorityText = value => (word(value) ? value.trim() : FALLBACKS.priority);
 
+// Priority choices come from the authorized snapshot. A task's own priority stays selectable even when the
+// bootstrap list has not caught up, so editing never silently drops it.
+export function priorityOptions(priorities, current) {
+  const values = (Array.isArray(priorities) ? priorities : []).filter(word);
+  const chosen = word(current) ? current.trim() : "";
+  return chosen && !values.includes(chosen) ? [chosen, ...values] : values;
+}
+
 // Date-only strings order by calendar day, so a plain compare against today decides the urgency.
 export function dueUrgency(dueDate, today) {
   if (!word(dueDate)) return "";
@@ -30,10 +38,15 @@ export function dueUrgency(dueDate, today) {
   return dueDate < today ? "overdue" : "later";
 }
 
-// A calendar day in short words: "Nov 2". A date nobody can read says so rather than "Invalid Date".
+// A calendar day in short words: "Nov 2". A date-only value is a calendar day, not an instant, so it is
+// read and written in UTC; a fixed locale keeps the order and spelling the same for everyone.
 export function dayText(value) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date);
+  const text = `${value ?? ""}`.trim();
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric", month: "short", ...(/^\d{4}-\d{2}-\d{2}$/.test(text) ? { timeZone: "UTC" } : {})
+  }).format(date);
 }
 
 // A count that isn't there reads as empty, never as a zero claimed by the page.
@@ -43,7 +56,7 @@ export const countText = value => typeof value === "number" && Number.isFinite(v
 // an absent param is the API default, which is the only meaning this side claims.
 /**
  * @param {string} view
- * @param {{projectIds?: string[], mine?: boolean, priority?: string, status?: string, due?: string, preset?: string, q?: string}} filters
+ * @param {{projectIds?: string[], mine?: boolean, priority?: string, status?: string, due?: string, preset?: string, q?: string, timezone?: string}} filters
  * @returns {URLSearchParams}
  */
 export function taskQuery(view, filters = {}) {
@@ -59,6 +72,8 @@ export function taskQuery(view, filters = {}) {
   if (filters.mine === true) params.set("mine", "true");
   const q = `${filters.q ?? ""}`.trim();
   if (q) params.set("q", q);
+  const timezone = `${filters.timezone ?? ""}`.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timezone) params.set("timezone", timezone);
   return params;
 }
 
@@ -97,6 +112,20 @@ export function pickDrop(moves) {
   const single = list.length === 1 ? list[0] : null;
   if (single && !single.fields?.some(field => field?.required === true)) return { kind: "submit", transition: single };
   return { kind: "pick" };
+}
+
+// A board cursor page carries only the column that asked for it. Append that column's items in place and
+// leave every other column, its total and its own cursor untouched.
+export function mergeColumns(current, incoming) {
+  const pages = new Map((Array.isArray(incoming) ? incoming : [])
+    .filter(column => column && typeof column.id === "string")
+    .map(column => [column.id, column]));
+  return (Array.isArray(current) ? current : []).map(column => {
+    const page = pages.get(column.id);
+    if (!page) return column;
+    return { ...column, total: page.total ?? column.total,
+      items: [...(column.items ?? []), ...(page.items ?? [])], nextCursor: page.nextCursor ?? null };
+  });
 }
 
 // The header text behind the count tiles: numbers as the response reported them, and the done tile

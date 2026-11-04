@@ -338,12 +338,17 @@ describe("the task workbench routes", () => {
     const critical = (await demo.call("/v1/tasks?projectIds=DB&priorityIds=Critical", "maya")).body as ListBody;
     expect(critical.items.map(item => item.key)).toEqual(["DB-15"]);
     expect(critical.page.total).toBe(1);
+    // A standard priority this viewer's snapshot never carries still filters, reaching an empty set instead of a 400.
+    const empties = (await demo.call("/v1/tasks?priorityIds=Highest", "maya")).body as ListBody;
+    expect(empties.items).toEqual([]);
+    expect(empties.page.total).toBe(0);
     const hiddenProject = await demo.call("/v1/tasks?projectIds=SEC", "maya");
     expect(hiddenProject.status).toBe(400);
     const davidSeesSecurity = (await demo.call("/v1/tasks?projectIds=SEC&priorityIds=Highest", "david")).body as ListBody;
     expect(davidSeesSecurity.items.map(item => item.key)).toEqual(["SEC-44"]);
-    const projects = (await demo.call("/v1/tasks/projects", "maya")).body as { projects: Array<{ key: string }> };
+    const projects = (await demo.call("/v1/tasks/projects", "maya")).body as { projects: Array<{ key: string }>; priorities: string[] };
     expect(projects.projects.map(project => project.key)).toEqual(["DB", "PAY", "REL", "SETL"]);
+    expect(projects.priorities).toEqual(["Highest", "High", "Medium", "Low", "Lowest", "Critical"]);
   });
 
   it("answers hidden, missing, malformed and unresolved with the same 404 bytes (FT17, C12)", async () => {

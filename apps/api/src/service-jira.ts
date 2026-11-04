@@ -1,6 +1,6 @@
 import type { User } from "@brain/types";
 import type { SourceOAuth } from "./source-oauth.js";
-import { CommandRejection, type EditFields, type TransitionMeta } from "./task-commands.js";
+import { CommandRejection, type EditFields, type TransitionMeta, type UncertainIntent } from "./task-commands.js";
 
 export interface IssueInput {
   project: string;
@@ -180,6 +180,13 @@ export class JiraAsUser {
     return await this.mayView(user, key, authorization, site) && await this.holds(user, "EDIT_ISSUES", { issueKey: key });
   }
 
+  private async mayTransition(user: User, key: string): Promise<boolean> {
+    if (!/^[A-Z][A-Z0-9]{0,9}-\d+$/.test(key) || user.active === false) return false;
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return false;
+    return await this.mayView(user, key, authorization, site) && await this.holds(user, "TRANSITION_ISSUES", { issueKey: key });
+  }
+
   async editFields(user: User, key: string, fields: EditFields): Promise<Record<string, unknown>> {
     if (!await this.mayEdit(user, key)) throw new CommandRejection(403, "FORBIDDEN");
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
@@ -204,7 +211,7 @@ export class JiraAsUser {
   }
 
   async transitionIssue(user: User, key: string, command: { transitionId: string; fields: Record<string, string> }): Promise<Record<string, unknown>> {
-    if (!await this.mayEdit(user, key)) throw new CommandRejection(403, "FORBIDDEN");
+    if (!await this.mayTransition(user, key)) throw new CommandRejection(403, "FORBIDDEN");
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
     if (!authorization || !site) throw new CommandRejection(403, "FORBIDDEN");
     const body = { transition: { id: command.transitionId },
@@ -215,23 +222,49 @@ export class JiraAsUser {
     return await this.writeOutcome(response, { ...command.fields });
   }
 
-  async settleUncertainEdit(user: User, key: string, intended: Record<string, unknown>): Promise<boolean> {
+  /** A fresh pre-write status, checked under the same access rules as the transition. */
+  async currentTransitionStatus(user: User, key: string): Promise<string | undefined> {
+    if (!await this.mayTransition(user, key)) return undefined;
+    const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
+    if (!authorization || !site) return undefined;
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`, {
+      headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    if (!response.ok) return undefined;
+    const payload = await response.json() as { fields?: { status?: { name?: unknown } } };
+    const name = payload.fields?.status?.name;
+    return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  }
+
+  async settleUncertainEdit(user: User, key: string, intended: UncertainIntent): Promise<boolean> {
+    const wanted = Object.entries(intended.fields ?? {});
+    if (!intended.status && wanted.length === 0) return false;
     const [authorization, site] = await Promise.all([this.oauth.authorization("jira"), this.oauth.siteFor("jira")]);
     if (!authorization || !site) return false;
-    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,duedate,priority,labels,assignee`, {
+    const response = await this.transport(`https://api.atlassian.com/ex/jira/${encodeURIComponent(site.cloudId)}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,duedate,priority,labels,assignee,status,resolution`, {
       headers: { authorization, accept: "application/json" }, signal: AbortSignal.timeout(10_000), redirect: "error" });
     if (!response.ok) return false;
     const payload = await response.json() as { fields?: Record<string, any> };
     const fields = payload.fields ?? {};
+    const providerField = (name: string): string => name === "dueDate" ? "duedate" : name;
+    const cleared = (name: string): boolean => {
+      const value = fields[providerField(name)];
+      return value === null || value === undefined;
+    };
     const matches = (name: string, value: unknown): boolean => {
-      if (value === undefined) return false;
-      if (name === "assignee") return !value ? fields.assignee === null : fields.assignee?.accountId === value;
+      if (name === "assignee") return !value ? cleared("assignee") : fields.assignee?.accountId === value;
       if (name === "dueDate") return fields.duedate === value;
       if (name === "priority") return fields.priority?.name === value || fields.priority?.id === value;
-      if (name === "labels") return Array.isArray(value) && JSON.stringify(fields.labels) === JSON.stringify(value);
+      if (name === "resolutionId") return fields.resolution?.id === value;
+      if (name === "labels") return Array.isArray(value) &&
+        JSON.stringify([...(fields.labels ?? [])].sort()) === JSON.stringify([...value].sort());
       return fields[name] === value;
     };
-    return intended instanceof Object && Object.entries(intended).every(([name, value]) => value === null ? fields[name] === null || fields[name] === undefined : matches(name, value));
+    if (!wanted.every(([name, value]) => value === null ? cleared(name) : matches(name, value))) return false;
+    if (intended.status) {
+      const status = fields.status;
+      return status?.name === intended.status.name && status?.statusCategory?.key === intended.status.category;
+    }
+    return true;
   }
 
   private async writeOutcome(response: Response, accepted: Record<string, unknown>): Promise<Record<string, unknown>> {

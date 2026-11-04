@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answerLines, auditSummary, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
+import { answerLines, auditSummary, displayAnswer, isDemoAddress, isRoutineSync, leftOutNote, looksLikeAuditQuestion, numberSources, quotedRanges } from "./answer.js";
 
 const documents = JSON.parse(readFileSync(new URL("../../data/mock/documents.json", import.meta.url), "utf8"));
 const content = docId => documents.find(doc => doc.docId === docId).content;
@@ -30,6 +30,15 @@ test("turns each line's markers into source numbers and keeps the fixed reply as
   ]);
   assert.deepEqual(answerLines(NO_RESULT, []), [{ text: NO_RESULT, refs: [] }]);
   assert.deepEqual(answerLines("", []), []);
+});
+
+test("the answer people read is the API's fixed reply in home words, and an empty answer says so", () => {
+  const answer = displayAnswer({ text: NO_RESULT }, [], false) ?? "";
+  assert(answer.startsWith("Hmm, I couldn't find anything on that."), `the no-result reply reads as help, got: ${answer}`);
+  assert.equal(displayAnswer({ text: "" }, [], false), "No answer returned.");
+  assert((displayAnswer({ text: "" }, [], true) ?? "").startsWith("Broppy hasn't read any of your tools"));
+  assert.equal(displayAnswer(undefined, [], true), "Broppy hasn't read any of your tools yet, so it has nothing to answer from. Connect a tool, or choose what Broppy reads, in Setup.");
+  assert.equal(displayAnswer({}, [citation("jira:DB-12", 0, "DB-12")], true), "No answer returned.", "citations exist, so the fallback keeps its place");
 });
 
 test("gives each line the checker's verdict and the source sentences that back it, when the check lines up", () => {

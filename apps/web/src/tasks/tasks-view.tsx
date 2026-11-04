@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge, Button, FieldError, Input, Label, Surface, TextField } from "@heroui/react";
 import { isDemoAddress } from "../../answer.js";
+import { currentIdentity } from "../lib/identity";
 import { changedFields, countText, countsText, dayText, detailPath, doneTileLabel, dueText, errorText,
-  movesByColumn, nameText, pickDrop, priorityText, taskQuery } from "../lib/tasks.js";
+  mergeColumns, movesByColumn, nameText, pickDrop, priorityOptions, priorityText, taskQuery } from "../lib/tasks.js";
 import { ApiError, call, type CommandReceipt, type TaskCard, type TaskColumn, type TaskDetail, type TaskListResponse,
   type TaskSummary, type TransitionChoices, type TaskTransition } from "./api";
-import { OPEN_DOC, OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail } from "./events";
+import { IDENTITY_CHANGED, OPEN_DOC, OPEN_TASK, SHOW_ALL_TASKS, TASKS_CHANGED, WORKSPACE_LOADED, type OpenTaskDetail } from "./events";
 
 type View = "list" | "board";
 type Filters = { projectIds: string[]; mine: boolean; priority: string; status: string; due: string; q: string; preset: string };
@@ -15,7 +16,7 @@ type Intent = { docId: string; signature: string; idempotencyKey: string; intent
 
 const emptyFilters = (): Filters => ({ projectIds: [], mine: false, priority: "", status: "", due: "any", q: "", preset: "" });
 const emptyDraft = (): Draft => ({ summary: "", dueDate: "", priority: "" });
-const PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
+const DEFAULT_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
 const DUE_CHOICES: [string, string][] = [["any", "Any due date"], ["today", "Due today"], ["throughToday", "Through today"],
   ["thisWeek", "Due this week"], ["overdue", "Overdue"], ["none", "No due date"]];
 const PRESET_CHOICES: [string, string][] = [["", "All tasks"], ["open", "Open"], ["dueThisWeek", "Due this week"],
@@ -34,6 +35,7 @@ export function TasksView() {
   const [view, setView] = useState<View>("list");
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [projects, setProjects] = useState<{ key: string; name: string }[]>([]);
+  const [priorities, setPriorities] = useState<string[]>(DEFAULT_PRIORITIES);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [summary, setSummary] = useState<TaskSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -52,7 +54,7 @@ export function TasksView() {
   const [transitionValues, setTransitionValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savingCard, setSavingCard] = useState<{ id: string; label: string } | null>(null);
-  const [discardArmed, setDiscardArmed] = useState(false);
+  const [discardArmed, setDiscardArmed] = useState<{ docId: string } | "close" | null>(null);
   const [focusMoves, setFocusMoves] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<{ mode: string; documents: number; documentIds: string[] }>({ mode: "", documents: 0, documentIds: [] });
 
@@ -61,6 +63,10 @@ export function TasksView() {
   const detailRef = useRef<TaskDetail | null>(null);
   const identityRef = useRef(0);
   const loadRef = useRef(0);
+  const selectionRef = useRef(0);
+  const cursorRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+  const discardArmedRef = useRef<{ docId: string } | "close" | null>(null);
   const savingRef = useRef(false);
   const dragRef = useRef<DragState | null>(null);
   const intentRef = useRef<Intent | undefined>(undefined);
@@ -76,6 +82,8 @@ export function TasksView() {
   detailRef.current = detail;
 
   const dirty = detail ? Object.keys(changedFields(draftBase(detail), draft)).length > 0 : false;
+  dirtyRef.current = dirty;
+  discardArmedRef.current = discardArmed;
   const filtered = filters.projectIds.length > 0 || filters.mine ||
     [filters.priority, filters.status, filters.q, filters.preset].some(value => value !== "") || filters.due !== "any";
   const nothingRead = workspace.mode === "live" && workspace.documents === 0;
@@ -83,16 +91,27 @@ export function TasksView() {
     : filtered ? "No tasks match these filters." : "No Jira tasks here yet.";
 
   const loadProjects = async () => {
+    if (currentIdentity().canLoad === false) return;
+    const identity = identityRef.current;
     try {
-      const result = await call<{ projects: { key: string; name: string }[] }>("/v1/tasks/projects");
+      const result = await call<{ projects: { key: string; name: string }[]; priorities?: string[] }>("/v1/tasks/projects");
+      if (identity !== identityRef.current) return;
       setProjects((result.projects ?? []).filter(item => item && typeof item.key === "string" && item.key)
         .map(item => ({ key: item.key, name: typeof item.name === "string" && item.name ? item.name : item.key })));
+      const listed = (result.priorities ?? []).filter(name => typeof name === "string" && name.trim() !== "");
+      setPriorities(listed.length ? listed : DEFAULT_PRIORITIES);
     } catch {
+      if (identity !== identityRef.current) return;
       setProjects([]);
     }
   };
 
   const load = async (nextView: View, nextFilters: Filters, cursor?: string) => {
+    if (currentIdentity().canLoad === false) return;
+    if (cursor) {
+      if (cursorRef.current) return;
+      cursorRef.current = cursor;
+    }
     const request = ++loadRef.current;
     const identity = identityRef.current;
     if (!cursor) setStatus("Loading tasks…");
@@ -104,28 +123,37 @@ export function TasksView() {
       setSummary(response.summary ?? {});
       setLoaded(true);
       setStatuses(previous => mergeStatuses(previous, response));
-      setPage({ nextCursor: response.page?.nextCursor ?? null, hasMore: response.page?.hasMore === true, total: response.page?.total });
-      if (cursor) setCards(previous => [...previous, ...(response.items ?? [])]);
-      else if (nextView === "board") setColumns(response.columns ?? []);
-      else setCards(response.items ?? []);
+      if (nextView === "board") {
+        setColumns(previous => cursor ? mergeColumns(previous, response.columns ?? []) : response.columns ?? []);
+        setPage({ nextCursor: null, hasMore: false, total: response.page?.total });
+      } else {
+        setPage({ nextCursor: response.page?.nextCursor ?? null, hasMore: response.page?.hasMore === true, total: response.page?.total });
+        if (cursor) setCards(previous => [...previous, ...(response.items ?? [])]);
+        else setCards(response.items ?? []);
+      }
       setStatus("");
     } catch (error) {
       if (request !== loadRef.current || identity !== identityRef.current) return;
       if (error instanceof ApiError && error.status === 409) { await load(nextView, nextFilters); return; }
       setStatus(error instanceof ApiError ? errorText(error.payload) : "The tasks could not be loaded.");
+    } finally {
+      if (cursor) cursorRef.current = null;
     }
   };
 
   const loadTransitions = async (docId: string) => {
     const path = detailPath(docId);
     if (!path) return;
+    const selection = selectionRef.current;
     try {
       const result = await call<TransitionChoices>(`${path}/transitions`);
+      if (selection !== selectionRef.current || detailRef.current?.id !== docId) return;
       setChoices(result);
       setTransitionId(result.transitions?.[0]?.id ?? "");
       setTransitionValues({});
       setTransitionNote("");
     } catch (error) {
+      if (selection !== selectionRef.current || detailRef.current?.id !== docId) return;
       setChoices(null);
       setTransitionId("");
       if (!(error instanceof ApiError && error.status === 404)) setTransitionNote("Jira's moves are unavailable right now.");
@@ -133,12 +161,13 @@ export function TasksView() {
   };
 
   const showDetail = (task: TaskDetail) => {
+    detailRef.current = task;
     setDetail(task);
     setUnavailable(false);
     setDraft(draftBase(task));
     setEditNote("");
     setFieldErrors({});
-    setDiscardArmed(false);
+    setDiscardArmed(null);
     setChoices(null);
     setTransitionId("");
     setTransitionValues({});
@@ -147,25 +176,27 @@ export function TasksView() {
   };
 
   const showUnavailable = () => {
+    detailRef.current = null;
     setDetail(null);
     setUnavailable(true);
     setChoices(null);
-    setDiscardArmed(false);
+    setDiscardArmed(null);
   };
 
   const openDetail = async (docId: string, options: { focus?: boolean } = {}) => {
     const identity = identityRef.current;
+    const selection = ++selectionRef.current;
     const path = detailPath(docId);
     if (!path) { showUnavailable(); return; }
     setStatus("Loading task…");
     try {
       const task = await call<TaskDetail>(path);
-      if (identity !== identityRef.current) return;
+      if (identity !== identityRef.current || selection !== selectionRef.current) return;
       setStatus("");
       showDetail(task);
       if (options.focus) requestAnimationFrame(() => headingRef.current?.focus({ preventScroll: true }));
     } catch (error) {
-      if (identity !== identityRef.current) return;
+      if (identity !== identityRef.current || selection !== selectionRef.current) return;
       setStatus("");
       if (error instanceof ApiError && error.status === 404) showUnavailable();
       else setStatus(error instanceof ApiError ? errorText(error.payload) : "The task could not be loaded.");
@@ -176,19 +207,45 @@ export function TasksView() {
   openDetailRef.current = openDetail;
 
   const closeDetail = () => {
+    selectionRef.current += 1;
+    detailRef.current = null;
     setDetail(null);
     setUnavailable(false);
     setChoices(null);
     setEditNote("");
     setFieldErrors({});
     setTransitionNote("");
-    setDiscardArmed(false);
+    setDiscardArmed(null);
     const trigger = triggerRef.current;
     triggerRef.current = undefined;
     const back = trigger?.element && trigger.element.isConnected && isVisible(trigger.element) ? trigger.element
       : trigger?.id ? Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
         .find(item => item.dataset.taskId === trigger.id && isVisible(item)) : null;
     back?.focus({ preventScroll: true });
+  };
+
+  const openTask = (docId: string, options: { focus?: boolean; element?: HTMLElement } = {}) => {
+    const armed = discardArmedRef.current;
+    if (dirtyRef.current && (typeof armed !== "object" || armed?.docId !== docId)) {
+      setDiscardArmed({ docId });
+      setStatus("Open another task? Unsaved edits would be lost. Choose the task again to switch.");
+      return false;
+    }
+    triggerRef.current = { id: docId, element: options.element };
+    void openDetailRef.current(docId, { focus: options.focus });
+    return true;
+  };
+
+  const openTaskRef = useRef(openTask);
+  openTaskRef.current = openTask;
+
+  const requestClose = (again = "Close") => {
+    if (dirtyRef.current && discardArmedRef.current !== "close") {
+      setDiscardArmed("close");
+      setStatus(`Unsaved edits would be lost. Press ${again} again to discard them.`);
+      return;
+    }
+    closeDetail();
   };
 
   const intentFor = (docId: string, signature: string) => {
@@ -216,7 +273,7 @@ export function TasksView() {
     await new Promise(resolve => setTimeout(resolve, delay));
     if (intentRef.current !== intent || intent.identity !== identityRef.current) return;
     try {
-      const receipt = await call<CommandReceipt>(`/v1/task-operations/${encodeURIComponent(operationId)}`);
+      const receipt = await call<CommandReceipt>(`/v1/task-operations/${encodeURIComponent(operationId)}/check`, { method: "POST" });
       if (receipt.state === "applied") {
         intentRef.current = undefined;
         setSavingCard(current => current?.id === docId ? null : current);
@@ -272,7 +329,9 @@ export function TasksView() {
         command.note("The task changed on Jira since you loaded it. Your draft is kept; reload the task to compare.");
         return;
       }
-      if (error instanceof ApiError && error.status === 409 && Array.isArray((payload as { transitions?: unknown } | null)?.transitions)) {
+      if (error instanceof ApiError && error.status === 409 &&
+        (payload as { error?: { code?: string } } | null)?.error?.code === "TRANSITION_UNAVAILABLE" &&
+        Array.isArray((payload as { transitions?: unknown } | null)?.transitions)) {
         command.note("Jira's workflow changed; the moves below are refreshed.");
         await loadTransitions(command.docId);
         return;
@@ -338,8 +397,7 @@ export function TasksView() {
     const drop = pickDrop(drag.moves.get(column.id) ?? []);
     if (drop.kind === "none") { setStatus(`No legal move to ${column.name}.`); return; }
     if (drop.kind === "pick") {
-      setFocusMoves(drag.id);
-      await openDetail(drag.id, { focus: true });
+      if (openTask(drag.id, { focus: true })) setFocusMoves(drag.id);
       return;
     }
     const path = detailPath(drag.id);
@@ -450,21 +508,27 @@ export function TasksView() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => () => clearTimeout(searchTimer.current), []);
+
   useEffect(() => {
-    const user = document.getElementById("user");
-    if (!user) return;
     const onIdentity = () => {
       identityRef.current += 1;
       loadRef.current += 1;
+      selectionRef.current += 1;
+      cursorRef.current = null;
       intentRef.current = undefined;
       triggerRef.current = undefined;
+      detailRef.current = null;
+      clearTimeout(searchTimer.current);
       setFilters(emptyFilters());
       setProjects([]);
+      setPriorities(DEFAULT_PRIORITIES);
       setStatuses([]);
       setSummary(null);
       setLoaded(false);
       setCards([]);
       setColumns([]);
+      setWorkspace({ mode: "", documents: 0, documentIds: [] });
       setPage({ nextCursor: null, hasMore: false });
       setStatus("");
       setDetail(null);
@@ -473,11 +537,11 @@ export function TasksView() {
       setEditNote("");
       setFieldErrors({});
       setTransitionNote("");
-      setDiscardArmed(false);
+      setDiscardArmed(null);
       setFocusMoves(null);
     };
-    user.addEventListener("change", onIdentity);
-    return () => user.removeEventListener("change", onIdentity);
+    document.addEventListener(IDENTITY_CHANGED, onIdentity);
+    return () => document.removeEventListener(IDENTITY_CHANGED, onIdentity);
   }, []);
 
   useEffect(() => {
@@ -504,12 +568,15 @@ export function TasksView() {
     const onOpenTask = (event: Event) => {
       const requested = (event as CustomEvent<OpenTaskDetail>).detail;
       if (!requested?.id) return;
-      triggerRef.current = { id: requested.id, element: requested.element };
-      void openDetailRef.current(requested.id);
+      openTaskRef.current(requested.id, { element: requested.element });
     };
     const onShowAll = () => {
       const seeded = { ...emptyFilters(), mine: true, due: "throughToday" };
+      clearTimeout(searchTimer.current);
+      setView("list");
+      viewRef.current = "list";
       setFilters(seeded);
+      filtersRef.current = seeded;
       void load("list", seeded);
     };
     document.addEventListener(OPEN_TASK, onOpenTask);
@@ -532,12 +599,7 @@ export function TasksView() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!detail && !unavailable) return;
       if (event.key === "Escape") {
-        if (dirty && !discardArmed) {
-          setDiscardArmed(true);
-          setStatus("Close anyway? Unsaved edits would be lost. Press Escape again to close.");
-          return;
-        }
-        closeDetail();
+        requestClose("Escape");
         return;
       }
       if (event.key === "Tab") trapFocus(event);
@@ -548,17 +610,22 @@ export function TasksView() {
 
   const switchView = (next: View) => {
     if (next === view) return;
+    viewRef.current = next;
     setView(next);
-    void load(next, filters);
+    void load(next, filtersRef.current);
   };
 
   const applyFilters = (next: Filters) => {
+    clearTimeout(searchTimer.current);
+    filtersRef.current = next;
     setFilters(next);
     void load(viewRef.current, next);
   };
 
   const clearFilters = () => {
     const cleared = emptyFilters();
+    clearTimeout(searchTimer.current);
+    filtersRef.current = cleared;
     setFilters(cleared);
     void load(viewRef.current, cleared);
   };
@@ -619,7 +686,7 @@ export function TasksView() {
             <select id="tasksPriority" aria-label="Priority" value={filters.priority}
               onChange={event => applyFilters({ ...filters, priority: event.target.value })}>
               <option value="">All priorities</option>
-              {PRIORITIES.map(priority => <option key={priority} value={priority}>{priority}</option>)}
+              {priorityOptions(priorities, filters.priority).map(priority => <option key={priority} value={priority}>{priority}</option>)}
             </select>
           </label>
           <label>Status
@@ -657,7 +724,7 @@ export function TasksView() {
       <div id="tasksList" hidden={view !== "list"}>
         {cards.length === 0 ? loaded ? <p className="empty">{emptyText}</p> : null : cards.map(card => (
           <TaskCardView key={card.id} card={card} variant="list" saving={savingCard?.id === card.id ? savingCard.label : undefined}
-            onOpen={() => { triggerRef.current = { id: card.id }; void openDetail(card.id); }} />
+            onOpen={() => openTask(card.id)} />
         ))}
         {page.hasMore && page.nextCursor ? (
           <Button type="button" className="show-more" variant="ghost"
@@ -675,10 +742,14 @@ export function TasksView() {
             <div className="stack">
               {column.items.length === 0 ? <p className="empty">No tasks</p> : column.items.map(card => (
                 <TaskCardView key={card.id} card={card} variant="board" saving={savingCard?.id === card.id ? savingCard.label : undefined}
-                  onOpen={() => { triggerRef.current = { id: card.id }; void openDetail(card.id); }}
+                  onOpen={() => openTask(card.id)}
                   onDragStart={event => void startDrag(event, card)} onDragEnd={endDrag} />
               ))}
             </div>
+            {column.nextCursor ? (
+              <Button type="button" className="show-more" variant="ghost"
+                onPress={() => void load("board", filtersRef.current, column.nextCursor ?? undefined)}>Show more</Button>
+            ) : null}
           </Surface>
         ))}
       </div>
@@ -686,7 +757,7 @@ export function TasksView() {
       <div id="tasksDetail" className="selected-detail" ref={panelRef} hidden={!detail && !unavailable}>
         {detail ? (
           <>
-            <Button type="button" className="task-detail-close" variant="ghost" size="sm" onPress={closeDetail}>Close</Button>
+            <Button type="button" className="task-detail-close" variant="ghost" size="sm" onPress={() => requestClose()}>Close</Button>
             <p className="eyebrow">{["Jira", detail.key ?? "", nameText(detail.status?.name)].join(" · ")}</p>
             <h3 ref={headingRef} tabIndex={-1}>{nameText(detail.title)}</h3>
             <p className="detail-meta">{[
@@ -729,7 +800,7 @@ export function TasksView() {
                   <select id="tasksEditPriority" className="task-select" name="priority" value={draft.priority}
                     onChange={event => setDraft(current => ({ ...current, priority: event.target.value }))}>
                     <option value="">No priority</option>
-                    {PRIORITIES.map(priority => <option key={priority} value={priority}>{priority}</option>)}
+                    {priorityOptions(priorities, draft.priority).map(priority => <option key={priority} value={priority}>{priority}</option>)}
                   </select>
                 </div>
                 {fieldErrors.priority ? <FieldError>{fieldErrors.priority}</FieldError> : null}
@@ -770,7 +841,7 @@ export function TasksView() {
           </>
         ) : unavailable ? (
           <>
-            <Button type="button" className="task-detail-close" variant="ghost" size="sm" onPress={closeDetail}>Close</Button>
+            <Button type="button" className="task-detail-close" variant="ghost" size="sm" onPress={() => requestClose()}>Close</Button>
             <h3 ref={headingRef} tabIndex={-1}>Task unavailable.</h3>
             <p className="muted">Broppy couldn&apos;t open it. It may not exist, or this identity may not have access to it.</p>
           </>
